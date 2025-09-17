@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
+import { createClient } from "@supabase/supabase-js";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+// cria client do supabase usando variáveis do .env.local
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-
-    // garante apenas arquivos válidos
-    const files = formData
-      .getAll("files")
-      .filter((f): f is File => f instanceof File);
+    const files = formData.getAll("files") as File[];
 
     if (!files || files.length === 0) {
       return NextResponse.json(
@@ -20,32 +19,42 @@ export async function POST(req: Request) {
       );
     }
 
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
-
-    const savedFiles: string[] = [];
+    const uploaded: { name: string; url: string }[] = [];
 
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const savePath = path.join(UPLOAD_DIR, file.name);
-      await fs.writeFile(savePath, buffer);
+      const filePath = `${Date.now()}-${file.name}`;
 
-      // caminho público (será servido do /public/uploads)
-      savedFiles.push(`/uploads/${file.name}`);
+      // faz upload no bucket "uploads"
+      const { error } = await supabase.storage
+        .from("uploads")
+        .upload(filePath, buffer, {
+          contentType: file.type,
+        });
+
+      if (error) throw error;
+
+      // gera link público
+      const { data } = supabase.storage
+        .from("uploads")
+        .getPublicUrl(filePath);
+
+      uploaded.push({
+        name: file.name,
+        url: data.publicUrl,
+      });
     }
 
     return NextResponse.json({
       success: true,
-      count: savedFiles.length,
-      savedFiles,
-      message: "Arquivos salvos com sucesso!",
+      count: uploaded.length,
+      files: uploaded,
+      message: "✅ Arquivos enviados com sucesso para o Supabase!",
     });
-  } catch (err: unknown) {
+  } catch (err: any) {
     console.error("❌ Erro no upload:", err);
     return NextResponse.json(
-      {
-        success: false,
-        error: err instanceof Error ? err.message : "Erro interno",
-      },
+      { success: false, error: err.message || "Erro interno" },
       { status: 500 }
     );
   }

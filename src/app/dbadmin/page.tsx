@@ -5,13 +5,14 @@ import PasswordModal from "./components/PasswordModal";
 export default function DBAdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploaded, setUploaded] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<
+    { name: string; url: string }[]
+  >([]);
 
   // seleção de arquivos
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setSelectedFiles(Array.from(e.target.files));
-      setUploaded(false);
     }
   };
 
@@ -19,50 +20,48 @@ export default function DBAdminDashboard() {
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setSelectedFiles(Array.from(e.target.files));
-      setUploaded(false);
     }
   };
 
-  // confirma e envia
+  // confirmar upload
   const handleConfirm = async () => {
-    if (selectedFiles.length === 0) return;
+    if (selectedFiles.length === 0) {
+      alert("Nenhum arquivo selecionado!");
+      return;
+    }
 
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append("files", file));
 
     try {
-      const res = await fetch("/api/dbadmin/upload", {
+      const res = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
+
       const data = await res.json();
 
       if (data.success) {
         alert(`✅ ${data.count} arquivo(s) enviados com sucesso!`);
-        setUploaded(true);
+        setUploadedFiles(data.files); // guarda lista com links
+        setSelectedFiles([]); // limpa seleção
       } else {
-        alert("⚠️ Falha ao enviar: " + data.error);
+        alert(`⚠️ Falha ao enviar: ${data.error}`);
       }
     } catch (err) {
-      console.error("Erro no upload:", err);
-      alert("❌ Erro ao enviar arquivos!");
+      alert("❌ Erro inesperado no upload.");
+      console.error(err);
     }
   };
 
   // cancelar seleção
   const handleCancel = () => {
     setSelectedFiles([]);
-    setUploaded(false);
-  };
-
-  // iniciar depuração (chamará o Python futuramente)
-  const handleDebug = () => {
-    alert("🚀 Iniciando depuração com Python...");
-    // TODO: fetch("/api/dbadmin/debug") ou algo similar
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
+      {/* Modal de senha */}
       {!authenticated && (
         <PasswordModal onSuccess={() => setAuthenticated(true)} />
       )}
@@ -77,12 +76,12 @@ export default function DBAdminDashboard() {
         </h1>
         <p>Aqui vai ficar a interface de upload e gerenciamento dos .txt → .db</p>
 
+        {/* Seleção de arquivos ou pasta */}
         <div className="mt-6 space-y-4">
           <label className="block cursor-pointer text-blue-600 hover:underline">
             Selecionar arquivos
             <input
               type="file"
-              multiple
               accept=".txt"
               onChange={handleFileChange}
               className="hidden"
@@ -99,49 +98,58 @@ export default function DBAdminDashboard() {
                   input.setAttribute("directory", "");
                 }
               }}
-              multiple
               onChange={handleFolderChange}
               className="hidden"
             />
           </label>
         </div>
 
+        {/* Lista de arquivos selecionados */}
         {selectedFiles.length > 0 && (
           <div className="mt-6 bg-white p-4 rounded-lg shadow">
             <h2 className="font-semibold mb-2">📂 Arquivos selecionados:</h2>
             <ul className="list-disc list-inside space-y-1 text-sm max-h-60 overflow-y-auto">
               {selectedFiles.map((file) => (
-                <li key={file.name + file.lastModified}>
-                  {file.webkitRelativePath || file.name}
-                </li>
+                <li key={file.name + file.lastModified}>{file.name}</li>
               ))}
             </ul>
 
+            {/* Botões */}
             <div className="flex space-x-4 mt-4">
-              {!uploaded ? (
-                <>
-                  <button
-                    onClick={handleConfirm}
-                    className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-                  >
-                    ✅ Confirmar
-                  </button>
-                  <button
-                    onClick={handleCancel}
-                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-                  >
-                    ❌ Cancelar
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={handleDebug}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  ▶️ Iniciar Depuração
-                </button>
-              )}
+              <button
+                onClick={handleConfirm}
+                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+              >
+                ✅ Confirmar
+              </button>
+              <button
+                onClick={handleCancel}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+              >
+                ❌ Cancelar
+              </button>
             </div>
+          </div>
+        )}
+
+        {/* Lista de arquivos enviados */}
+        {uploadedFiles.length > 0 && (
+          <div className="mt-6 bg-white p-4 rounded-lg shadow">
+            <h2 className="font-semibold mb-2">🌐 Arquivos enviados:</h2>
+            <ul className="list-disc list-inside space-y-1 text-sm">
+              {uploadedFiles.map((file) => (
+                <li key={file.url}>
+                  <a
+                    href={file.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    {file.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </main>
