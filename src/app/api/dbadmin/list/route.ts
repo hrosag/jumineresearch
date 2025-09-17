@@ -8,6 +8,8 @@ const supabase = createClient(
 
 export async function GET() {
   try {
+    console.log("📂 LIST chamado");
+
     const { data, error } = await supabase.storage.from("uploads").list("", {
       limit: 100,
       offset: 0,
@@ -16,6 +18,8 @@ export async function GET() {
 
     if (error) throw error;
 
+    console.log("📦 Arquivos retornados pelo Supabase:", data);
+
     const files = data.map((f) => {
       const { data: publicUrl } = supabase.storage
         .from("uploads")
@@ -23,6 +27,7 @@ export async function GET() {
 
       return {
         name: f.name,
+        path: f.name, // caminho relativo dentro do bucket
         url: publicUrl.publicUrl,
         status: "pendente",
       };

@@ -1,13 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// DEBUG: conferir se as variáveis estão chegando no Vercel
-console.log("🚀 SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
-console.log(
-  "🚀 SUPABASE_KEY:",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "OK" : "MISSING"
-);
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -15,8 +8,12 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
+    console.log("⬆️ UPLOAD chamado");
+
     const formData = await req.formData();
-    const files = formData.getAll("files") as Blob[];
+    const files = formData.getAll("files") as File[];
+
+    console.log(`📄 Total de arquivos recebidos: ${files.length}`);
 
     if (!files || files.length === 0) {
       return NextResponse.json(
@@ -25,51 +22,42 @@ export async function POST(req: Request) {
       );
     }
 
-    const uploaded: { name: string; url: string; path: string }[] = [];
+    const uploaded: { name: string; url: string }[] = [];
 
     for (const file of files) {
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
       const name =
-        (file as Blob & { name?: string }).name ??
+        (file as File & { name?: string }).name ??
         `sem_nome_${Date.now()}.txt`;
 
-      const type =
-        (file as Blob & { type?: string }).type ?? "text/plain";
-
-      const filePath = `${Date.now()}-${name}`;
-
-      console.log(`📂 Tentando upload do arquivo: ${name} (${type})`);
+      console.log(`📂 Tentando upload: ${name}`);
 
       const { error } = await supabase.storage
         .from("uploads")
-        .upload(filePath, buffer, {
-          contentType: type,
+        .upload(name, buffer, {
+          contentType: (file as File & { type?: string }).type ?? "text/plain",
           upsert: true,
         });
 
       if (error) {
-        console.error("❌ Erro Supabase upload:", error.message, error);
+        console.error("❌ Erro Supabase upload:", error.message);
         throw new Error(error.message);
       }
 
       const { data: publicUrl } = supabase.storage
         .from("uploads")
-        .getPublicUrl(filePath);
+        .getPublicUrl(name);
 
-      uploaded.push({
-        name,
-        url: publicUrl.publicUrl,
-        path: filePath, // 👈 agora o delete usa isso sem erro
-      });
+      uploaded.push({ name, url: publicUrl.publicUrl });
     }
 
+    console.log("✅ Upload concluído:", uploaded);
     return NextResponse.json({
       success: true,
       count: uploaded.length,
       files: uploaded,
-      message: "Arquivos enviados para o Supabase com sucesso!",
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Erro interno";

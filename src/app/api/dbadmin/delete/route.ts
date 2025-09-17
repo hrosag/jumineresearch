@@ -9,7 +9,11 @@ const supabase = createClient(
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const file = searchParams.get("file"); // 🔑 só name agora
+    const file = searchParams.get("file");
+
+    console.log("🗑️ DELETE chamado");
+    console.log("📩 URL completa:", req.url);
+    console.log("📌 Param file recebido:", file);
 
     if (!file) {
       return NextResponse.json(
@@ -18,15 +22,18 @@ export async function DELETE(req: Request) {
       );
     }
 
-    console.log(`🗑️ Tentando deletar arquivo: ${file}`);
+    console.log(`🗑️ Tentando deletar arquivo no bucket: ${file}`);
 
-    const { error } = await supabase.storage.from("uploads").remove([file]);
+    const { error } = await supabase.storage
+      .from("uploads")
+      .remove([file]); // agora passando somente o "name" retornado pelo list()
 
     if (error) {
       console.error("❌ Erro ao deletar:", error.message);
       throw new Error(error.message);
     }
 
+    console.log(`✅ Arquivo ${file} deletado do Supabase`);
     return NextResponse.json({
       success: true,
       message: `Arquivo ${file} removido com sucesso!`,
