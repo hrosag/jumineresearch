@@ -1,4 +1,3 @@
-// src/app/api/dbadmin/delete/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -25,17 +24,18 @@ export async function DELETE(req: Request) {
 
     if (error) {
       console.error("❌ Erro ao deletar:", error.message);
-      throw error;
+      throw new Error(error.message);
     }
 
     return NextResponse.json({
       success: true,
       message: `Arquivo ${file} removido com sucesso!`,
     });
-  } catch (err: any) {
-    console.error("🔥 Erro no delete:", err.message || err);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("🔥 Erro no delete:", errorMessage);
     return NextResponse.json(
-      { success: false, error: err.message || "Erro interno" },
+      { success: false, error: errorMessage || "Erro interno" },
       { status: 500 }
     );
   }

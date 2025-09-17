@@ -26,15 +26,16 @@ export async function GET() {
       return {
         name: f.name,
         url: publicUrl.publicUrl,
-        status: "pendente", // default
+        status: "pendente", // padrão inicial
       };
     });
 
     return NextResponse.json({ success: true, files });
-  } catch (err: any) {
-    console.error("❌ Erro ao listar arquivos:", err.message);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("❌ Erro ao listar arquivos:", errorMessage);
     return NextResponse.json(
-      { success: false, error: err.message || "Erro interno" },
+      { success: false, error: errorMessage || "Erro interno" },
       { status: 500 }
     );
   }

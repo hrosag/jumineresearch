@@ -1,4 +1,3 @@
-// src/app/api/dbadmin/depurar/route.ts
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
@@ -15,17 +14,18 @@ export async function POST(req: Request) {
 
     console.log(`🔍 Simulando depuração para o arquivo: ${file}`);
 
-    // 👉 Aqui no futuro será chamada do Python (All_Data)
-    await new Promise((resolve) => setTimeout(resolve, 2000)); // simulação de delay
+    // Aqui no futuro será chamada a rotina Python (All_Data)
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // delay simulado
 
     return NextResponse.json({
       success: true,
       message: `Arquivo ${file} processado com sucesso!`,
     });
-  } catch (err: any) {
-    console.error("🔥 Erro no depurar:", err.message || err);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("🔥 Erro no depurar:", errorMessage);
     return NextResponse.json(
-      { success: false, error: err.message || "Erro interno" },
+      { success: false, error: errorMessage || "Erro interno" },
       { status: 500 }
     );
   }
