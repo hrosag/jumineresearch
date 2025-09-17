@@ -9,11 +9,7 @@ const supabase = createClient(
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const file = searchParams.get("file");
-
-    console.log("🗑️ DELETE chamado");
-    console.log("📩 URL completa:", req.url);
-    console.log("📌 Param file recebido:", file);
+    const file = searchParams.get("file"); // vem sem o prefixo
 
     if (!file) {
       return NextResponse.json(
@@ -22,21 +18,21 @@ export async function DELETE(req: Request) {
       );
     }
 
-    console.log(`🗑️ Tentando deletar arquivo no bucket: ${file}`);
+    // 🔑 Garantir caminho correto no bucket
+    const fullPath = file.startsWith("uploads/") ? file : `uploads/${file}`;
 
-    const { error } = await supabase.storage
-      .from("uploads")
-      .remove([file]); // agora passando somente o "name" retornado pelo list()
+    console.log("🗑️ Tentando deletar arquivo do bucket:", fullPath);
+
+    const { error } = await supabase.storage.from("uploads").remove([fullPath]);
 
     if (error) {
       console.error("❌ Erro ao deletar:", error.message);
       throw new Error(error.message);
     }
 
-    console.log(`✅ Arquivo ${file} deletado do Supabase`);
     return NextResponse.json({
       success: true,
-      message: `Arquivo ${file} removido com sucesso!`,
+      message: `✅ Arquivo ${fullPath} removido com sucesso!`,
     });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
