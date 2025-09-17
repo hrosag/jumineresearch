@@ -4,7 +4,6 @@ import PasswordModal from "./components/PasswordModal";
 
 type UploadedFile = {
   name: string;
-  path: string; // 👈 agora incluímos path completo
   url: string;
   status?: "pendente" | "processado" | "removido";
 };
@@ -13,6 +12,7 @@ export default function DBAdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [checked, setChecked] = useState<string[]>([]); // 👈 controle dos checkboxes
 
   // carregar arquivos já existentes no bucket
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function DBAdminDashboard() {
     fetchFiles();
   }, []);
 
-  // seleção de arquivos
+  // seleção de arquivos locais
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setSelectedFiles(Array.from(e.target.files));
@@ -86,165 +86,201 @@ export default function DBAdminDashboard() {
     setSelectedFiles([]);
   };
 
-  // depurar arquivo (placeholder → Python)
-  const handleDepurar = async (file: UploadedFile) => {
-    try {
-      const res = await fetch(`/api/dbadmin/depurar?file=${encodeURIComponent(file.path)}`, {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`🔍 Arquivo ${file.name} depurado com sucesso!`);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.path === file.path ? { ...f, status: "processado" } : f))
-        );
-      } else {
-        alert(`⚠️ Erro ao depurar: ${data.error}`);
+  // depurar (um ou vários)
+  const handleDepurar = async (names: string[]) => {
+    for (const name of names) {
+      try {
+        const res = await fetch(`/api/dbadmin/depurar?file=${encodeURIComponent(name)}`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (data.success) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.name === name ? { ...f, status: "processado" } : f))
+          );
+        }
+      } catch (err) {
+        console.error("❌ Erro na depuração:", err);
       }
-    } catch (err) {
-      console.error(err);
-      alert("❌ Erro inesperado na depuração.");
     }
+    alert(`🔍 ${names.length} arquivo(s) depurado(s)!`);
+    setChecked([]); // limpa seleção
   };
 
-  // deletar arquivo do bucket
-  const handleDelete = async (file: UploadedFile) => {
-    if (!confirm(`Tem certeza que deseja deletar ${file.name}?`)) return;
+  // deletar (um ou vários)
+  const handleDelete = async (names: string[]) => {
+    if (!confirm(`Tem certeza que deseja deletar ${names.length} arquivo(s)?`)) return;
 
-    try {
-      const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(file.path)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`🗑️ Arquivo ${file.name} removido com sucesso!`);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.path === file.path ? { ...f, status: "removido" } : f))
-        );
-      } else {
-        alert(`⚠️ Erro ao remover: ${data.error}`);
+    for (const name of names) {
+      try {
+        const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(name)}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (data.success) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.name === name ? { ...f, status: "removido" } : f))
+          );
+        }
+      } catch (err) {
+        console.error("❌ Erro ao deletar:", err);
       }
-    } catch (err) {
-      console.error(err);
-      alert("❌ Erro inesperado ao deletar.");
     }
+    alert(`🗑️ ${names.length} arquivo(s) removido(s)!`);
+    setChecked([]); // limpa seleção
+  };
+
+  // marcar/desmarcar
+  const toggleCheck = (name: string) => {
+    setChecked((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
-      {!authenticated && <PasswordModal onSuccess={() => setAuthenticated(true)} />}
-
-      <main
-        className={`flex-1 p-10 ${!authenticated ? "blur-sm pointer-events-none" : ""}`}
-      >
-        <h1 className="text-2xl font-bold mb-6">
-          ⚙️ Gestão do Banco de Dados (TSXV)
-        </h1>
-        <p>Aqui vai ficar a interface de upload e gerenciamento dos .txt → .db</p>
-
-        {/* Seleção de arquivos ou pasta */}
-        <div className="mt-6 space-y-4">
-          <label className="block cursor-pointer text-blue-600 hover:underline">
-            Selecionar arquivos
-            <input
-              type="file"
-              accept=".txt"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-          </label>
-
-          <label className="block cursor-pointer text-blue-600 hover:underline">
-            Selecionar pasta
-            <input
-              type="file"
-              ref={(input) => {
-                if (input) {
-                  input.setAttribute("webkitdirectory", "");
-                  input.setAttribute("directory", "");
-                }
-              }}
-              onChange={handleFolderChange}
-              className="hidden"
-            />
-          </label>
+      {!authenticated ? (
+        <div className="flex items-center justify-center h-screen">
+          <PasswordModal onSuccess={() => setAuthenticated(true)} />
         </div>
+      ) : (
+        <main className="flex-1 p-10">
+          <h1 className="text-2xl font-bold mb-6">
+            ⚙️ Gestão do Banco de Dados (TSXV)
+          </h1>
+          <p>Aqui vai ficar a interface de upload e gerenciamento dos .txt → .db</p>
 
-        {/* Lista de arquivos selecionados */}
-        {selectedFiles.length > 0 && (
-          <div className="mt-6 bg-white p-4 rounded-lg shadow">
-            <h2 className="font-semibold mb-2">📂 Arquivos selecionados:</h2>
-            <ul className="list-disc list-inside space-y-1 text-sm max-h-60 overflow-y-auto">
-              {selectedFiles.map((file) => (
-                <li key={file.name + file.lastModified}>{file.name}</li>
-              ))}
-            </ul>
-            <div className="flex space-x-4 mt-4">
-              <button
-                onClick={handleConfirm}
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-              >
-                ✅ Confirmar
-              </button>
-              <button
-                onClick={handleCancel}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                ❌ Cancelar
-              </button>
-            </div>
+          {/* Seleção de arquivos ou pasta */}
+          <div className="mt-6 space-y-4">
+            <label className="block cursor-pointer text-blue-600 hover:underline">
+              Selecionar arquivos
+              <input
+                type="file"
+                accept=".txt"
+                onChange={handleFileChange}
+                className="hidden"
+                multiple
+              />
+            </label>
+
+            <label className="block cursor-pointer text-blue-600 hover:underline">
+              Selecionar pasta
+              <input
+                type="file"
+                ref={(input) => {
+                  if (input) {
+                    input.setAttribute("webkitdirectory", "");
+                    input.setAttribute("directory", "");
+                  }
+                }}
+                onChange={handleFolderChange}
+                className="hidden"
+              />
+            </label>
           </div>
-        )}
 
-        {/* Lista de arquivos enviados */}
-        {uploadedFiles.length > 0 && (
-          <div className="mt-6 bg-white p-4 rounded-lg shadow">
-            <h2 className="font-semibold mb-2">🌐 Arquivos enviados:</h2>
-            <ul className="space-y-2 text-sm">
-              {uploadedFiles.map((file) => (
-                <li
-                  key={file.path}
-                  className="flex justify-between items-center bg-gray-50 p-3 rounded"
+          {/* Lista de arquivos selecionados */}
+          {selectedFiles.length > 0 && (
+            <div className="mt-6 bg-white p-4 rounded-lg shadow">
+              <h2 className="font-semibold mb-2">📂 Arquivos selecionados:</h2>
+              <ul className="list-disc list-inside space-y-1 text-sm max-h-60 overflow-y-auto">
+                {selectedFiles.map((file) => (
+                  <li key={file.name + file.lastModified}>{file.name}</li>
+                ))}
+              </ul>
+              <div className="flex space-x-4 mt-4">
+                <button
+                  onClick={handleConfirm}
+                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
                 >
-                  <a
-                    href={file.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
+                  ✅ Confirmar
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                >
+                  ❌ Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Lista de arquivos enviados */}
+          {uploadedFiles.length > 0 && (
+            <div className="mt-6 bg-white p-4 rounded-lg shadow">
+              <h2 className="font-semibold mb-2">🌐 Arquivos enviados:</h2>
+
+              {/* Ações em massa */}
+              {checked.length > 0 && (
+                <div className="mb-3 flex space-x-2">
+                  <button
+                    onClick={() => handleDepurar(checked)}
+                    className="px-3 py-1 bg-green-600 text-white text-sm rounded"
                   >
-                    {file.name}
-                  </a>
-                  <div className="flex space-x-2 items-center">
-                    <span
-                      className={`text-xs px-2 py-1 rounded ${
-                        file.status === "processado"
-                          ? "bg-green-200 text-green-800"
-                          : file.status === "removido"
-                          ? "bg-red-200 text-red-800"
-                          : "bg-yellow-200 text-yellow-800"
-                      }`}
-                    >
-                      {file.status}
-                    </span>
-                    <button
-                      onClick={() => handleDepurar(file)}
-                      className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
-                    >
-                      Depurar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(file)}
-                      className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-                    >
-                      Deletar
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </main>
+                    Depurar Selecionados
+                  </button>
+                  <button
+                    onClick={() => handleDelete(checked)}
+                    className="px-3 py-1 bg-red-600 text-white text-sm rounded"
+                  >
+                    Deletar Selecionados
+                  </button>
+                </div>
+              )}
+
+              <ul className="space-y-2 text-sm">
+                {uploadedFiles.map((file) => (
+                  <li
+                    key={file.name}
+                    className="flex justify-between items-center bg-gray-50 p-3 rounded"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={checked.includes(file.name)}
+                        onChange={() => toggleCheck(file.name)}
+                      />
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {file.name}
+                      </a>
+                    </div>
+                    <div className="flex space-x-2 items-center">
+                      <span
+                        className={`text-xs px-2 py-1 rounded ${
+                          file.status === "processado"
+                            ? "bg-green-200 text-green-800"
+                            : file.status === "removido"
+                            ? "bg-red-200 text-red-800"
+                            : "bg-yellow-200 text-yellow-800"
+                        }`}
+                      >
+                        {file.status}
+                      </span>
+                      <button
+                        onClick={() => handleDepurar([file.name])}
+                        className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
+                      >
+                        Depurar
+                      </button>
+                      <button
+                        onClick={() => handleDelete([file.name])}
+                        className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                      >
+                        Deletar
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </main>
+      )}
     </div>
   );
 }

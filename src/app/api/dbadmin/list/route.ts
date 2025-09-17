@@ -23,7 +23,6 @@ export async function GET() {
 
       return {
         name: f.name,
-        path: `uploads/${f.name}`, // <- caminho completo
         url: publicUrl.publicUrl,
         status: "pendente",
       };
@@ -31,8 +30,7 @@ export async function GET() {
 
     return NextResponse.json({ success: true, files });
   } catch (err: unknown) {
-    const errorMessage =
-      err instanceof Error ? err.message : String(err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
     console.error("❌ Erro ao listar arquivos:", errorMessage);
     return NextResponse.json(
       { success: false, error: errorMessage || "Erro interno" },
