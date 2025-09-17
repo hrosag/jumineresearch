@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Inicializa Supabase
+// DEBUG: conferir se as variáveis estão chegando no Vercel
+console.log("SUPABASE URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+console.log(
+  "SUPABASE KEY:",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "OK" : "MISSING"
+);
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -26,20 +32,21 @@ export async function POST(req: Request) {
       const filePath = `${Date.now()}-${file.name}`;
 
       const { data, error } = await supabase.storage
-        .from("uploads") // bucket
+        .from("uploads")
         .upload(filePath, buffer, {
           contentType: file.type,
         });
 
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw error;
 
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("uploads").getPublicUrl(filePath);
+      const { data: publicUrl } = supabase.storage
+        .from("uploads")
+        .getPublicUrl(filePath);
 
-      uploaded.push({ name: file.name, url: publicUrl });
+      uploaded.push({
+        name: file.name,
+        url: publicUrl.publicUrl,
+      });
     }
 
     return NextResponse.json({
@@ -48,14 +55,10 @@ export async function POST(req: Request) {
       files: uploaded,
       message: "Arquivos enviados para o Supabase com sucesso!",
     });
-  } catch (err) {
-    const errorMessage =
-      err instanceof Error ? err.message : "Erro interno inesperado";
-
+  } catch (err: any) {
     console.error("❌ Erro no upload:", err);
-
     return NextResponse.json(
-      { success: false, error: errorMessage },
+      { success: false, error: err.message || "Erro interno" },
       { status: 500 }
     );
   }
