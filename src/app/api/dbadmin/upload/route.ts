@@ -55,10 +55,11 @@ export async function POST(req: Request) {
       files: uploaded,
       message: "Arquivos enviados para o Supabase com sucesso!",
     });
-  } catch (err: any) {
-    console.error("❌ Erro no upload:", err);
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error("❌ Erro no upload:", error);
     return NextResponse.json(
-      { success: false, error: err.message || "Erro interno" },
+      { success: false, error: error || "Erro interno" },
       { status: 500 }
     );
   }
