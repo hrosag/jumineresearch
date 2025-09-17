@@ -3,13 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! // usando anon (já tem policy criada)
 );
 
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const file = searchParams.get("file"); // vem sem o prefixo
+    const file = searchParams.get("file");
 
     if (!file) {
       return NextResponse.json(
@@ -18,21 +18,29 @@ export async function DELETE(req: Request) {
       );
     }
 
-    // 🔑 Garantir caminho correto no bucket
+    // caminho completo no bucket
     const fullPath = file.startsWith("uploads/") ? file : `uploads/${file}`;
 
     console.log("🗑️ Tentando deletar arquivo do bucket:", fullPath);
 
-    const { error } = await supabase.storage.from("uploads").remove([fullPath]);
+    const { data, error } = await supabase.storage
+      .from("uploads")
+      .remove([fullPath]);
 
     if (error) {
       console.error("❌ Erro ao deletar:", error.message);
-      throw new Error(error.message);
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 500 }
+      );
     }
+
+    console.log("✅ Delete result:", data);
 
     return NextResponse.json({
       success: true,
       message: `✅ Arquivo ${fullPath} removido com sucesso!`,
+      data,
     });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
