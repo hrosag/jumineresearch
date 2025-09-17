@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Debug para garantir que variáveis estão chegando
+// DEBUG: conferir se as variáveis estão chegando no Vercel
 console.log("🚀 SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
 console.log(
   "🚀 SUPABASE_KEY:",
@@ -16,7 +16,8 @@ const supabase = createClient(
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-    const files = formData.getAll("files") as File[];
+    // ⚠️ Cast como Blob[], pois em ambiente serverless não é File do navegador
+    const files = formData.getAll("files") as unknown as Blob[];
 
     if (!files || files.length === 0) {
       return NextResponse.json(
@@ -28,16 +29,21 @@ export async function POST(req: Request) {
     const uploaded: { name: string; url: string }[] = [];
 
     for (const file of files) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const filePath = `${Date.now()}-${file.name}`;
+      const arrayBuffer = await (file as Blob).arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
 
-      console.log(`📂 Tentando upload do arquivo: ${file.name} (${file.type})`);
+      // se não tiver name, cria um fallback
+      const name = (file as any).name || `sem_nome_${Date.now()}.txt`;
+      const type = (file as any).type || "text/plain";
+      const filePath = `${Date.now()}-${name}`;
+
+      console.log(`📂 Tentando upload do arquivo: ${name} (${type})`);
 
       const { data, error } = await supabase.storage
         .from("uploads")
         .upload(filePath, buffer, {
-          contentType: file.type || "text/plain",
-          upsert: true, // garante que sobrescreve se já existir
+          contentType: type,
+          upsert: true, // sobrescreve se já existir
         });
 
       if (error) {
@@ -52,7 +58,7 @@ export async function POST(req: Request) {
         .getPublicUrl(filePath);
 
       uploaded.push({
-        name: file.name,
+        name,
         url: publicUrl.publicUrl,
       });
     }

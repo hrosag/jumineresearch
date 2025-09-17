@@ -34,16 +34,17 @@ export default function DBAdminDashboard() {
     selectedFiles.forEach((file) => formData.append("files", file));
 
     try {
-      const res = await fetch("/api/upload", {
+      const res = await fetch("/api/dbadmin/upload", {
         method: "POST",
         body: formData,
       });
 
       const data = await res.json();
+      console.log("📡 Resposta upload:", data);
 
       if (data.success) {
         alert(`✅ ${data.count} arquivo(s) enviados com sucesso!`);
-        setUploadedFiles(data.files); // guarda lista com links
+        setUploadedFiles(data.files); // links vindos do Supabase
         setSelectedFiles([]); // limpa seleção
       } else {
         alert(`⚠️ Falha ao enviar: ${data.error}`);
@@ -61,7 +62,6 @@ export default function DBAdminDashboard() {
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
-      {/* Modal de senha */}
       {!authenticated && (
         <PasswordModal onSuccess={() => setAuthenticated(true)} />
       )}
@@ -74,7 +74,7 @@ export default function DBAdminDashboard() {
         <h1 className="text-2xl font-bold mb-6">
           ⚙️ Gestão do Banco de Dados (TSXV)
         </h1>
-        <p>Aqui vai ficar a interface de upload e gerenciamento dos .txt → .db</p>
+        <p>Selecione os arquivos .txt para enviar ao Supabase.</p>
 
         {/* Seleção de arquivos ou pasta */}
         <div className="mt-6 space-y-4">
@@ -83,6 +83,7 @@ export default function DBAdminDashboard() {
             <input
               type="file"
               accept=".txt"
+              multiple
               onChange={handleFileChange}
               className="hidden"
             />
@@ -98,6 +99,7 @@ export default function DBAdminDashboard() {
                   input.setAttribute("directory", "");
                 }
               }}
+              multiple
               onChange={handleFolderChange}
               className="hidden"
             />
@@ -114,13 +116,12 @@ export default function DBAdminDashboard() {
               ))}
             </ul>
 
-            {/* Botões */}
             <div className="flex space-x-4 mt-4">
               <button
                 onClick={handleConfirm}
                 className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
               >
-                ✅ Confirmar
+                ✅ Confirmar envio
               </button>
               <button
                 onClick={handleCancel}
