@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const file = searchParams.get("file");
+    const file = searchParams.get("file"); // deve vir como "uploads/arquivo.txt"
 
     if (!file) {
       return NextResponse.json(
@@ -12,7 +12,7 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log(`🔍 Simulando depuração para o arquivo: ${file}`);
+    console.log(`🔍 Simulando depuração para o arquivo (path completo): ${file}`);
 
     // Aqui no futuro será chamada a rotina Python (All_Data)
     await new Promise((resolve) => setTimeout(resolve, 2000)); // delay simulado
