@@ -4,6 +4,7 @@ import PasswordModal from "./components/PasswordModal";
 
 type UploadedFile = {
   name: string;
+  path: string; // 👈 agora incluímos path completo
   url: string;
   status?: "pendente" | "processado" | "removido";
 };
@@ -88,14 +89,14 @@ export default function DBAdminDashboard() {
   // depurar arquivo (placeholder → Python)
   const handleDepurar = async (file: UploadedFile) => {
     try {
-      const res = await fetch(`/api/dbadmin/depurar?file=${encodeURIComponent(file.name)}`, {
+      const res = await fetch(`/api/dbadmin/depurar?file=${encodeURIComponent(file.path)}`, {
         method: "POST",
       });
       const data = await res.json();
       if (data.success) {
         alert(`🔍 Arquivo ${file.name} depurado com sucesso!`);
         setUploadedFiles((prev) =>
-          prev.map((f) => (f.name === file.name ? { ...f, status: "processado" } : f))
+          prev.map((f) => (f.path === file.path ? { ...f, status: "processado" } : f))
         );
       } else {
         alert(`⚠️ Erro ao depurar: ${data.error}`);
@@ -111,14 +112,14 @@ export default function DBAdminDashboard() {
     if (!confirm(`Tem certeza que deseja deletar ${file.name}?`)) return;
 
     try {
-      const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(file.name)}`, {
+      const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(file.path)}`, {
         method: "DELETE",
       });
       const data = await res.json();
       if (data.success) {
         alert(`🗑️ Arquivo ${file.name} removido com sucesso!`);
         setUploadedFiles((prev) =>
-          prev.map((f) => (f.name === file.name ? { ...f, status: "removido" } : f))
+          prev.map((f) => (f.path === file.path ? { ...f, status: "removido" } : f))
         );
       } else {
         alert(`⚠️ Erro ao remover: ${data.error}`);
@@ -202,7 +203,7 @@ export default function DBAdminDashboard() {
             <ul className="space-y-2 text-sm">
               {uploadedFiles.map((file) => (
                 <li
-                  key={file.url}
+                  key={file.path}
                   className="flex justify-between items-center bg-gray-50 p-3 rounded"
                 >
                   <a

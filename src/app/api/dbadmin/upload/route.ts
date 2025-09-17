@@ -25,13 +25,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const uploaded: { name: string; url: string }[] = [];
+    const uploaded: { name: string; url: string; path: string }[] = [];
 
     for (const file of files) {
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      // 👇 Evita `any` usando indexação de objeto
       const name =
         (file as Blob & { name?: string }).name ??
         `sem_nome_${Date.now()}.txt`;
@@ -62,6 +61,7 @@ export async function POST(req: Request) {
       uploaded.push({
         name,
         url: publicUrl.publicUrl,
+        path: filePath, // 👈 agora o delete usa isso sem erro
       });
     }
 
