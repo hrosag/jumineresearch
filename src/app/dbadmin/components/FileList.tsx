@@ -13,6 +13,8 @@ interface FileListProps {
   toggleCheck: (name: string) => void;
   handleDepurar: (names: string[]) => void;
   handleDelete: (names: string[]) => void;
+  currentPage: number;
+  setCurrentPage: (page: number) => void;
 }
 
 export default function FileList({
@@ -21,30 +23,28 @@ export default function FileList({
   toggleCheck,
   handleDepurar,
   handleDelete,
+  currentPage,
+  setCurrentPage,
 }: FileListProps) {
-  // marcar/desmarcar todos
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(files.length / itemsPerPage);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedFiles = files.slice(startIndex, startIndex + itemsPerPage);
+
   const toggleAll = () => {
-    if (checked.length === files.length) {
-      handleUncheckAll();
+    const allOnPage = paginatedFiles.map((f) => f.name);
+    const allChecked = allOnPage.every((name) => checked.includes(name));
+
+    if (allChecked) {
+      // desmarca só os da página atual
+      allOnPage.forEach((name) => toggleCheck(name));
     } else {
-      handleCheckAll();
+      // marca os da página atual
+      allOnPage.forEach((name) => {
+        if (!checked.includes(name)) toggleCheck(name);
+      });
     }
-  };
-
-  const handleCheckAll = () => {
-    files.forEach((f) => {
-      if (!checked.includes(f.name)) {
-        toggleCheck(f.name);
-      }
-    });
-  };
-
-  const handleUncheckAll = () => {
-    files.forEach((f) => {
-      if (checked.includes(f.name)) {
-        toggleCheck(f.name);
-      }
-    });
   };
 
   return (
@@ -56,10 +56,10 @@ export default function FileList({
           <label className="flex items-center space-x-2 mb-3">
             <input
               type="checkbox"
-              checked={checked.length === files.length}
+              checked={paginatedFiles.every((f) => checked.includes(f.name))}
               onChange={toggleAll}
             />
-            <span>Selecionar todos</span>
+            <span>Selecionar todos desta página</span>
           </label>
 
           <div className="mb-4 flex space-x-2">
@@ -90,9 +90,9 @@ export default function FileList({
         </>
       )}
 
-      {/* Lista de arquivos */}
+      {/* Lista de arquivos paginada */}
       <ul className="space-y-2">
-        {files.map((file) => (
+        {paginatedFiles.map((file) => (
           <li
             key={file.name}
             className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded"
@@ -143,6 +143,29 @@ export default function FileList({
           </li>
         ))}
       </ul>
+
+      {/* Paginação */}
+      {totalPages > 1 && (
+        <div className="flex justify-center mt-4 space-x-2">
+          <button
+            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 bg-gray-300 rounded disabled:opacity-50"
+          >
+            ◀ Anterior
+          </button>
+          <span className="px-2 py-1">
+            Página {currentPage} de {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 bg-gray-300 rounded disabled:opacity-50"
+          >
+            Próxima ▶
+          </button>
+        </div>
+      )}
     </div>
   );
 }
