@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import PasswordModal from "./components/PasswordModal";
 import FileList from "./components/FileList";
+import UploadButton from "./components/UploadButton";
 
 type UploadedFile = {
   name: string;
@@ -14,37 +15,34 @@ export default function DBAdminDashboard() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
 
-  // fetch inicial dos arquivos
-  useEffect(() => {
-    const fetchFiles = async () => {
-      try {
-        const res = await fetch("/api/dbadmin/list");
-        const data = await res.json();
-        if (data.success) {
-          setUploadedFiles(data.files);
-        }
-      } catch (err) {
-        console.error("❌ Erro ao buscar arquivos:", err);
+  const fetchFiles = async () => {
+    try {
+      const res = await fetch("/api/dbadmin/list");
+      const data = await res.json();
+      if (data.success) {
+        setUploadedFiles(data.files);
       }
-    };
+    } catch (err) {
+      console.error("Erro ao buscar arquivos:", err);
+    }
+  };
+
+  useEffect(() => {
     fetchFiles();
   }, []);
 
-  // toggle de checkboxes individuais
   const toggleCheck = (name: string) => {
     setChecked((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
     );
   };
 
-  // depurar em lote
   const handleDepurar = async (names: string[]) => {
     if (!names.length) return;
-    console.log("🚧 Depuração chamada para:", names);
-    // 👉 aqui entra a lógica real depois
+    console.log("Depuracao chamada para:", names);
+    // TODO: implementar chamada real
   };
 
-  // deletar em lote
   const handleDelete = async (names: string[]) => {
     if (!names.length) return;
     if (!confirm(`Tem certeza que deseja deletar ${names.length} arquivo(s)?`))
@@ -52,24 +50,22 @@ export default function DBAdminDashboard() {
 
     try {
       for (const name of names) {
-        const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(name)}`, {
-          method: "DELETE",
-        });
+        const res = await fetch(
+          `/api/dbadmin/delete?file=${encodeURIComponent(name)}`,
+          { method: "DELETE" }
+        );
         const data = await res.json();
         if (!data.success) {
-          console.error("❌ Erro ao deletar", name, data.error);
+          console.error("Erro ao deletar", name, data.error);
         } else {
-          console.log("✅ Arquivo deletado:", name);
+          console.log("Arquivo deletado:", name);
         }
       }
 
-      // Atualiza a lista removendo os deletados
-      setUploadedFiles((prev) =>
-        prev.filter((f) => !names.includes(f.name))
-      );
-      setChecked([]); // limpa seleção
+      setUploadedFiles((prev) => prev.filter((f) => !names.includes(f.name)));
+      setChecked([]);
     } catch (err) {
-      console.error("🔥 Erro no handleDelete:", err);
+      console.error("Erro no handleDelete:", err);
     }
   };
 
@@ -82,10 +78,11 @@ export default function DBAdminDashboard() {
       ) : (
         <main className="flex-1 p-10">
           <h1 className="text-2xl font-bold mb-6">
-            ⚙️ Gestão do Banco de Dados (TSXV)
+            Gestao do Banco de Dados (TSXV)
           </h1>
 
-          {/* Lista de arquivos */}
+          <UploadButton onUploadComplete={fetchFiles} />
+
           <FileList
             files={uploadedFiles}
             checked={checked}
@@ -94,11 +91,8 @@ export default function DBAdminDashboard() {
             handleDelete={handleDelete}
           />
 
-          {/* Mensagem quando não tiver nada */}
           {uploadedFiles.length === 0 && (
-            <p className="mt-4 text-gray-500">
-              Nenhum arquivo enviado ainda. 🚀
-            </p>
+            <p className="mt-4 text-gray-500">Nenhum arquivo enviado ainda.</p>
           )}
         </main>
       )}

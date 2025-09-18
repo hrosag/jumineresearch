@@ -1,49 +1,82 @@
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const supabase =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey)
+    : null;
 
 export async function POST(req: Request) {
+  if (!supabase) {
+    return NextResponse.json(
+      { success: false, error: "Variaveis do Supabase nao configuradas." },
+      { status: 500 }
+    );
+  }
+
   try {
     const formData = await req.formData();
-    const files = formData.getAll("files") as File[];
+    const files = formData
+      .getAll("files")
+      .filter((value): value is File => value instanceof File);
 
-    if (!files.length) {
+    if (files.length === 0) {
       return NextResponse.json(
-        { success: false, error: "Nenhum arquivo enviado" },
+        { success: false, error: "Nenhum arquivo recebido." },
         { status: 400 }
       );
     }
 
-    const uploaded: { name: string; url: string }[] = [];
+    const uploaded: Array<{
+      name: string;
+      path: string;
+      size: number;
+      originalName: string;
+    }> = [];
 
     for (const file of files) {
-      const buffer = Buffer.from(await file.arrayBuffer());
+      const sanitizedName = file.name.replace(/[\\/]/g, "_").trim();
 
-      // nome único para evitar sobrescrita
-      const uniqueName = `${Date.now()}-${file.name}`;
+      if (!sanitizedName) {
+        return NextResponse.json(
+          { success: false, error: "Nome de arquivo invalido." },
+          { status: 400 }
+        );
+      }
 
-      const { error } = await supabase.storage
+      const uniqueName = `${randomUUID()}-${sanitizedName}`;
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      const { data, error } = await supabase.storage
         .from("uploads")
         .upload(uniqueName, buffer, {
+          cacheControl: "3600",
           contentType: file.type || "text/plain",
-          upsert: false, // não sobrescreve
+          upsert: false,
         });
 
       if (error) {
-        console.error("❌ Erro no upload:", error.message);
+        console.error(`Erro ao enviar ${uniqueName}:`, error.message);
         return NextResponse.json(
-          { success: false, error: error.message },
+          {
+            success: false,
+            error: `Erro ao enviar ${uniqueName}: ${error.message}`,
+          },
           { status: 500 }
         );
       }
 
-      // gera URL pública
-      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/uploads/${uniqueName}`;
-      uploaded.push({ name: uniqueName, url });
+      uploaded.push({
+        name: uniqueName,
+        path: data?.path ?? uniqueName,
+        size: file.size,
+        originalName: file.name,
+      });
     }
 
     return NextResponse.json({
@@ -51,11 +84,11 @@ export async function POST(req: Request) {
       count: uploaded.length,
       files: uploaded,
     });
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error("🔥 Erro inesperado no /upload:", errorMessage);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Erro inesperado no upload:", message);
     return NextResponse.json(
-      { success: false, error: errorMessage },
+      { success: false, error: message || "Erro interno" },
       { status: 500 }
     );
   }
