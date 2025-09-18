@@ -14,7 +14,7 @@ type Row = {
   company: string | null;
   ticker: string | null;
   bulletin_type: string | null;
-  bulletin_date: string | null;
+  bulletin_date: string | null; // string vinda do Supabase: "YYYY-MM-DD"
   tier: string | null;
 };
 
@@ -33,10 +33,13 @@ export default function ViewAllData() {
       const { data, error } = await supabase
         .from('all_data')
         .select('id, block_id, company, ticker, bulletin_type, bulletin_date, tier')
-        .order('bulletin_date', { ascending: false });
+        .order('bulletin_date', { ascending: false }); // ordenação Z-A pelo Supabase
 
-      if (error) console.error(error);
-      else setRows(data as Row[]);
+      if (error) {
+        console.error(error);
+      } else {
+        setRows(data as Row[]);
+      }
       setLoading(false);
     }
     fetchData();
@@ -55,55 +58,72 @@ export default function ViewAllData() {
     <div className="p-6 select-none">
       <h1 className="text-2xl font-bold mb-4">All Data (visualização)</h1>
 
-      <table className="table-auto border-collapse w-full">
+      <table className="table-auto border-collapse w-full text-sm">
         <thead>
           <tr>
             <th className="border px-4 py-2">Date</th>
             <th className="border px-4 py-2">Block ID</th>
+
             <th className="border px-4 py-2">
-              Company
-              <input
-                className="mt-1 w-full p-1 border rounded text-sm"
-                placeholder="Filtro"
-                value={filterCompany}
-                onChange={(e) => setFilterCompany(e.target.value)}
-              />
+              <div className="flex flex-col">
+                <span>Company</span>
+                <input
+                  className="mt-1 w-full p-1 border rounded text-sm"
+                  aria-label="Filtro Company"
+                  placeholder="Filtrar"
+                  value={filterCompany}
+                  onChange={(e) => setFilterCompany(e.target.value)}
+                />
+              </div>
             </th>
+
             <th className="border px-4 py-2">
-              Ticker
-              <input
-                className="mt-1 w-full p-1 border rounded text-sm"
-                placeholder="Filtro"
-                value={filterTicker}
-                onChange={(e) => setFilterTicker(e.target.value)}
-              />
+              <div className="flex flex-col">
+                <span>Ticker</span>
+                <input
+                  className="mt-1 w-full p-1 border rounded text-sm"
+                  aria-label="Filtro Ticker"
+                  placeholder="Filtrar"
+                  value={filterTicker}
+                  onChange={(e) => setFilterTicker(e.target.value)}
+                />
+              </div>
             </th>
+
             <th className="border px-4 py-2">
-              Type
-              <input
-                className="mt-1 w-full p-1 border rounded text-sm"
-                placeholder="Filtro"
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-              />
+              <div className="flex flex-col">
+                <span>Type</span>
+                <input
+                  className="mt-1 w-full p-1 border rounded text-sm"
+                  aria-label="Filtro Type"
+                  placeholder="Filtrar"
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
+                />
+              </div>
             </th>
+
             <th className="border px-4 py-2">
-              Tier
-              <input
-                className="mt-1 w-full p-1 border rounded text-sm"
-                placeholder="Filtro"
-                value={filterTier}
-                onChange={(e) => setFilterTier(e.target.value)}
-              />
+              <div className="flex flex-col">
+                <span>Tier</span>
+                <input
+                  className="mt-1 w-full p-1 border rounded text-sm"
+                  aria-label="Filtro Tier"
+                  placeholder="Filtrar"
+                  value={filterTier}
+                  onChange={(e) => setFilterTier(e.target.value)}
+                />
+              </div>
             </th>
           </tr>
         </thead>
+
         <tbody>
           {filtered.map((r) => (
             <tr key={r.id}>
               <td className="border px-4 py-2">
                 {r.bulletin_date
-                  ? new Date(r.bulletin_date).toLocaleDateString('pt-BR')
+                  ? new Date(r.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
                   : ''}
               </td>
               <td className="border px-4 py-2">{r.block_id}</td>
