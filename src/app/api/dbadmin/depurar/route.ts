@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 
+// dispara o workflow de depuração no GitHub Actions
 export async function POST(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const file = searchParams.get("file");
-
-    console.log("🔍 DEPURAR chamado");
-    console.log("📌 Param file recebido:", file);
 
     if (!file) {
       return NextResponse.json(
@@ -15,9 +13,10 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log(`🔍 Simulando depuração para o arquivo: ${file}`);
+    console.log("🔍 DEPURAR chamado para:", file);
 
-    // futuro → chamar rotina Python
+    // aqui você pode disparar o GitHub Actions ou rodar lógica de depuração
+    // Exemplo simples: simulação de processamento
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     return NextResponse.json({

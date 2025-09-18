@@ -15,6 +15,7 @@ export default function DBAdminDashboard() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
 
+  // ----- busca lista de arquivos enviados -----
   const fetchFiles = async () => {
     try {
       const res = await fetch("/api/dbadmin/list");
@@ -31,18 +32,43 @@ export default function DBAdminDashboard() {
     fetchFiles();
   }, []);
 
+  // ----- seleção de arquivos -----
   const toggleCheck = (name: string) => {
     setChecked((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
     );
   };
 
+  // ======= ✅ AGORA IMPLEMENTADO DE FATO =======
   const handleDepurar = async (names: string[]) => {
     if (!names.length) return;
-    console.log("Depuracao chamada para:", names);
-    // TODO: implementar lógica real
+
+    for (const name of names) {
+      try {
+        const resp = await fetch(
+          `/api/dbadmin/depurar?file=${encodeURIComponent(name)}`,
+          { method: "POST" }
+        );
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success) {
+          console.error("Erro ao depurar", name, data.error);
+        } else {
+          console.log(`✅ Depuração concluída para ${name}`);
+          // opcional: marcar como processado na UI
+          setUploadedFiles((prev) =>
+            prev.map((f) =>
+              f.name === name ? { ...f, status: "processado" } : f
+            )
+          );
+        }
+      } catch (err) {
+        console.error("Falha ao chamar depurar para", name, err);
+      }
+    }
   };
 
+  // ----- deletar arquivos -----
   const handleDelete = async (names: string[]) => {
     if (!names.length) return;
     if (!confirm(`Tem certeza que deseja deletar ${names.length} arquivo(s)?`))
@@ -69,6 +95,7 @@ export default function DBAdminDashboard() {
     }
   };
 
+  // ----- renderização -----
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
       {!authenticated ? (
