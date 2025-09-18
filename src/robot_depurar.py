@@ -1,6 +1,7 @@
 import os, re, unicodedata
 import pandas as pd
 import requests
+from datetime import datetime      # <<< ADIÇÃO >>>
 from supabase import create_client
 
 # ---------------------------------------------------------------------
@@ -30,6 +31,34 @@ TICK_ANYWHERE = [
 ]
 
 # ---------------------------------------------------------------------
+# <<< ADIÇÃO >>> Funções de normalização
+# ---------------------------------------------------------------------
+def normalize_date(raw: str) -> str | None:
+    """Converte várias formas de data para DD/MM/AAAA."""
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+        try:
+            d = datetime.strptime(raw.strip(), fmt)
+            return d.strftime("%d/%m/%Y")
+        except ValueError:
+            continue
+    return raw.strip()
+
+def normalize_tier(raw: str) -> str | None:
+    """Reduz descrição longa para Tier 1, Tier 2 ou Nex."""
+    if not raw:
+        return None
+    txt = raw.lower()
+    if "tier 1" in txt:
+        return "Tier 1"
+    if "tier 2" in txt:
+        return "Tier 2"
+    if "nex" in txt:
+        return "Nex"
+    return raw.strip()
+
+# ---------------------------------------------------------------------
 # Funções auxiliares
 # ---------------------------------------------------------------------
 def normalize_text(s: str) -> str:
@@ -55,34 +84,25 @@ def extract_company_ticker(body: str):
             return None, m.group(1).strip().upper()
     return None, None
 
-def clean_filename(full_name: str) -> str:
-    """
-    Remove o prefixo UUID gerado pelo bucket e retorna apenas o nome real do arquivo.
-    Ex.: 'c3f37e09-...-n20080102.txt' -> 'n20080102.txt'
-    """
-    return full_name.split('-')[-1] if full_name.lower().endswith('.txt') else full_name
-
 def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
-    """
-    Cria o dicionário para um bloco, já incluindo a composite_key
-    """
     body = normalize_text(b)
     company, ticker = extract_company_ticker(body)
     mtype = BULLETIN_TYPE_RE.search(body)
     mdate = BULLETIN_DATE_RE.search(body)
     mtier = TIER_RE.search(body)
-    composite_key = f"{source_file}-{block_id}"  # <── chave única
-
     return {
-        "source_file": source_file,
+        # <<< ADIÇÃO >>> — só nome limpo do arquivo
+        "source_file": source_file.split("-")[-1],
         "block_id": block_id,
-        "composite_key": composite_key,
         "company": company,
         "ticker": ticker,
         "bulletin_type": mtype.group(1).strip() if mtype else None,
-        "bulletin_date": mdate.group(1).strip() if mdate else None,
-        "tier": mtier.group(1).strip() if mtier else None,
-        "body_text": body
+        # <<< ADIÇÃO >>> normalização de data e tier
+        "bulletin_date": normalize_date(mdate.group(1)) if mdate else None,
+        "tier": normalize_tier(mtier.group(1)) if mtier else None,
+        "body_text": body,
+        # composite_key para upsert idempotente
+        "composite_key": f"{source_file.split('-')[-1]}-{block_id}"
     }
 
 # ---------------------------------------------------------------------
@@ -101,17 +121,14 @@ def main():
         if not f["name"].lower().endswith(".txt"):
             continue
 
-        # 🔧 usa apenas o nome limpo para que a chave seja estável
-        file_name = clean_filename(f["name"])
-        print(f"📂 Processando {file_name}")
-
         url = supabase.storage.from_(BUCKET).get_public_url(f["name"])
+        print(f"📂 Processando {f['name']}")
         resp = requests.get(url)
         resp.raise_for_status()
         txt = resp.text
 
         for i, b in enumerate(parse_blocks(txt), start=1):
-            rows.append(parse_one_block(b, file_name, i))
+            rows.append(parse_one_block(b, f["name"], i))
 
     if not rows:
         print("⚠️ Nenhum bloco processado.")
@@ -120,7 +137,6 @@ def main():
     df = pd.DataFrame(rows)
     print(f"✅ Total de blocos processados: {len(df)}")
 
-    # Upsert usando a nova chave única composite_key
     data = df.to_dict(orient="records")
     res = supabase.table("all_data").upsert(
         data,
