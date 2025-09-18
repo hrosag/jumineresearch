@@ -109,7 +109,7 @@ def main():
     data = df.to_dict(orient="records")
     res = supabase.table("all_data").upsert(
         data,
-        on_conflict=["source_file", "block_id"]
+        on_conflict="all_data_source_block_unique"   # nome da UNIQUE constraint
     ).execute()
 
     if getattr(res, "error", None):
