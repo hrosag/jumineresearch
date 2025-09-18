@@ -13,7 +13,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BUCKET = "uploads"
 
 # ---------------------------------------------------------------------
-# Regex e padrões – conforme o parser original
+# Regex e padrões – exatamente como no Python_Depurar original
 # ---------------------------------------------------------------------
 BULLETIN_TYPE_RE = re.compile(r'BULLETIN TYPE:\s*(.+)', re.IGNORECASE)
 BULLETIN_DATE_RE = re.compile(r'BULLETIN DATE:\s*(.+)', re.IGNORECASE)
@@ -33,8 +33,7 @@ TICK_ANYWHERE = [
 # Funções auxiliares
 # ---------------------------------------------------------------------
 def normalize_text(s: str) -> str:
-    if s is None:
-        return ""
+    if s is None: return ""
     s = unicodedata.normalize("NFKC", s)
     s = re.sub(r"[ \t]+", " ", s)
     return s.strip()
@@ -56,23 +55,34 @@ def extract_company_ticker(body: str):
             return None, m.group(1).strip().upper()
     return None, None
 
+def clean_filename(full_name: str) -> str:
+    """
+    Remove o prefixo UUID gerado pelo bucket e retorna apenas o nome real do arquivo.
+    Ex.: 'c3f37e09-...-n20080102.txt' -> 'n20080102.txt'
+    """
+    return full_name.split('-')[-1] if full_name.lower().endswith('.txt') else full_name
+
 def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
+    """
+    Cria o dicionário para um bloco, já incluindo a composite_key
+    """
     body = normalize_text(b)
     company, ticker = extract_company_ticker(body)
     mtype = BULLETIN_TYPE_RE.search(body)
     mdate = BULLETIN_DATE_RE.search(body)
     mtier = TIER_RE.search(body)
+    composite_key = f"{source_file}-{block_id}"  # <── chave única
+
     return {
         "source_file": source_file,
         "block_id": block_id,
+        "composite_key": composite_key,
         "company": company,
         "ticker": ticker,
         "bulletin_type": mtype.group(1).strip() if mtype else None,
         "bulletin_date": mdate.group(1).strip() if mdate else None,
         "tier": mtier.group(1).strip() if mtier else None,
-        "body_text": body,
-        # chave composta em formato string única:
-        "composite_key": f"{source_file}#{block_id}"
+        "body_text": body
     }
 
 # ---------------------------------------------------------------------
@@ -91,14 +101,17 @@ def main():
         if not f["name"].lower().endswith(".txt"):
             continue
 
+        # 🔧 usa apenas o nome limpo para que a chave seja estável
+        file_name = clean_filename(f["name"])
+        print(f"📂 Processando {file_name}")
+
         url = supabase.storage.from_(BUCKET).get_public_url(f["name"])
-        print(f"📂 Processando {f['name']}")
         resp = requests.get(url)
         resp.raise_for_status()
         txt = resp.text
 
         for i, b in enumerate(parse_blocks(txt), start=1):
-            rows.append(parse_one_block(b, f["name"], i))
+            rows.append(parse_one_block(b, file_name, i))
 
     if not rows:
         print("⚠️ Nenhum bloco processado.")
@@ -107,11 +120,7 @@ def main():
     df = pd.DataFrame(rows)
     print(f"✅ Total de blocos processados: {len(df)}")
 
-    # IMPORTANTE: garanta que na tabela all_data exista:
-    #   composite_key TEXT UNIQUE
-    #   (pode ser criado via painel SQL):
-    #   ALTER TABLE all_data ADD COLUMN IF NOT EXISTS composite_key text UNIQUE;
-
+    # Upsert usando a nova chave única composite_key
     data = df.to_dict(orient="records")
     res = supabase.table("all_data").upsert(
         data,
