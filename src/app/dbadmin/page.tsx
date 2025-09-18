@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PasswordModal from "./components/PasswordModal";
-import FileList from "./components/FileList"; // 👈 importamos aqui
+import FileList from "./components/FileList";
 
 type UploadedFile = {
   name: string;
@@ -15,7 +15,7 @@ export default function DBAdminDashboard() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
 
-  // fetch dos arquivos
+  // buscar arquivos já existentes
   useEffect(() => {
     const fetchFiles = async () => {
       try {
@@ -23,29 +23,67 @@ export default function DBAdminDashboard() {
         const data = await res.json();
         if (data.success) {
           setUploadedFiles(data.files);
+        } else {
+          console.error("⚠️ Erro ao listar arquivos:", data.error);
         }
       } catch (err) {
-        console.error("❌ Erro ao buscar arquivos:", err);
+        console.error("❌ Erro inesperado ao buscar arquivos:", err);
       }
     };
     fetchFiles();
   }, []);
 
-  // toggle de checkboxes
+  // toggle dos checkboxes
   const toggleCheck = (name: string) => {
     setChecked((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
     );
   };
 
-  // depurar em lote
+  // depurar arquivos
   const handleDepurar = async (names: string[]) => {
-    // mesma lógica que você já tinha
+    for (const name of names) {
+      try {
+        const res = await fetch(`/api/dbadmin/depurar?file=${encodeURIComponent(name)}`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (data.success) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.name === name ? { ...f, status: "processado" } : f))
+          );
+        }
+      } catch (err) {
+        console.error("❌ Erro ao depurar:", err);
+      }
+    }
+    setChecked([]);
   };
 
-  // deletar em lote
+  // deletar arquivos
   const handleDelete = async (names: string[]) => {
-    // mesma lógica que você já tinha
+    if (!confirm(`Tem certeza que deseja deletar ${names.length} arquivo(s)?`)) return;
+
+    for (const name of names) {
+      try {
+        const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(name)}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          // remove do estado local
+          setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
+        } else {
+          alert(`⚠️ Erro ao deletar ${name}: ${data.error}`);
+        }
+      } catch (err) {
+        console.error("❌ Erro ao deletar:", err);
+        alert(`❌ Erro inesperado ao deletar ${name}`);
+      }
+    }
+
+    setChecked([]);
   };
 
   return (
@@ -60,10 +98,7 @@ export default function DBAdminDashboard() {
             ⚙️ Gestão do Banco de Dados (TSXV)
           </h1>
 
-          {/* Upload aqui em cima */}
-          {/* ... mantem seus handlers de upload */}
-
-          {/* Lista usando o novo componente */}
+          {/* lista de arquivos enviados */}
           {uploadedFiles.length > 0 && (
             <FileList
               files={uploadedFiles}

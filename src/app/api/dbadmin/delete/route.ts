@@ -18,7 +18,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    // 📂 agora usa o nome exato listado pelo GET
+    // usa o nome exato retornado pelo /list
     const fullPath = file;
 
     console.log("🗑️ Tentando deletar arquivo do bucket:", fullPath);
@@ -32,6 +32,15 @@ export async function DELETE(req: Request) {
       return NextResponse.json(
         { success: false, error: error.message },
         { status: 500 }
+      );
+    }
+
+    if (!data || data.length === 0) {
+      // 👈 garante que só retorna sucesso se realmente removeu
+      console.warn("⚠️ Nenhum arquivo removido:", fullPath);
+      return NextResponse.json(
+        { success: false, error: "Arquivo não encontrado ou já removido" },
+        { status: 404 }
       );
     }
 

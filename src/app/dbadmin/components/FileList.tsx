@@ -22,42 +22,33 @@ export default function FileList({
   handleDepurar,
   handleDelete,
 }: FileListProps) {
-  // ✅ Mestre: marcar/desmarcar todos
-  const allChecked = checked.length === files.length && files.length > 0;
-  const isIndeterminate = checked.length > 0 && checked.length < files.length;
-
-  const toggleAll = () => {
-    if (allChecked) {
-      // se já estavam todos, limpa
-      files.forEach((f) => {
-        if (checked.includes(f.name)) toggleCheck(f.name);
-      });
-    } else {
-      // marca todos que ainda não estavam
-      files.forEach((f) => {
-        if (!checked.includes(f.name)) toggleCheck(f.name);
-      });
-    }
-  };
+  const allSelected = files.length > 0 && checked.length === files.length;
 
   return (
     <div className="mt-6 bg-white p-4 rounded-lg shadow">
       <h2 className="font-semibold mb-2">🌐 Arquivos enviados:</h2>
 
-      {/* Checkbox mestre */}
+      {/* checkbox selecionar todos */}
       <div className="flex items-center mb-3">
         <input
           type="checkbox"
-          checked={allChecked}
-          ref={(input) => {
-            if (input) input.indeterminate = isIndeterminate;
+          checked={allSelected}
+          onChange={() => {
+            if (allSelected) {
+              handleDelete([]); // limpa seleção
+            } else {
+              const allNames = files.map((f) => f.name);
+              // força todos como selecionados
+              allNames.forEach((n) => {
+                if (!checked.includes(n)) toggleCheck(n);
+              });
+            }
           }}
-          onChange={toggleAll}
         />
-        <span className="ml-2 text-sm text-gray-700">Selecionar todos</span>
+        <span className="ml-2 text-sm font-medium">Selecionar todos</span>
       </div>
 
-      {/* Ações em massa */}
+      {/* botões de ação em massa */}
       {checked.length > 0 && (
         <div className="mb-3 flex space-x-2">
           <button
@@ -75,6 +66,7 @@ export default function FileList({
         </div>
       )}
 
+      {/* lista de arquivos */}
       <ul className="space-y-2 text-sm">
         {files.map((file) => (
           <li
