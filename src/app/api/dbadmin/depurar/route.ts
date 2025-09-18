@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-// dispara o workflow de depuração no GitHub Actions
 export async function POST(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -13,15 +12,30 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("🔍 DEPURAR chamado para:", file);
+    // Dispara workflow do GitHub que roda o script Python
+    const ghResp = await fetch(
+      "https://api.github.com/repos/hrosag/jumineresearch/actions/workflows/depurar.yml/dispatches",
+      {
+        method: "POST",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${process.env.GITHUB_TOKEN}`,
+        },
+        body: JSON.stringify({
+          ref: "main",
+          inputs: { file }  // <- input definido no depurar.yml
+        }),
+      }
+    );
 
-    // aqui você pode disparar o GitHub Actions ou rodar lógica de depuração
-    // Exemplo simples: simulação de processamento
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!ghResp.ok) {
+      const text = await ghResp.text();
+      throw new Error(`Falha ao disparar workflow: ${text}`);
+    }
 
     return NextResponse.json({
       success: true,
-      message: `Arquivo ${file} processado com sucesso!`,
+      message: `Workflow de depuração disparado para ${file}`,
     });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
