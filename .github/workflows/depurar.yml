@@ -1,0 +1,25 @@
+name: Depurar arquivos TSXV
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'Nome lógico do arquivo a processar (ex: n20080102.txt)'
+        required: true
+        type: string
+
+jobs:
+  depurar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Rodar depuração
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python depurar.py --file "${{ github.event.inputs.file }}"
