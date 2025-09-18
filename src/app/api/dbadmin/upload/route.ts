@@ -8,16 +8,12 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
-    console.log("⬆️ UPLOAD chamado");
-
     const formData = await req.formData();
     const files = formData.getAll("files") as File[];
 
-    console.log(`📄 Total de arquivos recebidos: ${files.length}`);
-
-    if (!files || files.length === 0) {
+    if (!files.length) {
       return NextResponse.json(
-        { success: false, error: "Nenhum arquivo enviado." },
+        { success: false, error: "Nenhum arquivo enviado" },
         { status: 400 }
       );
     }
@@ -25,45 +21,41 @@ export async function POST(req: Request) {
     const uploaded: { name: string; url: string }[] = [];
 
     for (const file of files) {
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      const buffer = Buffer.from(await file.arrayBuffer());
 
-      const name =
-        (file as File & { name?: string }).name ??
-        `sem_nome_${Date.now()}.txt`;
-
-      console.log(`📂 Tentando upload: ${name}`);
+      // nome único para evitar sobrescrita
+      const uniqueName = `${Date.now()}-${file.name}`;
 
       const { error } = await supabase.storage
         .from("uploads")
-        .upload(name, buffer, {
-          contentType: (file as File & { type?: string }).type ?? "text/plain",
-          upsert: true,
+        .upload(uniqueName, buffer, {
+          contentType: file.type || "text/plain",
+          upsert: false, // não sobrescreve
         });
 
       if (error) {
-        console.error("❌ Erro Supabase upload:", error.message);
-        throw new Error(error.message);
+        console.error("❌ Erro no upload:", error.message);
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 500 }
+        );
       }
 
-      const { data: publicUrl } = supabase.storage
-        .from("uploads")
-        .getPublicUrl(name);
-
-      uploaded.push({ name, url: publicUrl.publicUrl });
+      // gera URL pública
+      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/uploads/${uniqueName}`;
+      uploaded.push({ name: uniqueName, url });
     }
 
-    console.log("✅ Upload concluído:", uploaded);
     return NextResponse.json({
       success: true,
       count: uploaded.length,
       files: uploaded,
     });
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Erro interno";
-    console.error("🔥 Erro no upload:", errorMsg);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("🔥 Erro inesperado no /upload:", errorMessage);
     return NextResponse.json(
-      { success: false, error: errorMsg },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }

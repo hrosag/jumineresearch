@@ -22,56 +22,80 @@ export default function FileList({
   handleDepurar,
   handleDelete,
 }: FileListProps) {
-  const allSelected = files.length > 0 && checked.length === files.length;
+  // marcar/desmarcar todos
+  const toggleAll = () => {
+    if (checked.length === files.length) {
+      handleUncheckAll();
+    } else {
+      handleCheckAll();
+    }
+  };
+
+  const handleCheckAll = () => {
+    files.forEach((f) => {
+      if (!checked.includes(f.name)) {
+        toggleCheck(f.name);
+      }
+    });
+  };
+
+  const handleUncheckAll = () => {
+    files.forEach((f) => {
+      if (checked.includes(f.name)) {
+        toggleCheck(f.name);
+      }
+    });
+  };
 
   return (
     <div className="mt-6 bg-white p-4 rounded-lg shadow">
       <h2 className="font-semibold mb-2">🌐 Arquivos enviados:</h2>
 
-      {/* checkbox selecionar todos */}
-      <div className="flex items-center mb-3">
-        <input
-          type="checkbox"
-          checked={allSelected}
-          onChange={() => {
-            if (allSelected) {
-              handleDelete([]); // limpa seleção
-            } else {
-              const allNames = files.map((f) => f.name);
-              // força todos como selecionados
-              allNames.forEach((n) => {
-                if (!checked.includes(n)) toggleCheck(n);
-              });
-            }
-          }}
-        />
-        <span className="ml-2 text-sm font-medium">Selecionar todos</span>
-      </div>
+      {files.length > 0 && (
+        <>
+          <label className="flex items-center space-x-2 mb-3">
+            <input
+              type="checkbox"
+              checked={checked.length === files.length}
+              onChange={toggleAll}
+            />
+            <span>Selecionar todos</span>
+          </label>
 
-      {/* botões de ação em massa */}
-      {checked.length > 0 && (
-        <div className="mb-3 flex space-x-2">
-          <button
-            onClick={() => handleDepurar(checked)}
-            className="px-3 py-1 bg-green-600 text-white text-sm rounded"
-          >
-            Depurar Selecionados
-          </button>
-          <button
-            onClick={() => handleDelete(checked)}
-            className="px-3 py-1 bg-red-600 text-white text-sm rounded"
-          >
-            Deletar Selecionados
-          </button>
-        </div>
+          <div className="mb-4 flex space-x-2">
+            <button
+              onClick={() => handleDepurar(checked)}
+              disabled={checked.length === 0}
+              className={`px-3 py-1 rounded ${
+                checked.length === 0
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-green-600 text-white"
+              }`}
+            >
+              Depurar Selecionados
+            </button>
+
+            <button
+              onClick={() => handleDelete(checked)}
+              disabled={checked.length === 0}
+              className={`px-3 py-1 rounded ${
+                checked.length === 0
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-red-600 text-white"
+              }`}
+            >
+              Deletar Selecionados
+            </button>
+          </div>
+        </>
       )}
 
-      {/* lista de arquivos */}
-      <ul className="space-y-2 text-sm">
+      {/* Lista de arquivos */}
+      <ul className="space-y-2">
         {files.map((file) => (
           <li
             key={file.name}
-            className="flex justify-between items-center bg-gray-50 p-3 rounded"
+            className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded"
           >
             <div className="flex items-center space-x-2">
               <input
@@ -83,14 +107,15 @@ export default function FileList({
                 href={file.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:underline"
+                className="text-blue-600 underline"
               >
                 {file.name}
               </a>
             </div>
-            <div className="flex space-x-2 items-center">
+
+            <div className="flex items-center space-x-2">
               <span
-                className={`text-xs px-2 py-1 rounded ${
+                className={`px-2 py-1 rounded text-xs ${
                   file.status === "processado"
                     ? "bg-green-200 text-green-800"
                     : file.status === "removido"
@@ -98,17 +123,19 @@ export default function FileList({
                     : "bg-yellow-200 text-yellow-800"
                 }`}
               >
-                {file.status}
+                {file.status || "pendente"}
               </span>
+
               <button
                 onClick={() => handleDepurar([file.name])}
-                className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
+                className="px-3 py-1 bg-green-500 text-white rounded"
               >
                 Depurar
               </button>
+
               <button
                 onClick={() => handleDelete([file.name])}
-                className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                className="px-3 py-1 bg-red-500 text-white rounded"
               >
                 Deletar
               </button>

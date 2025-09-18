@@ -11,11 +11,10 @@ type UploadedFile = {
 
 export default function DBAdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
 
-  // buscar arquivos já existentes
+  // fetch inicial dos arquivos
   useEffect(() => {
     const fetchFiles = async () => {
       try {
@@ -23,67 +22,55 @@ export default function DBAdminDashboard() {
         const data = await res.json();
         if (data.success) {
           setUploadedFiles(data.files);
-        } else {
-          console.error("⚠️ Erro ao listar arquivos:", data.error);
         }
       } catch (err) {
-        console.error("❌ Erro inesperado ao buscar arquivos:", err);
+        console.error("❌ Erro ao buscar arquivos:", err);
       }
     };
     fetchFiles();
   }, []);
 
-  // toggle dos checkboxes
+  // toggle de checkboxes individuais
   const toggleCheck = (name: string) => {
     setChecked((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
     );
   };
 
-  // depurar arquivos
+  // depurar em lote
   const handleDepurar = async (names: string[]) => {
-    for (const name of names) {
-      try {
-        const res = await fetch(`/api/dbadmin/depurar?file=${encodeURIComponent(name)}`, {
-          method: "POST",
-        });
-        const data = await res.json();
-        if (data.success) {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.name === name ? { ...f, status: "processado" } : f))
-          );
-        }
-      } catch (err) {
-        console.error("❌ Erro ao depurar:", err);
-      }
-    }
-    setChecked([]);
+    if (!names.length) return;
+    console.log("🚧 Depuração chamada para:", names);
+    // 👉 aqui entra a lógica real depois
   };
 
-  // deletar arquivos
+  // deletar em lote
   const handleDelete = async (names: string[]) => {
-    if (!confirm(`Tem certeza que deseja deletar ${names.length} arquivo(s)?`)) return;
+    if (!names.length) return;
+    if (!confirm(`Tem certeza que deseja deletar ${names.length} arquivo(s)?`))
+      return;
 
-    for (const name of names) {
-      try {
+    try {
+      for (const name of names) {
         const res = await fetch(`/api/dbadmin/delete?file=${encodeURIComponent(name)}`, {
           method: "DELETE",
         });
         const data = await res.json();
-
-        if (data.success) {
-          // remove do estado local
-          setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
+        if (!data.success) {
+          console.error("❌ Erro ao deletar", name, data.error);
         } else {
-          alert(`⚠️ Erro ao deletar ${name}: ${data.error}`);
+          console.log("✅ Arquivo deletado:", name);
         }
-      } catch (err) {
-        console.error("❌ Erro ao deletar:", err);
-        alert(`❌ Erro inesperado ao deletar ${name}`);
       }
-    }
 
-    setChecked([]);
+      // Atualiza a lista removendo os deletados
+      setUploadedFiles((prev) =>
+        prev.filter((f) => !names.includes(f.name))
+      );
+      setChecked([]); // limpa seleção
+    } catch (err) {
+      console.error("🔥 Erro no handleDelete:", err);
+    }
   };
 
   return (
@@ -98,15 +85,20 @@ export default function DBAdminDashboard() {
             ⚙️ Gestão do Banco de Dados (TSXV)
           </h1>
 
-          {/* lista de arquivos enviados */}
-          {uploadedFiles.length > 0 && (
-            <FileList
-              files={uploadedFiles}
-              checked={checked}
-              toggleCheck={toggleCheck}
-              handleDepurar={handleDepurar}
-              handleDelete={handleDelete}
-            />
+          {/* Lista de arquivos */}
+          <FileList
+            files={uploadedFiles}
+            checked={checked}
+            toggleCheck={toggleCheck}
+            handleDepurar={handleDepurar}
+            handleDelete={handleDelete}
+          />
+
+          {/* Mensagem quando não tiver nada */}
+          {uploadedFiles.length === 0 && (
+            <p className="mt-4 text-gray-500">
+              Nenhum arquivo enviado ainda. 🚀
+            </p>
           )}
         </main>
       )}

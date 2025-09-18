@@ -18,45 +18,22 @@ export async function DELETE(req: Request) {
       );
     }
 
-    // usa o nome exato retornado pelo /list
-    const fullPath = file;
+    console.log("🗑️ Tentando deletar arquivo:", file);
 
-    console.log("🗑️ Tentando deletar arquivo do bucket:", fullPath);
-
-    const { data, error } = await supabase.storage
-      .from("uploads")
-      .remove([fullPath]);
+    const { error } = await supabase.storage.from("uploads").remove([file]);
 
     if (error) {
       console.error("❌ Erro ao deletar:", error.message);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
-
-    if (!data || data.length === 0) {
-      // 👈 garante que só retorna sucesso se realmente removeu
-      console.warn("⚠️ Nenhum arquivo removido:", fullPath);
-      return NextResponse.json(
-        { success: false, error: "Arquivo não encontrado ou já removido" },
-        { status: 404 }
-      );
-    }
-
-    console.log("✅ Delete result:", data);
 
     return NextResponse.json({
       success: true,
-      message: `✅ Arquivo ${fullPath} removido com sucesso!`,
-      data,
+      message: `✅ Arquivo ${file} removido com sucesso!`,
     });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error("🔥 Erro no delete:", errorMessage);
-    return NextResponse.json(
-      { success: false, error: errorMessage || "Erro interno" },
-      { status: 500 }
-    );
+    console.error("🔥 Erro inesperado no /delete:", errorMessage);
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
