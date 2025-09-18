@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! // usando anon (já tem policy criada)
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 export async function DELETE(req: Request) {
@@ -18,8 +18,8 @@ export async function DELETE(req: Request) {
       );
     }
 
-    // caminho completo no bucket
-    const fullPath = file.startsWith("uploads/") ? file : `uploads/${file}`;
+    // 📂 agora usa o nome exato listado pelo GET
+    const fullPath = file;
 
     console.log("🗑️ Tentando deletar arquivo do bucket:", fullPath);
 

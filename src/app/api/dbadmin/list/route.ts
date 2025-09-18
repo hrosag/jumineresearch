@@ -27,8 +27,9 @@ export async function GET() {
 
       return {
         name: f.name,
-        path: f.name, // caminho relativo dentro do bucket
+        path: f.name, // caminho relativo no bucket
         url: publicUrl.publicUrl,
+        deleteUrl: `/api/dbadmin/delete?file=${encodeURIComponent(f.name)}`, // 🔗 pronto pra usar
         status: "pendente",
       };
     });
