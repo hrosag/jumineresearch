@@ -13,7 +13,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BUCKET = "uploads"
 
 # ---------------------------------------------------------------------
-# Regex e padrões – exatamente como no Python_Depurar original
+# Regex e padrões – conforme o parser original
 # ---------------------------------------------------------------------
 BULLETIN_TYPE_RE = re.compile(r'BULLETIN TYPE:\s*(.+)', re.IGNORECASE)
 BULLETIN_DATE_RE = re.compile(r'BULLETIN DATE:\s*(.+)', re.IGNORECASE)
@@ -33,7 +33,8 @@ TICK_ANYWHERE = [
 # Funções auxiliares
 # ---------------------------------------------------------------------
 def normalize_text(s: str) -> str:
-    if s is None: return ""
+    if s is None:
+        return ""
     s = unicodedata.normalize("NFKC", s)
     s = re.sub(r"[ \t]+", " ", s)
     return s.strip()
@@ -69,7 +70,9 @@ def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
         "bulletin_type": mtype.group(1).strip() if mtype else None,
         "bulletin_date": mdate.group(1).strip() if mdate else None,
         "tier": mtier.group(1).strip() if mtier else None,
-        "body_text": body
+        "body_text": body,
+        # chave composta em formato string única:
+        "composite_key": f"{source_file}#{block_id}"
     }
 
 # ---------------------------------------------------------------------
@@ -88,7 +91,6 @@ def main():
         if not f["name"].lower().endswith(".txt"):
             continue
 
-        # obtém URL pública e lê conteúdo diretamente em memória
         url = supabase.storage.from_(BUCKET).get_public_url(f["name"])
         print(f"📂 Processando {f['name']}")
         resp = requests.get(url)
@@ -105,11 +107,15 @@ def main():
     df = pd.DataFrame(rows)
     print(f"✅ Total de blocos processados: {len(df)}")
 
-    # Upsert para evitar duplicatas: chave = source_file + block_id
+    # IMPORTANTE: garanta que na tabela all_data exista:
+    #   composite_key TEXT UNIQUE
+    #   (pode ser criado via painel SQL):
+    #   ALTER TABLE all_data ADD COLUMN IF NOT EXISTS composite_key text UNIQUE;
+
     data = df.to_dict(orient="records")
     res = supabase.table("all_data").upsert(
         data,
-        on_conflict="all_data_source_block_unique"   # nome da UNIQUE constraint
+        on_conflict=["composite_key"]
     ).execute()
 
     if getattr(res, "error", None):
