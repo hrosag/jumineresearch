@@ -40,7 +40,7 @@ export default function DBAdminDashboard() {
   const handleDepurar = async (names: string[]) => {
     if (!names.length) return;
     console.log("Depuracao chamada para:", names);
-    // TODO: implementar chamada real
+    // TODO: implementar lógica real
   };
 
   const handleDelete = async (names: string[]) => {
@@ -78,7 +78,7 @@ export default function DBAdminDashboard() {
       ) : (
         <main className="flex-1 p-10">
           <h1 className="text-2xl font-bold mb-6">
-            Gestao do Banco de Dados (TSXV)
+            Gestão do Banco de Dados (TSXV)
           </h1>
 
           <UploadButton onUploadComplete={fetchFiles} />
