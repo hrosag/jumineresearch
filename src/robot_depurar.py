@@ -1,7 +1,6 @@
-import os
-from datetime import datetime
-
+import os, re, unicodedata
 import pandas as pd
+import requests
 from supabase import create_client
 
 # ---------------------------------------------------------------------
@@ -10,79 +9,113 @@ from supabase import create_client
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
-# cria cliente Supabase com permissão de service key
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+BUCKET = "uploads"
 
 # ---------------------------------------------------------------------
-# Função que processa um único arquivo .txt e devolve lista de dicts
-#   -> cada dict = uma linha para a tabela all_data
+# Regex e padrões – exatamente como no Python_Depurar original
 # ---------------------------------------------------------------------
-def parse_txt(content: str, source_file: str) -> list[dict]:
-    """
-    Exemplo didático: assume que cada bloco de 2 linhas no TXT contém:
-       1ª linha: nome da empresa
-       2ª linha: ticker
-    Ajuste esta função conforme a estrutura real dos boletins.
-    """
-    linhas = [l.strip() for l in content.splitlines() if l.strip()]
-    registros = []
-    block_id = 0
-    for i in range(0, len(linhas), 2):
-        try:
-            company = linhas[i]
-            ticker = linhas[i + 1] if i + 1 < len(linhas) else ""
-        except IndexError:
-            continue
+BULLETIN_TYPE_RE = re.compile(r'BULLETIN TYPE:\s*(.+)', re.IGNORECASE)
+BULLETIN_DATE_RE = re.compile(r'BULLETIN DATE:\s*(.+)', re.IGNORECASE)
+TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
+BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
 
-        registros.append({
-            "source_file": source_file,
-            "block_id": block_id,
-            "company": company,
-            "ticker": ticker,
-            "bulletin_type": "auto",            # ajuste conforme necessário
-            "bulletin_date": datetime.utcnow().date().isoformat(),
-            "tier": "parsed"
-        })
-        block_id += 1
-
-    return registros
+HEADER_PATTERNS = [
+    re.compile(r'^(.+?)\s*\(\s*"?([A-Z0-9][A-Z0-9\.\-]*)"?\s*\)$', re.IGNORECASE),
+    re.compile(r'^(.+?)\s*\(\s*(?:TSXV|TSX[-\s]?V)\s*:\s*([A-Z0-9][A-Z0-9\.\-]*)\s*\)$', re.IGNORECASE)
+]
+TICK_ANYWHERE = [
+    re.compile(r'"([A-Z0-9][A-Z0-9\.\-]*)"'),
+    re.compile(r'\(TSXV:\s*([A-Z0-9][A-Z0-9\.\-]*)\)')
+]
 
 # ---------------------------------------------------------------------
-# Função principal: lê todos os .txt no bucket "uploads" e grava no all_data
+# Funções auxiliares
+# ---------------------------------------------------------------------
+def normalize_text(s: str) -> str:
+    if s is None: return ""
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"[ \t]+", " ", s)
+    return s.strip()
+
+def parse_blocks(txt: str):
+    t = txt.replace("\r\n", "\n").replace("\r", "\n")
+    return [b.strip() for b in BLOCK_SPLITTER.split(t) if b.strip()]
+
+def extract_company_ticker(body: str):
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    for ln in lines[:5]:
+        for pat in HEADER_PATTERNS:
+            m = pat.match(ln)
+            if m:
+                return m.group(1).strip(), m.group(2).strip().upper()
+    for pat in TICK_ANYWHERE:
+        m = pat.search(body)
+        if m:
+            return None, m.group(1).strip().upper()
+    return None, None
+
+def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
+    body = normalize_text(b)
+    company, ticker = extract_company_ticker(body)
+    mtype = BULLETIN_TYPE_RE.search(body)
+    mdate = BULLETIN_DATE_RE.search(body)
+    mtier = TIER_RE.search(body)
+    return {
+        "source_file": source_file,
+        "block_id": block_id,
+        "company": company,
+        "ticker": ticker,
+        "bulletin_type": mtype.group(1).strip() if mtype else None,
+        "bulletin_date": mdate.group(1).strip() if mdate else None,
+        "tier": mtier.group(1).strip() if mtier else None,
+        "body_text": body
+    }
+
+# ---------------------------------------------------------------------
+# Pipeline principal
 # ---------------------------------------------------------------------
 def main():
-    print("🚀 Iniciando depuração…")
+    print("🚀 Iniciando depuração dos arquivos do bucket…")
 
-    # lista arquivos no bucket "uploads"
-    files = supabase.storage.from_("uploads").list()
+    files = supabase.storage.from_(BUCKET).list()
     if not files:
         print("⚠️ Nenhum arquivo encontrado no bucket 'uploads'.")
         return
 
-    total_registros = 0
-
+    rows = []
     for f in files:
         if not f["name"].lower().endswith(".txt"):
             continue
 
-        print(f"📂 Processando {f['name']}…")
-        # baixa o conteúdo do arquivo
-        data = supabase.storage.from_("uploads").download(f["name"])
-        text = data.decode("utf-8")
+        # obtém URL pública e lê conteúdo diretamente em memória
+        url = supabase.storage.from_(BUCKET).get_public_url(f["name"])
+        print(f"📂 Processando {f['name']}")
+        resp = requests.get(url)
+        resp.raise_for_status()
+        txt = resp.text
 
-        # faz o parse e monta os registros
-        registros = parse_txt(text, f["name"])
-        if not registros:
-            print(f"⚠️ Nenhum registro extraído de {f['name']}.")
-            continue
+        for i, b in enumerate(parse_blocks(txt), start=1):
+            rows.append(parse_one_block(b, f["name"], i))
 
-        # insere no Supabase
-        supabase.table("all_data").insert(registros).execute()
-        total_registros += len(registros)
-        print(f"✅ {len(registros)} registro(s) inserido(s) de {f['name']}.")
+    if not rows:
+        print("⚠️ Nenhum bloco processado.")
+        return
 
-    print(f"🏁 Concluído. Total de registros inseridos: {total_registros}")
+    df = pd.DataFrame(rows)
+    print(f"✅ Total de blocos processados: {len(df)}")
 
-# ---------------------------------------------------------------------
+    # Upsert para evitar duplicatas: chave = source_file + block_id
+    data = df.to_dict(orient="records")
+    res = supabase.table("all_data").upsert(
+        data,
+        on_conflict=["source_file", "block_id"]
+    ).execute()
+
+    if getattr(res, "error", None):
+        print("❌ Erro no upsert:", res.error)
+    else:
+        print("🚀 Upsert concluído com sucesso!")
+
 if __name__ == "__main__":
     main()
