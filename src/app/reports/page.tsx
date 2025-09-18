@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import {
   ResponsiveContainer,
@@ -22,19 +22,20 @@ type Row = {
   company: string | null
   ticker: string | null
   bulletin_type: string | null
-  bulletin_date: string | null   // formato ISO (YYYY-MM-DD) vindo do Supabase
+  bulletin_date: string | null
+  body_text: string | null        // <<< NOVO campo para texto completo
 }
 
 export default function ReportsPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
+  const [selectedCompany, setSelectedCompany] = useState<string>('')
 
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
         .from('all_data')
-        .select('id, company, ticker, bulletin_type, bulletin_date')
+        .select('id, company, ticker, bulletin_type, bulletin_date, body_text')
       if (error) console.error(error)
       else setRows(data as Row[])
       setLoading(false)
@@ -42,78 +43,78 @@ export default function ReportsPage() {
     fetchData()
   }, [])
 
-  // lista de empresas únicas (ordenadas)
-  const companies = useMemo(
-    () =>
-      Array.from(
-        new Set(rows.map(r => r.company).filter((c): c is string => Boolean(c)))
-      ).sort(),
-    [rows]
-  )
-
-  // filtro por empresa (se nada selecionado mostra tudo)
-  const filtered = useMemo(
-    () =>
-      rows.filter(r =>
-        selectedCompanies.length === 0
-          ? true
-          : selectedCompanies.includes(r.company ?? '')
-      ),
-    [rows, selectedCompanies]
-  )
-
-  // prepara dados pro gráfico: converte data em timestamp (com T00:00:00 para fuso local)
-  const chartData = useMemo(
-    () =>
-      filtered
-        .filter(r => r.company && r.bulletin_date)
-        .map(r => ({
-          company: r.company ?? '',
-          date: new Date(r.bulletin_date + 'T00:00:00').getTime(),
-          type: r.bulletin_type ?? '—'
-        })),
-    [filtered]
-  )
-
-  // eventos ordenados por data real
-  const events = useMemo(
-    () =>
-      [...filtered].sort(
-        (a, b) =>
-          new Date(a.bulletin_date ?? 0).getTime() -
-          new Date(b.bulletin_date ?? 0).getTime()
-      ),
-    [filtered]
-  )
-
   if (loading) return <p className="p-4">Carregando…</p>
 
+  // lista de empresas únicas (ordenadas)
+  const companies = Array.from(new Set(rows.map(r => r.company).filter(Boolean))).sort()
+
+  // filtro
+  const filtered = rows.filter(r =>
+    selectedCompany ? r.company === selectedCompany : true
+  )
+
+  // macro-dados (mesmo modelo do Streamlit)
+  const boletins = filtered.length
+  const empresas = new Set(filtered.map(r => r.company)).size
+  const tipos = new Set(filtered.map(r => r.bulletin_type)).size
+  const avisos = filtered.filter(r => !r.company).length
+
+  // dados para o gráfico: X = tempo, Y = empresa (fixa)
+  const chartData = filtered
+    .filter(r => r.bulletin_date)
+    .map(r => ({
+      company: selectedCompany || r.company || '',
+      date: new Date(r.bulletin_date + 'T00:00:00').getTime(),
+      type: r.bulletin_type ?? '—'
+    }))
+
+  // eventos ordenados por data
+  const events = [...filtered].sort((a, b) =>
+    (a.bulletin_date ?? '').localeCompare(b.bulletin_date ?? '')
+  )
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">
-        TSXV 2008 — Storytelling por Empresa
-      </h1>
+    <div className="p-6 space-y-6">
+      <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
 
-      {/* Filtro por empresa(s) */}
-      <label className="font-semibold">Filtrar por empresa(s)</label>
-      <select
-        multiple
-        value={selectedCompanies}
-        onChange={e =>
-          setSelectedCompanies(
-            Array.from(e.target.selectedOptions).map(o => o.value)
-          )
-        }
-        className="border rounded w-full mb-6 h-32 p-2"
-      >
-        {companies.map(c => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
+      {/* --- Painel macro --- */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center font-semibold">
+        <div>
+          <div className="text-3xl">{boletins}</div>
+          <div className="text-sm text-gray-600">Boletins no filtro</div>
+        </div>
+        <div>
+          <div className="text-3xl">{empresas}</div>
+          <div className="text-sm text-gray-600">Empresas distintas</div>
+        </div>
+        <div>
+          <div className="text-3xl">{tipos}</div>
+          <div className="text-sm text-gray-600">Tipos de boletim distintos</div>
+        </div>
+        <div>
+          <div className="text-3xl">{avisos}</div>
+          <div className="text-sm text-gray-600">Avisos gerais (no filtro)</div>
+        </div>
+      </div>
 
-      {/* Timeline */}
+      {/* --- Filtro de empresa --- */}
+      <div>
+        <label className="block font-semibold mb-1">Selecionar empresa</label>
+        <select
+          value={selectedCompany}
+          onChange={(e) => setSelectedCompany(e.target.value)}
+          className="border rounded p-2 w-full max-w-xl"
+        >
+          <option value="">Todas</option>
+          {companies.map(c => (
+            <option key={c ?? ''} value={c ?? ''}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* --- Timeline --- */}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <XAxis
@@ -123,7 +124,8 @@ export default function ReportsPage() {
             domain={['auto', 'auto']}
             tickFormatter={(ts) => new Date(ts).toLocaleDateString('pt-BR')}
           />
-          <YAxis type="category" dataKey="company" name="Empresa" />
+          {/* Y sem labels de empresa */}
+          <YAxis type="category" dataKey="company" hide />
           <Tooltip
             cursor={{ strokeDasharray: '3 3' }}
             formatter={(value, name) =>
@@ -137,19 +139,20 @@ export default function ReportsPage() {
         </ScatterChart>
       </ResponsiveContainer>
 
-      {/* Lista de eventos ordenados */}
+      {/* --- Lista de eventos --- */}
       <div className="mt-8">
         <h2 className="text-xl font-bold mb-2">Eventos (ordenados por data)</h2>
         {events.map(ev => (
           <details key={ev.id} className="mb-2 border-b pb-1">
-            <summary>
+            <summary className="cursor-pointer">
               {ev.bulletin_date
                 ? new Date(ev.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
-                : ''}{' '}
-              — {ev.bulletin_type}
+                : ''} — {ev.bulletin_type}
             </summary>
-            <div className="pl-4 text-sm text-gray-700">
-              {ev.company} ({ev.ticker})
+            <div className="pl-4 text-sm text-gray-700 whitespace-pre-wrap">
+              <p className="font-semibold">{ev.company} ({ev.ticker})</p>
+              {/* corpo completo do boletim */}
+              {ev.body_text ?? '(sem texto)'}
             </div>
           </details>
         ))}
