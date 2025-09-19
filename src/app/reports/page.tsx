@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import Select from 'react-select'
+import Select, { MultiValue } from 'react-select'
 import {
   ResponsiveContainer,
   ScatterChart,
@@ -12,13 +12,17 @@ import {
   Legend
 } from 'recharts'
 
-// --- Supabase client --------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Conexão Supabase
+// -----------------------------------------------------------------------------
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// --- Tipos ------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Tipos
+// -----------------------------------------------------------------------------
 type Row = {
   id: number
   company: string | null
@@ -28,23 +32,24 @@ type Row = {
   body_text: string | null
 }
 
+type CompanyOption = { value: string; label: string }
+
+// -----------------------------------------------------------------------------
+// Componente principal
+// -----------------------------------------------------------------------------
 export default function ReportsPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
 
-  // --------------------------------------------------------------------------
   // Carrega dados do Supabase
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
         .from('all_data')
         .select('id, company, ticker, bulletin_type, bulletin_date, body_text')
-      if (error) {
-        console.error(error)
-      } else {
-        setRows(data as Row[])
-      }
+      if (error) console.error(error)
+      else setRows(data as Row[])
       setLoading(false)
     }
     fetchData()
@@ -55,14 +60,14 @@ export default function ReportsPage() {
     new Set(rows.map(r => r.company).filter(Boolean))
   ).sort() as string[]
 
-  // Aplica filtro (ou mostra tudo se nada selecionado)
+  // Filtro por empresa (se nada selecionado mostra tudo)
   const filtered = rows.filter(r =>
     selectedCompanies.length === 0
       ? true
       : selectedCompanies.includes(r.company ?? '')
   )
 
-  // Dados do gráfico: converte data para timestamp p/ eixo X
+  // Dados do gráfico: data -> timestamp p/ eixo X
   const chartData = filtered
     .filter(r => r.bulletin_date && r.company)
     .map(r => ({
@@ -71,12 +76,12 @@ export default function ReportsPage() {
       type: r.bulletin_type ?? '—'
     }))
 
-  // Eventos em ordem cronológica
+  // Eventos ordenados por data
   const events = [...filtered].sort((a, b) =>
     (a.bulletin_date ?? '').localeCompare(b.bulletin_date ?? '')
   )
 
-  // Estatísticas “macro”
+  // Estatísticas macro
   const macro = {
     boletins: filtered.length,
     empresas: new Set(filtered.map(r => r.company)).size,
@@ -86,12 +91,13 @@ export default function ReportsPage() {
 
   if (loading) return <p className="p-4">Carregando…</p>
 
-  // --------------------------------------------------------------------------
   return (
     <div className="p-6">
       {/* Cabeçalho + botão Gerar Story */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
+        <h1 className="text-2xl font-bold">
+          TSXV 2008 — Storytelling por Empresa
+        </h1>
 
         {selectedCompanies.length === 1 && (
           <a
@@ -125,10 +131,10 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* --- Dropdown de seleção (react-select) ----------------------------- */}
+      {/* Dropdown de seleção (react-select) */}
       <div className="mb-6">
         <label className="font-semibold block mb-2">Selecionar empresa(s)</label>
-        <Select
+        <Select<CompanyOption, true>
           isMulti
           options={[
             { value: '*ALL*', label: 'Selecionar todas' },
@@ -139,8 +145,8 @@ export default function ReportsPage() {
               ? [{ value: '*ALL*', label: 'Selecionar todas' }]
               : selectedCompanies.map(c => ({ value: c, label: c }))
           }
-          onChange={(selected) => {
-            const vals = (selected ?? []).map((s: any) => s.value)
+          onChange={(selected: MultiValue<CompanyOption>) => {
+            const vals = (selected ?? []).map(s => s.value)
             if (vals.includes('*ALL*')) {
               setSelectedCompanies(companies)
             } else {
@@ -152,7 +158,7 @@ export default function ReportsPage() {
         />
       </div>
 
-      {/* ---- Timeline (sem YAxis de empresa) ---- */}
+      {/* Timeline (sem eixo Y de empresa) */}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <XAxis
@@ -160,11 +166,13 @@ export default function ReportsPage() {
             dataKey="date"
             name="Data"
             domain={['auto', 'auto']}
-            tickFormatter={ts => new Date(ts).toLocaleDateString('pt-BR')}
+            tickFormatter={(ts: number) =>
+              new Date(ts).toLocaleDateString('pt-BR')
+            }
           />
           <Tooltip
             cursor={{ strokeDasharray: '3 3' }}
-            formatter={(value, name) =>
+            formatter={(value: number | string, name: string) =>
               name === 'date'
                 ? new Date(value as number).toLocaleDateString('pt-BR')
                 : value
