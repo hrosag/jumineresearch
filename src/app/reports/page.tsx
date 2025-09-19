@@ -7,18 +7,15 @@ import {
   ScatterChart,
   Scatter,
   XAxis,
-  YAxis,
   Tooltip,
   Legend
 } from 'recharts'
 
-// --- Supabase client --------------------------------------------------------
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// --- Tipos ------------------------------------------------------------------
 type Row = {
   id: number
   company: string | null
@@ -33,37 +30,28 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
 
-  // --------------------------------------------------------------------------
-  // Carrega dados do Supabase
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
         .from('all_data')
         .select('id, company, ticker, bulletin_type, bulletin_date, body_text')
-      if (error) {
-        console.error(error)
-      } else {
-        setRows(data as Row[])
-      }
+      if (error) console.error(error)
+      else setRows(data as Row[])
       setLoading(false)
     }
     fetchData()
   }, [])
 
-  // --------------------------------------------------------------------------
-  // Empresas únicas (ordenadas) para o filtro
   const companies = Array.from(
     new Set(rows.map(r => r.company).filter(Boolean))
   ).sort() as string[]
 
-  // Aplica filtro (ou mostra tudo se nada selecionado)
   const filtered = rows.filter(r =>
     selectedCompanies.length === 0
       ? true
       : selectedCompanies.includes(r.company ?? '')
   )
 
-  // Dados do gráfico: converte data para timestamp p/ eixo X
   const chartData = filtered
     .filter(r => r.bulletin_date && r.company)
     .map(r => ({
@@ -72,12 +60,10 @@ export default function ReportsPage() {
       type: r.bulletin_type ?? '—'
     }))
 
-  // Eventos em ordem cronológica
   const events = [...filtered].sort((a, b) =>
     (a.bulletin_date ?? '').localeCompare(b.bulletin_date ?? '')
   )
 
-  // Estatísticas “macro” como no layout do Streamlit
   const macro = {
     boletins: filtered.length,
     empresas: new Set(filtered.map(r => r.company)).size,
@@ -87,13 +73,11 @@ export default function ReportsPage() {
 
   if (loading) return <p className="p-4">Carregando…</p>
 
-  // --------------------------------------------------------------------------
   return (
     <div className="p-6">
       {/* Cabeçalho + botão Gerar Story */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
-
         {selectedCompanies.length === 1 && (
           <a
             href={`/api/reports/story?company=${encodeURIComponent(
@@ -106,44 +90,53 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {/* Painel de estatísticas macro */}
+      {/* Estatísticas macro */}
       <div className="grid grid-cols-4 gap-4 text-center mb-6">
-        <div>
-          <div className="text-3xl font-bold">{macro.boletins}</div>
-          <div className="text-sm">Boletins no filtro</div>
-        </div>
-        <div>
-          <div className="text-3xl font-bold">{macro.empresas}</div>
-          <div className="text-sm">Empresas distintas</div>
-        </div>
-        <div>
-          <div className="text-3xl font-bold">{macro.tipos}</div>
-          <div className="text-sm">Tipos de boletim distintos</div>
-        </div>
-        <div>
-          <div className="text-3xl font-bold">{macro.avisosGerais}</div>
-          <div className="text-sm">Avisos gerais (no filtro)</div>
+        <div><div className="text-3xl font-bold">{macro.boletins}</div><div className="text-sm">Boletins no filtro</div></div>
+        <div><div className="text-3xl font-bold">{macro.empresas}</div><div className="text-sm">Empresas distintas</div></div>
+        <div><div className="text-3xl font-bold">{macro.tipos}</div><div className="text-sm">Tipos de boletim distintos</div></div>
+        <div><div className="text-3xl font-bold">{macro.avisosGerais}</div><div className="text-sm">Avisos gerais (no filtro)</div></div>
+      </div>
+
+      {/* Filtro com checkbox + Selecionar todas */}
+      <div className="mb-6">
+        <label className="font-semibold block mb-2">Selecionar empresa(s)</label>
+        <div className="space-y-1">
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={selectedCompanies.length === companies.length}
+              onChange={e => {
+                if (e.target.checked) setSelectedCompanies(companies)
+                else setSelectedCompanies([])
+              }}
+            />
+            Selecionar todas
+          </label>
+          {companies.map(c => (
+            <label key={c} className="flex items-center">
+              <input
+                type="checkbox"
+                className="mr-2"
+                value={c}
+                checked={selectedCompanies.includes(c)}
+                onChange={e => {
+                  const val = e.target.value
+                  setSelectedCompanies(prev =>
+                    prev.includes(val)
+                      ? prev.filter(x => x !== val)
+                      : [...prev, val]
+                  )
+                }}
+              />
+              {c}
+            </label>
+          ))}
         </div>
       </div>
 
-      {/* Filtro de empresas */}
-      <label className="font-semibold">Selecionar empresa(s)</label>
-      <select
-        multiple
-        value={selectedCompanies}
-        onChange={e =>
-          setSelectedCompanies(
-            Array.from(e.target.selectedOptions).map(o => o.value)
-          )
-        }
-        className="border rounded w-full mb-6 h-32 p-2"
-      >
-        {companies.map(c => (
-          <option key={c} value={c}>{c}</option>
-        ))}
-      </select>
-
-      {/* Timeline */}
+      {/* Timeline sem nomes de empresa no eixo Y */}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <XAxis
@@ -153,7 +146,6 @@ export default function ReportsPage() {
             domain={['auto', 'auto']}
             tickFormatter={ts => new Date(ts).toLocaleDateString('pt-BR')}
           />
-          <YAxis type="category" dataKey="company" name="Empresa" />
           <Tooltip
             cursor={{ strokeDasharray: '3 3' }}
             formatter={(value, name) =>
