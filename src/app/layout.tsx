@@ -33,6 +33,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               📊 Reports
             </Link>
             <Link
+              href="/warnings"
+              className="flex items-center gap-2 hover:bg-yellow-400 hover:text-black px-2 py-1 rounded-md transition-colors"
+            >
+              ⚠️ Database Warning
+            </Link>
+            <Link
               href="/about"
               className="flex items-center gap-2 hover:bg-yellow-400 hover:text-black px-2 py-1 rounded-md transition-colors"
             >
