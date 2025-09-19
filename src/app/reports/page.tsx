@@ -12,11 +12,13 @@ import {
   Legend
 } from 'recharts'
 
+// --- Supabase client --------------------------------------------------------
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+// --- Tipos ------------------------------------------------------------------
 type Row = {
   id: number
   company: string | null
@@ -31,31 +33,37 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
 
+  // --------------------------------------------------------------------------
+  // Carrega dados do Supabase
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
         .from('all_data')
         .select('id, company, ticker, bulletin_type, bulletin_date, body_text')
-      if (error) console.error(error)
-      else setRows(data as Row[])
+      if (error) {
+        console.error(error)
+      } else {
+        setRows(data as Row[])
+      }
       setLoading(false)
     }
     fetchData()
   }, [])
 
-  // lista de empresas únicas ordenadas
+  // --------------------------------------------------------------------------
+  // Empresas únicas (ordenadas) para o filtro
   const companies = Array.from(
     new Set(rows.map(r => r.company).filter(Boolean))
-  ).sort()
+  ).sort() as string[]
 
-  // aplica filtro de empresa (ou mostra tudo se nenhuma selecionada)
+  // Aplica filtro (ou mostra tudo se nada selecionado)
   const filtered = rows.filter(r =>
     selectedCompanies.length === 0
       ? true
       : selectedCompanies.includes(r.company ?? '')
   )
 
-  // prepara dados pro gráfico: data em timestamp para eixo X
+  // Dados do gráfico: converte data para timestamp p/ eixo X
   const chartData = filtered
     .filter(r => r.bulletin_date && r.company)
     .map(r => ({
@@ -64,21 +72,28 @@ export default function ReportsPage() {
       type: r.bulletin_type ?? '—'
     }))
 
-  // eventos ordenados por data
+  // Eventos em ordem cronológica
   const events = [...filtered].sort((a, b) =>
     (a.bulletin_date ?? '').localeCompare(b.bulletin_date ?? '')
   )
 
+  // Estatísticas “macro” como no layout do Streamlit
+  const macro = {
+    boletins: filtered.length,
+    empresas: new Set(filtered.map(r => r.company)).size,
+    tipos: new Set(filtered.map(r => r.bulletin_type)).size,
+    avisosGerais: filtered.filter(r => !r.company).length
+  }
+
   if (loading) return <p className="p-4">Carregando…</p>
 
+  // --------------------------------------------------------------------------
   return (
     <div className="p-6">
+      {/* Cabeçalho + botão Gerar Story */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">
-          TSXV 2008 — Storytelling por Empresa
-        </h1>
+        <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
 
-        {/* Botão Gerar Story: só aparece se exatamente 1 empresa estiver selecionada */}
         {selectedCompanies.length === 1 && (
           <a
             href={`/api/reports/story?company=${encodeURIComponent(
@@ -91,8 +106,28 @@ export default function ReportsPage() {
         )}
       </div>
 
+      {/* Painel de estatísticas macro */}
+      <div className="grid grid-cols-4 gap-4 text-center mb-6">
+        <div>
+          <div className="text-3xl font-bold">{macro.boletins}</div>
+          <div className="text-sm">Boletins no filtro</div>
+        </div>
+        <div>
+          <div className="text-3xl font-bold">{macro.empresas}</div>
+          <div className="text-sm">Empresas distintas</div>
+        </div>
+        <div>
+          <div className="text-3xl font-bold">{macro.tipos}</div>
+          <div className="text-sm">Tipos de boletim distintos</div>
+        </div>
+        <div>
+          <div className="text-3xl font-bold">{macro.avisosGerais}</div>
+          <div className="text-sm">Avisos gerais (no filtro)</div>
+        </div>
+      </div>
+
       {/* Filtro de empresas */}
-      <label className="font-semibold">Filtrar por empresa(s)</label>
+      <label className="font-semibold">Selecionar empresa(s)</label>
       <select
         multiple
         value={selectedCompanies}
@@ -104,9 +139,7 @@ export default function ReportsPage() {
         className="border rounded w-full mb-6 h-32 p-2"
       >
         {companies.map(c => (
-          <option key={c ?? ''} value={c ?? ''}>
-            {c}
-          </option>
+          <option key={c} value={c}>{c}</option>
         ))}
       </select>
 
@@ -134,11 +167,9 @@ export default function ReportsPage() {
         </ScatterChart>
       </ResponsiveContainer>
 
-      {/* Lista de eventos ordenados */}
+      {/* Lista de eventos */}
       <div className="mt-8">
-        <h2 className="text-xl font-bold mb-2">
-          Eventos (ordenados por data)
-        </h2>
+        <h2 className="text-xl font-bold mb-2">Eventos (ordenados por data)</h2>
         {events.map(ev => (
           <details key={ev.id} className="mb-2 border-b pb-1">
             <summary>
