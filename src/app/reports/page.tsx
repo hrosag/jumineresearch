@@ -23,13 +23,13 @@ type Row = {
   ticker: string | null
   bulletin_type: string | null
   bulletin_date: string | null
-  body_text: string | null        // <<< NOVO campo para texto completo
+  body_text: string | null
 }
 
 export default function ReportsPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedCompany, setSelectedCompany] = useState<string>('')
+  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
 
   useEffect(() => {
     async function fetchData() {
@@ -43,27 +43,23 @@ export default function ReportsPage() {
     fetchData()
   }, [])
 
-  if (loading) return <p className="p-4">Carregando…</p>
+  // lista de empresas únicas ordenadas
+  const companies = Array.from(
+    new Set(rows.map(r => r.company).filter(Boolean))
+  ).sort()
 
-  // lista de empresas únicas (ordenadas)
-  const companies = Array.from(new Set(rows.map(r => r.company).filter(Boolean))).sort()
-
-  // filtro
+  // aplica filtro de empresa (ou mostra tudo se nenhuma selecionada)
   const filtered = rows.filter(r =>
-    selectedCompany ? r.company === selectedCompany : true
+    selectedCompanies.length === 0
+      ? true
+      : selectedCompanies.includes(r.company ?? '')
   )
 
-  // macro-dados (mesmo modelo do Streamlit)
-  const boletins = filtered.length
-  const empresas = new Set(filtered.map(r => r.company)).size
-  const tipos = new Set(filtered.map(r => r.bulletin_type)).size
-  const avisos = filtered.filter(r => !r.company).length
-
-  // dados para o gráfico: X = tempo, Y = empresa (fixa)
+  // prepara dados pro gráfico: data em timestamp para eixo X
   const chartData = filtered
-    .filter(r => r.bulletin_date)
+    .filter(r => r.bulletin_date && r.company)
     .map(r => ({
-      company: selectedCompany || r.company || '',
+      company: r.company!,
       date: new Date(r.bulletin_date + 'T00:00:00').getTime(),
       type: r.bulletin_type ?? '—'
     }))
@@ -73,48 +69,48 @@ export default function ReportsPage() {
     (a.bulletin_date ?? '').localeCompare(b.bulletin_date ?? '')
   )
 
+  if (loading) return <p className="p-4">Carregando…</p>
+
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">
+          TSXV 2008 — Storytelling por Empresa
+        </h1>
 
-      {/* --- Painel macro --- */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center font-semibold">
-        <div>
-          <div className="text-3xl">{boletins}</div>
-          <div className="text-sm text-gray-600">Boletins no filtro</div>
-        </div>
-        <div>
-          <div className="text-3xl">{empresas}</div>
-          <div className="text-sm text-gray-600">Empresas distintas</div>
-        </div>
-        <div>
-          <div className="text-3xl">{tipos}</div>
-          <div className="text-sm text-gray-600">Tipos de boletim distintos</div>
-        </div>
-        <div>
-          <div className="text-3xl">{avisos}</div>
-          <div className="text-sm text-gray-600">Avisos gerais (no filtro)</div>
-        </div>
+        {/* Botão Gerar Story: só aparece se exatamente 1 empresa estiver selecionada */}
+        {selectedCompanies.length === 1 && (
+          <a
+            href={`/api/reports/story?company=${encodeURIComponent(
+              selectedCompanies[0]
+            )}`}
+            className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-600"
+          >
+            📄 Gerar Story
+          </a>
+        )}
       </div>
 
-      {/* --- Filtro de empresa --- */}
-      <div>
-        <label className="block font-semibold mb-1">Selecionar empresa</label>
-        <select
-          value={selectedCompany}
-          onChange={(e) => setSelectedCompany(e.target.value)}
-          className="border rounded p-2 w-full max-w-xl"
-        >
-          <option value="">Todas</option>
-          {companies.map(c => (
-            <option key={c ?? ''} value={c ?? ''}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* Filtro de empresas */}
+      <label className="font-semibold">Filtrar por empresa(s)</label>
+      <select
+        multiple
+        value={selectedCompanies}
+        onChange={e =>
+          setSelectedCompanies(
+            Array.from(e.target.selectedOptions).map(o => o.value)
+          )
+        }
+        className="border rounded w-full mb-6 h-32 p-2"
+      >
+        {companies.map(c => (
+          <option key={c ?? ''} value={c ?? ''}>
+            {c}
+          </option>
+        ))}
+      </select>
 
-      {/* --- Timeline --- */}
+      {/* Timeline */}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <XAxis
@@ -122,10 +118,9 @@ export default function ReportsPage() {
             dataKey="date"
             name="Data"
             domain={['auto', 'auto']}
-            tickFormatter={(ts) => new Date(ts).toLocaleDateString('pt-BR')}
+            tickFormatter={ts => new Date(ts).toLocaleDateString('pt-BR')}
           />
-          {/* Y sem labels de empresa */}
-          <YAxis type="category" dataKey="company" hide />
+          <YAxis type="category" dataKey="company" name="Empresa" />
           <Tooltip
             cursor={{ strokeDasharray: '3 3' }}
             formatter={(value, name) =>
@@ -139,20 +134,21 @@ export default function ReportsPage() {
         </ScatterChart>
       </ResponsiveContainer>
 
-      {/* --- Lista de eventos --- */}
+      {/* Lista de eventos ordenados */}
       <div className="mt-8">
-        <h2 className="text-xl font-bold mb-2">Eventos (ordenados por data)</h2>
+        <h2 className="text-xl font-bold mb-2">
+          Eventos (ordenados por data)
+        </h2>
         {events.map(ev => (
           <details key={ev.id} className="mb-2 border-b pb-1">
-            <summary className="cursor-pointer">
+            <summary>
               {ev.bulletin_date
                 ? new Date(ev.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
-                : ''} — {ev.bulletin_type}
+                : ''}{' '}
+              — {ev.bulletin_type}
             </summary>
             <div className="pl-4 text-sm text-gray-700 whitespace-pre-wrap">
-              <p className="font-semibold">{ev.company} ({ev.ticker})</p>
-              {/* corpo completo do boletim */}
-              {ev.body_text ?? '(sem texto)'}
+              {ev.body_text}
             </div>
           </details>
         ))}
