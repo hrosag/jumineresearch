@@ -8,17 +8,16 @@ import {
   ScatterChart,
   Scatter,
   XAxis,
+  YAxis,
   Tooltip,
   Legend
 } from 'recharts'
 
-// --- Supabase client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// --- Tipos
 type Row = {
   id: number
   company: string | null
@@ -27,6 +26,7 @@ type Row = {
   bulletin_date: string | null
   body_text: string | null
 }
+
 type CompanyOption = { value: string; label: string }
 
 export default function ReportsPage() {
@@ -34,7 +34,6 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
 
-  // ---- Carrega dados
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
@@ -47,32 +46,28 @@ export default function ReportsPage() {
     fetchData()
   }, [])
 
-  // ---- Lista de empresas únicas
-  const companies = Array.from(new Set(rows.map(r => r.company).filter(Boolean)))
-    .sort() as string[]
+  const companies = Array.from(
+    new Set(rows.map(r => r.company).filter(Boolean))
+  ).sort() as string[]
 
-  // ---- Filtro
   const filtered = rows.filter(r =>
     selectedCompanies.length === 0
       ? true
       : selectedCompanies.includes(r.company ?? '')
   )
 
-  // ---- Dados p/ gráfico
   const chartData = filtered
-    .filter(r => r.bulletin_date)
+    .filter(r => r.bulletin_date && r.company)
     .map(r => ({
-      company: r.company ?? '',
-      date: new Date(r.bulletin_date! + 'T00:00:00').getTime(),
+      company: r.company!,
+      date: new Date(r.bulletin_date + 'T00:00:00').getTime(),
       type: r.bulletin_type ?? '—'
     }))
 
-  // ---- Eventos ordenados
   const events = [...filtered].sort((a, b) =>
     (a.bulletin_date ?? '').localeCompare(b.bulletin_date ?? '')
   )
 
-  // ---- Estatísticas macro
   const macro = {
     boletins: filtered.length,
     empresas: new Set(filtered.map(r => r.company)).size,
@@ -82,24 +77,19 @@ export default function ReportsPage() {
 
   if (loading) return <p className="p-4">Carregando…</p>
 
-  // ---- Monta link de geração:
-  // * se 1 empresa -> txt
-  // * se várias -> zip com todas
-  const storyLink =
-    selectedCompanies.length === 1
-      ? `/api/reports/story?company=${encodeURIComponent(selectedCompanies[0])}`
-      : selectedCompanies.length > 1
-      ? `/api/reports/story?multi=${encodeURIComponent(selectedCompanies.join(','))}`
-      : null
-
   return (
     <div className="p-6">
+      {/* Cabeçalho + botão Gerar Story */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
 
-        {storyLink && (
+        {selectedCompanies.length > 0 && (
           <a
-            href={storyLink}
+            href={
+              selectedCompanies.length === 1
+                ? `/api/reports/story?company=${encodeURIComponent(selectedCompanies[0])}`
+                : `/api/reports/story?multi=${encodeURIComponent(selectedCompanies.join(','))}`
+            }
             className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-600"
           >
             📄 Gerar Story
@@ -109,10 +99,22 @@ export default function ReportsPage() {
 
       {/* Painel macro */}
       <div className="grid grid-cols-4 gap-4 text-center mb-6">
-        <div><div className="text-3xl font-bold">{macro.boletins}</div><div className="text-sm">Boletins no filtro</div></div>
-        <div><div className="text-3xl font-bold">{macro.empresas}</div><div className="text-sm">Empresas distintas</div></div>
-        <div><div className="text-3xl font-bold">{macro.tipos}</div><div className="text-sm">Tipos de boletim distintos</div></div>
-        <div><div className="text-3xl font-bold">{macro.avisosGerais}</div><div className="text-sm">Avisos gerais (no filtro)</div></div>
+        <div>
+          <div className="text-3xl font-bold">{macro.boletins}</div>
+          <div className="text-sm">Boletins no filtro</div>
+        </div>
+        <div>
+          <div className="text-3xl font-bold">{macro.empresas}</div>
+          <div className="text-sm">Empresas distintas</div>
+        </div>
+        <div>
+          <div className="text-3xl font-bold">{macro.tipos}</div>
+          <div className="text-sm">Tipos de boletim distintos</div>
+        </div>
+        <div>
+          <div className="text-3xl font-bold">{macro.avisosGerais}</div>
+          <div className="text-sm">Avisos gerais (no filtro)</div>
+        </div>
       </div>
 
       {/* Dropdown react-select */}
@@ -131,16 +133,15 @@ export default function ReportsPage() {
           }
           onChange={(selected: MultiValue<CompanyOption>) => {
             const vals = (selected ?? []).map(s => s.value)
-            setSelectedCompanies(
-              vals.includes('*ALL*') ? companies : vals
-            )
+            if (vals.includes('*ALL*')) setSelectedCompanies(companies)
+            else setSelectedCompanies(vals)
           }}
           placeholder="Escolha as empresas…"
           className="text-black"
         />
       </div>
 
-      {/* Timeline */}
+      {/* Timeline com eixo Y ocultando labels */}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <XAxis
@@ -148,7 +149,15 @@ export default function ReportsPage() {
             dataKey="date"
             name="Data"
             domain={['auto', 'auto']}
-            tickFormatter={(ts: number) => new Date(ts).toLocaleDateString('pt-BR')}
+            tickFormatter={(ts: number) =>
+              new Date(ts).toLocaleDateString('pt-BR')
+            }
+          />
+          <YAxis
+            type="category"
+            dataKey="company"
+            tick={false}        // ← mantém eixo mas oculta rótulos
+            axisLine={false}
           />
           <Tooltip
             cursor={{ strokeDasharray: '3 3' }}
