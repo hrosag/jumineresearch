@@ -21,8 +21,10 @@ type Row = {
   tier: string | null;
 };
 
+type RowKey = keyof Row;
+
 type SortConfig = {
-  key: keyof Row | 'comment';
+  key: RowKey | 'comment';
   direction: 'asc' | 'desc';
 };
 
@@ -42,7 +44,7 @@ export default function WarningsPage() {
   });
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
-  // Carrega comentários e widths
+  // Carrega comentários e larguras do localStorage
   useEffect(() => {
     const stored = localStorage.getItem('warnings-comments');
     if (stored) setComments(JSON.parse(stored));
@@ -56,7 +58,7 @@ export default function WarningsPage() {
     localStorage.setItem('warnings-comments', JSON.stringify(comments));
   }, [comments]);
 
-  // Salva widths
+  // Salva larguras
   useEffect(() => {
     localStorage.setItem('warnings-colwidths', JSON.stringify(colWidths));
   }, [colWidths]);
@@ -89,18 +91,20 @@ export default function WarningsPage() {
 
   if (loading) return <p className="p-4">Carregando avisos…</p>;
 
-  // Ordenação manual
+  // Ordenação tipada
   const sortedRows = [...rows].sort((a, b) => {
     if (!sortConfig) return 0;
     const { key, direction } = sortConfig;
 
-    let valA: any, valB: any;
+    let valA: string | number | null;
+    let valB: string | number | null;
+
     if (key === 'comment') {
       valA = comments[a.id] || '';
       valB = comments[b.id] || '';
     } else {
-      valA = a[key] || '';
-      valB = b[key] || '';
+      valA = a[key as RowKey] ?? '';
+      valB = b[key as RowKey] ?? '';
     }
 
     if (typeof valA === 'string') valA = valA.toLowerCase();
@@ -111,7 +115,7 @@ export default function WarningsPage() {
     return 0;
   });
 
-  // Header redimensionável + clique para ordenar
+  // Header redimensionável + ordenação
   const ResizableHeader = ({ columnKey, label }: { columnKey: string; label: string }) => {
     const isSorted = sortConfig?.key === columnKey;
     const arrow = isSorted ? (sortConfig?.direction === 'asc' ? '▲' : '▼') : '';
@@ -132,8 +136,8 @@ export default function WarningsPage() {
             onClick={() => {
               setSortConfig((prev) =>
                 prev?.key === columnKey
-                  ? { key: columnKey as any, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
-                  : { key: columnKey as any, direction: 'asc' }
+                  ? { key: columnKey as SortConfig['key'], direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+                  : { key: columnKey as SortConfig['key'], direction: 'asc' }
               );
             }}
           >
@@ -146,7 +150,7 @@ export default function WarningsPage() {
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">⚠️ Avisos Internos</h1>
+      <h1 className="text-2xl font-bold mb-4">⚠️ Avisos</h1>
 
       {rows.length === 0 ? (
         <p className="text-green-600">Nenhum aviso encontrado 🎉</p>
@@ -168,7 +172,10 @@ export default function WarningsPage() {
             <tbody>
               {sortedRows.map((r) => (
                 <tr key={r.id} className="bg-red-50">
-                  <td className="border px-2 py-2 font-mono text-xs text-gray-600" style={{ minWidth: colWidths.composite_key }}>
+                  <td
+                    className="border px-2 py-2 font-mono text-xs text-gray-600"
+                    style={{ minWidth: colWidths.composite_key }}
+                  >
                     {r.composite_key}
                   </td>
                   <td className="border px-2 py-2" style={{ minWidth: colWidths.date }}>
