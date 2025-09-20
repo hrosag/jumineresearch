@@ -1,27 +1,25 @@
 name: Depurar TXT e gravar Supabase
 
 on:
-  workflow_dispatch:
-    inputs:
-      file:
-        description: 'Nome do arquivo .txt a processar'
-        required: true
+  workflow_dispatch:   # ← só disparo manual
 
 jobs:
   run-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Instalar dependências
         run: pip install -r requirements.txt
+
       - name: Executar script de depuração
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          FILE_NAME: ${{ github.event.inputs.file }}
         run: |
-          python src/robot_depurar.py
+          python src/robot_depurar.py   # <<< processa TODOS os arquivos do bucket
