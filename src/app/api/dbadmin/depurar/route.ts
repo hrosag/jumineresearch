@@ -1,8 +1,7 @@
-// src/app/api/dbadmin/depurar/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-// <<< AJUSTE >>> trocamos `any` por tipos corretos (NextRequest, NextResponse)
-export async function POST(_req: NextRequest) {
+// <<< AJUSTE >>> removido req não usado
+export async function POST() {
   try {
     const res = await fetch(
       "https://api.github.com/repos/hrosag/jumineresearch/actions/workflows/depurar.yml/dispatches",
@@ -12,9 +11,7 @@ export async function POST(_req: NextRequest) {
           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          ref: "main", // branch de disparo
-        }),
+        body: JSON.stringify({ ref: "main" }),
       }
     );
 
@@ -25,7 +22,6 @@ export async function POST(_req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    // <<< AJUSTE >>> tipagem sem any → convertemos para string
     return NextResponse.json(
       { success: false, error: String(err) },
       { status: 500 }
