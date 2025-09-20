@@ -1,47 +1,30 @@
 import { NextResponse } from "next/server";
 
-export async function POST(req: Request) {
+export async function POST() {
   try {
-    const { searchParams } = new URL(req.url);
-    const file = searchParams.get("file");
-
-    if (!file) {
-      return NextResponse.json(
-        { success: false, error: "Nome do arquivo não informado" },
-        { status: 400 }
-      );
-    }
-
-    // Dispara workflow do GitHub que roda o script Python
-    const ghResp = await fetch(
+    const res = await fetch(
       "https://api.github.com/repos/hrosag/jumineresearch/actions/workflows/depurar.yml/dispatches",
       {
         method: "POST",
         headers: {
-          "Accept": "application/vnd.github+json",
-          "Authorization": `Bearer ${process.env.GITHUB_TOKEN}`,
+          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ref: "main",
-          inputs: { file }  // <- input definido no depurar.yml
+          ref: "main", // <<< AJUSTE >>> sempre branch main
         }),
       }
     );
 
-    if (!ghResp.ok) {
-      const text = await ghResp.text();
-      throw new Error(`Falha ao disparar workflow: ${text}`);
+    if (!res.ok) {
+      const txt = await res.text();
+      return NextResponse.json({ success: false, error: txt }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: `Workflow de depuração disparado para ${file}`,
-    });
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error("🔥 Erro no depurar:", errorMessage);
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
     return NextResponse.json(
-      { success: false, error: errorMessage || "Erro interno" },
+      { success: false, error: err.message },
       { status: 500 }
     );
   }

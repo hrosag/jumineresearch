@@ -39,32 +39,22 @@ export default function DBAdminDashboard() {
     );
   };
 
-  // ======= ✅ AGORA IMPLEMENTADO DE FATO =======
-  const handleDepurar = async (names: string[]) => {
-    if (!names.length) return;
+  // ======= ✅ NOVA FUNÇÃO: depurar todos de uma vez =======
+  const handleDepurarTodos = async () => {
+    try {
+      const resp = await fetch(`/api/dbadmin/depurar`, { method: "POST" });
+      const data = await resp.json();
 
-    for (const name of names) {
-      try {
-        const resp = await fetch(
-          `/api/dbadmin/depurar?file=${encodeURIComponent(name)}`,
-          { method: "POST" }
+      if (!resp.ok || !data.success) {
+        console.error("Erro ao depurar todos", data.error);
+      } else {
+        console.log("✅ Depuração concluída para todos os arquivos do bucket");
+        setUploadedFiles((prev) =>
+          prev.map((f) => ({ ...f, status: "processado" }))
         );
-        const data = await resp.json();
-
-        if (!resp.ok || !data.success) {
-          console.error("Erro ao depurar", name, data.error);
-        } else {
-          console.log(`✅ Depuração concluída para ${name}`);
-          // opcional: marcar como processado na UI
-          setUploadedFiles((prev) =>
-            prev.map((f) =>
-              f.name === name ? { ...f, status: "processado" } : f
-            )
-          );
-        }
-      } catch (err) {
-        console.error("Falha ao chamar depurar para", name, err);
       }
+    } catch (err) {
+      console.error("Falha ao chamar depurar todos", err);
     }
   };
 
@@ -110,11 +100,12 @@ export default function DBAdminDashboard() {
 
           <UploadButton onUploadComplete={fetchFiles} />
 
+          {/* <<< AJUSTE >>> Passa handleDepurarTodos */}
           <FileList
             files={uploadedFiles}
             checked={checked}
             toggleCheck={toggleCheck}
-            handleDepurar={handleDepurar}
+            handleDepurarTodos={handleDepurarTodos}
             handleDelete={handleDelete}
           />
 
