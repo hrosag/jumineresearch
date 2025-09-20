@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+// src/app/api/dbadmin/depurar/route.ts
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST() {
+// <<< AJUSTE >>> trocamos `any` por tipos corretos (NextRequest, NextResponse)
+export async function POST(_req: NextRequest) {
   try {
     const res = await fetch(
       "https://api.github.com/repos/hrosag/jumineresearch/actions/workflows/depurar.yml/dispatches",
@@ -11,7 +13,7 @@ export async function POST() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ref: "main", // <<< AJUSTE >>> sempre branch main
+          ref: "main", // branch de disparo
         }),
       }
     );
@@ -22,9 +24,10 @@ export async function POST() {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err) {
+    // <<< AJUSTE >>> tipagem sem any → convertemos para string
     return NextResponse.json(
-      { success: false, error: err.message },
+      { success: false, error: String(err) },
       { status: 500 }
     );
   }
