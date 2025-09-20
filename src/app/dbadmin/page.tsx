@@ -85,6 +85,27 @@ export default function DBAdminDashboard() {
     }
   };
 
+  // ----- depurar arquivos selecionados -----
+  const handleDepurar = async (names: string[]) => {
+    if (!names.length) return;
+    try {
+      for (const name of names) {
+        const res = await fetch(
+          `/api/dbadmin/depurar?file=${encodeURIComponent(name)}`,
+          { method: "POST" }
+        );
+        const data = await res.json();
+        if (!data.success) {
+          console.error("Erro ao depurar", name, data.error);
+        } else {
+          console.log("Arquivo depurado:", name);
+        }
+      }
+    } catch (err) {
+      console.error("Erro no handleDepurar:", err);
+    }
+  };
+
   // ----- renderização -----
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
@@ -105,6 +126,7 @@ export default function DBAdminDashboard() {
             files={uploadedFiles}
             checked={checked}
             toggleCheck={toggleCheck}
+            handleDepurar={handleDepurar}
             handleDepurarTodos={handleDepurarTodos}
             handleDelete={handleDelete}
           />
