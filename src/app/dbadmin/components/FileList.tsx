@@ -28,10 +28,8 @@ export default function FileList({
 
   const toggleAll = () => {
     if (allChecked) {
-      // desseleciona todos
       files.forEach((f) => toggleCheck(f.name));
     } else {
-      // seleciona todos
       files.forEach((f) => {
         if (!checked.includes(f.name)) toggleCheck(f.name);
       });
@@ -39,55 +37,82 @@ export default function FileList({
   };
 
   return (
-    <div className="mt-6">
-      <h2 className="text-lg font-semibold mb-2">Arquivos enviados</h2>
+    <section className="mt-8 space-y-6">
+      <header>
+        <h2 className="text-2xl font-semibold text-gray-800">
+          Arquivos enviados
+        </h2>
+        <p className="text-gray-500 text-sm">
+          Gerencie os arquivos de entrada para processamento da base TSXV.
+        </p>
+      </header>
 
-      <table className="table-auto border-collapse w-full text-sm bg-white shadow">
-        <thead>
-          <tr className="bg-gray-200">
-            <th className="border px-4 py-2 text-left">
-              <input
-                type="checkbox"
-                checked={allChecked}
-                onChange={toggleAll}
-              />{" "}
-              Selecionar
-            </th>
-            <th className="border px-4 py-2 text-left">Nome do Arquivo</th>
-            <th className="border px-4 py-2 text-left">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {files.map((file) => (
-            <tr key={file.name} className="border-t">
-              <td className="px-4 py-2">
-                <input
-                  type="checkbox"
-                  checked={checked.includes(file.name)}
-                  onChange={() => toggleCheck(file.name)}
-                />
-              </td>
-              <td className="px-4 py-2">{file.name}</td>
-              <td className="px-4 py-2">{file.status || "pendente"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="rounded-xl bg-white shadow-xl p-6">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm text-gray-800 border border-gray-200 rounded-lg overflow-hidden">
+            <thead className="bg-gray-100 text-gray-700">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    onChange={toggleAll}
+                  />{" "}
+                  Selecionar todos
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  Nome do Arquivo
+                </th>
+                <th className="px-4 py-3 text-left font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {files.map((file, i) => (
+                <tr
+                  key={file.name}
+                  className={i % 2 ? "bg-gray-50" : "bg-white"}
+                >
+                  <td className="px-4 py-2">
+                    <input
+                      type="checkbox"
+                      checked={checked.includes(file.name)}
+                      onChange={() => toggleCheck(file.name)}
+                    />
+                  </td>
+                  <td className="px-4 py-2 break-all">{file.name}</td>
+                  <td className="px-4 py-2">{file.status || "pendente"}</td>
+                </tr>
+              ))}
+              {files.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-6 text-left text-gray-500 italic"
+                  >
+                    Nenhum arquivo enviado ainda.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
-      <div className="mt-4 flex gap-4">
-        <button
-          onClick={handleDepurarTodos}
-          className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded shadow"
-        >
-          🪄 Depurar Todos
-        </button>
-        <button
-          onClick={() => handleDelete(checked)}
-          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow"
-        >
-          🗑️ Deletar Selecionados
-        </button>
+        {/* Barra de ações */}
+        <div className="mt-6 flex justify-start gap-4">
+          <button
+            onClick={handleDepurarTodos}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-md shadow transition"
+          >
+            🛠️ Depurar
+          </button>
+          <button
+            onClick={() => handleDelete(checked)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-md shadow transition"
+          >
+            🗑️ Deletar
+          </button>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

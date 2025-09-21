@@ -21,6 +21,9 @@ export default function DBAdminDashboard() {
       const res = await fetch("/api/dbadmin/list");
       const data = await res.json();
       if (data.success) {
+        const semPlaceholder = data.files.filter(
+          (f: UploadedFile) => !f.name.startsWith(".")
+        );  
         setUploadedFiles(data.files);
       }
     } catch (err) {
@@ -39,7 +42,7 @@ export default function DBAdminDashboard() {
     );
   };
 
-  // ======= ✅ NOVA FUNÇÃO: depurar todos de uma vez =======
+  // ======= ✅ depurar todos de uma vez =======
   const handleDepurarTodos = async () => {
     try {
       const resp = await fetch(`/api/dbadmin/depurar`, { method: "POST" });
@@ -121,7 +124,6 @@ export default function DBAdminDashboard() {
 
           <UploadButton onUploadComplete={fetchFiles} />
 
-          {/* <<< AJUSTE >>> Passa handleDepurarTodos */}
           <FileList
             files={uploadedFiles}
             checked={checked}
@@ -130,10 +132,6 @@ export default function DBAdminDashboard() {
             handleDepurarTodos={handleDepurarTodos}
             handleDelete={handleDelete}
           />
-
-          {uploadedFiles.length === 0 && (
-            <p className="mt-4 text-gray-500">Nenhum arquivo enviado ainda.</p>
-          )}
         </main>
       )}
     </div>
