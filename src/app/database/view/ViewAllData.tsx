@@ -33,7 +33,7 @@ export default function ViewAllData() {
   const [hiddenCols, setHiddenCols] = useState<HiddenCols[]>([])
   const [loading, setLoading] = useState(true)
 
-  // filtros de texto
+  // filtros
   const [filterBlockId, setFilterBlockId] = useState('')
   const [filterCompany, setFilterCompany] = useState('')
   const [filterTicker, setFilterTicker] = useState('')
@@ -48,12 +48,12 @@ export default function ViewAllData() {
   const [sortColumn, setSortColumn] = useState<SortColumn>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
 
-  // 🔑 controle de senha para habilitar exportação
+  // senha
   const [authorized, setAuthorized] = useState(false)
 
   const searchParams = useSearchParams()
 
-  // pré-preenche filtros de data da URL
+  // inicializa filtros de data via URL
   useEffect(() => {
     const start = searchParams.get('start')
     const end = searchParams.get('end')
@@ -61,6 +61,7 @@ export default function ViewAllData() {
     if (end) setMaxDate(end)
   }, [searchParams])
 
+  // busca dados
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
@@ -170,6 +171,7 @@ export default function ViewAllData() {
 
     const content = [header, ...lines].join('\n')
 
+    // nome dinâmico
     const fmt = (d: string) => d.replaceAll('-', '')
     const startStr = minDate ? fmt(minDate) : 'inicio'
     const endStr = maxDate ? fmt(maxDate) : 'fim'
