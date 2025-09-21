@@ -53,7 +53,7 @@ export default function ViewAllData() {
 
   const searchParams = useSearchParams()
 
-  // pré-preenche filtros de data a partir da URL
+  // pré-preenche filtros de data da URL
   useEffect(() => {
     const start = searchParams.get('start')
     const end = searchParams.get('end')
@@ -75,10 +75,12 @@ export default function ViewAllData() {
       } else {
         const fullData = data as FullRow[]
         setRows(fullData.map(({ body_text, composite_key, ...visible }) => visible))
-        setHiddenCols(fullData.map(({ body_text, composite_key }) => ({
-          body_text,
-          composite_key
-        })))
+        setHiddenCols(
+          fullData.map(({ body_text, composite_key }) => ({
+            body_text,
+            composite_key,
+          }))
+        )
       }
       setLoading(false)
     }
@@ -91,7 +93,7 @@ export default function ViewAllData() {
     return String(val ?? '').toLowerCase().includes(filter.toLowerCase())
   }
 
-  const filtered = rows.filter(r => {
+  const filtered = rows.filter((r) => {
     const textOk =
       check(r.block_id, filterBlockId) &&
       check(r.company, filterCompany) &&
@@ -127,7 +129,6 @@ export default function ViewAllData() {
     }
   }
 
-  // normaliza para não quebrar célula no Excel
   function sanitizeCell(text: string | null) {
     if (!text) return ''
     return text.replace(/(\r\n|\n|\r)/g, ' ')
@@ -147,7 +148,7 @@ export default function ViewAllData() {
       'Type',
       'Tier',
       'Body_Text',
-      'Composite_Key'
+      'Composite_Key',
     ].join(' | ')
 
     const lines = filtered.map((r, idx) => {
@@ -163,16 +164,15 @@ export default function ViewAllData() {
         r.bulletin_type ?? '',
         r.tier ?? '',
         sanitizeCell(hidden.body_text),
-        sanitizeCell(hidden.composite_key)
+        sanitizeCell(hidden.composite_key),
       ].join(' | ')
     })
 
     const content = [header, ...lines].join('\n')
 
-    // nome do arquivo com período do filtro
     const fmt = (d: string) => d.replaceAll('-', '')
     const startStr = minDate ? fmt(minDate) : 'inicio'
-    const endStr   = maxDate ? fmt(maxDate) : 'fim'
+    const endStr = maxDate ? fmt(maxDate) : 'fim'
     const filename = `all_data_export_TSXV_${startStr}_${endStr}.txt`
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
@@ -227,7 +227,7 @@ export default function ViewAllData() {
             type="date"
             className="border rounded p-1 text-sm"
             value={minDate}
-            onChange={e => setMinDate(e.target.value)}
+            onChange={(e) => setMinDate(e.target.value)}
           />
         </div>
         <div>
@@ -241,7 +241,7 @@ export default function ViewAllData() {
             type="date"
             className="border rounded p-1 text-sm"
             value={maxDate}
-            onChange={e => setMaxDate(e.target.value)}
+            onChange={(e) => setMaxDate(e.target.value)}
           />
         </div>
       </div>
@@ -264,7 +264,7 @@ export default function ViewAllData() {
                 className="mt-1 w-full p-1 border rounded text-sm"
                 placeholder="Filtrar"
                 value={filterBlockId}
-                onChange={e => setFilterBlockId(e.target.value)}
+                onChange={(e) => setFilterBlockId(e.target.value)}
               />
             </th>
             <th
@@ -276,7 +276,7 @@ export default function ViewAllData() {
                 className="mt-1 w-full p-1 border rounded text-sm"
                 placeholder="Filtrar"
                 value={filterCompany}
-                onChange={e => setFilterCompany(e.target.value)}
+                onChange={(e) => setFilterCompany(e.target.value)}
               />
             </th>
             <th
@@ -288,7 +288,7 @@ export default function ViewAllData() {
                 className="mt-1 w-full p-1 border rounded text-sm"
                 placeholder="Filtrar"
                 value={filterTicker}
-                onChange={e => setFilterTicker(e.target.value)}
+                onChange={(e) => setFilterTicker(e.target.value)}
               />
             </th>
             <th
@@ -300,7 +300,7 @@ export default function ViewAllData() {
                 className="mt-1 w-full p-1 border rounded text-sm"
                 placeholder="Filtrar"
                 value={filterType}
-                onChange={e => setFilterType(e.target.value)}
+                onChange={(e) => setFilterType(e.target.value)}
               />
             </th>
             <th
@@ -312,14 +312,14 @@ export default function ViewAllData() {
                 className="mt-1 w-full p-1 border rounded text-sm"
                 placeholder="Filtrar"
                 value={filterTier}
-                onChange={e => setFilterTier(e.target.value)}
+                onChange={(e) => setFilterTier(e.target.value)}
               />
             </th>
           </tr>
         </thead>
 
         <tbody>
-          {sorted.map(r => (
+          {sorted.map((r) => (
             <tr key={r.id}>
               <td className="border px-4 py-2">
                 {r.bulletin_date
