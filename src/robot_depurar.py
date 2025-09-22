@@ -16,7 +16,8 @@ BUCKET = "uploads"
 # ---------------------------------------------------------------------
 # Regex e padrões
 # ---------------------------------------------------------------------
-BULLETIN_DATE_RE = re.compile(r'BULLETIN DATE:\s*(.+)', re.IGNORECASE)
+# Aceita BULLETIN DATE ou NOTICE DATE
+BULLETIN_DATE_RE = re.compile(r'(BULLETIN|NOTICE)\s+DATE:\s*(.+)', re.IGNORECASE)
 TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
 BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
 
@@ -33,31 +34,18 @@ TICK_ANYWHERE = [
 # Funções de normalização
 # ---------------------------------------------------------------------
 def normalize_date(raw: str) -> str | None:
-    """Converte datas para YYYY-MM-DD (ISO). Corrige vírgulas grudadas antes do parse."""
+    """Converte datas para YYYY-MM-DD (formato ISO)."""
     if not raw:
         return None
-
-    txt = raw.strip()
-    # Corrige casos como "January 4,2008" → "January 4, 2008"
-    txt = re.sub(r",(\d{4})", r", \1", txt)
-
-    date_formats = [
-        "%Y-%m-%d",   # 2008-01-04
-        "%d-%m-%Y",   # 04-01-2008
-        "%Y/%m/%d",   # 2008/01/04
-        "%d/%m/%Y",   # 04/01/2008
-        "%d-%b-%Y",   # 04-Jan-2008
-        "%B %d, %Y",  # January 4, 2008
-        "%b %d, %Y",  # Jan 4, 2008
-    ]
-
-    for fmt in date_formats:
+    raw = raw.replace(",", ", ")       # garante espaço após vírgula (caso grudado)
+    raw = re.sub(r"\s+", " ", raw)     # normaliza espaços extras
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
+                "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"):
         try:
-            d = datetime.strptime(txt, fmt)
+            d = datetime.strptime(raw.strip(), fmt)
             return d.strftime("%Y-%m-%d")
         except ValueError:
             continue
-
     return None
 
 def normalize_tier(raw: str) -> str | None:
@@ -99,17 +87,17 @@ def extract_company_ticker(body: str):
     return None, None
 
 def extract_bulletin_type(body: str) -> str | None:
-    """Captura todas as linhas da seção BULLETIN TYPE até o próximo cabeçalho."""
+    """Captura TYPE (BULLETIN ou NOTICE) até o próximo cabeçalho."""
     lines = body.splitlines()
     capturing = False
     collected = []
     for ln in lines:
-        if ln.upper().startswith("BULLETIN TYPE:"):
+        if re.match(r'^(BULLETIN|NOTICE)\s+TYPE:', ln, re.IGNORECASE):
             capturing = True
             collected.append(ln.split(":", 1)[1].strip())
             continue
         if capturing:
-            if re.match(r"^[A-Z ]+:", ln):  # próxima seção encontrada
+            if re.match(r"^[A-Z ]+:", ln):  # próxima seção
                 break
             collected.append(ln.strip())
     if not collected:
@@ -127,7 +115,7 @@ def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
         "company": company,
         "ticker": ticker,
         "bulletin_type": extract_bulletin_type(body),
-        "bulletin_date": normalize_date(mdate.group(1)) if mdate else None,
+        "bulletin_date": normalize_date(mdate.group(2)) if mdate else None,
         "tier": normalize_tier(mtier.group(1)) if mtier else None,
         "body_text": body,
         "composite_key": f"{source_file.split('-')[-1]}-{block_id}"
