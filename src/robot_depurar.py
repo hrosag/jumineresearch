@@ -39,8 +39,6 @@ def normalize_date(raw: str) -> str | None:
     if not raw:
         return None
     raw = raw.strip().replace("  ", " ")
-    # Corrige vírgula grudada no ano
-    raw = re.sub(r",(\d{4})", r", \1", raw)
     formats = [
         "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
         "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"
@@ -80,36 +78,30 @@ def parse_blocks(txt: str):
 
 def extract_company_ticker(body: str):
     """
-    Extrai o nome da empresa e 1 ou mais tickers.
+    Extrai o nome da empresa e o primeiro ticker encontrado.
     - Remove seções do tipo [formerly ...]
-    - Captura todos os tickers entre aspas
-    - Company = texto antes da primeira aspa
+    - Company = tudo antes da primeira aspa
+    - Ticker = apenas o primeiro encontrado entre aspas
     """
     lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
     if not lines:
         return None, None
 
     header = lines[0]
-    header = re.sub(r"\[formerly.*?\]", "", header, flags=re.IGNORECASE).strip()
 
-    tickers = re.findall(r'"([A-Z0-9\.\-]+)"', header)
-    company = header.split('"')[0].strip()
+    # Remove brackets [formerly ...]
+    header_clean = re.sub(r"\[formerly.*?\]", "", header, flags=re.IGNORECASE).strip()
 
-    if tickers:
-        return company if company else None, ", ".join(tickers)
+    # Captura tickers entre aspas
+    tickers = re.findall(r'"([A-Z0-9\.\-]+)"', header_clean)
 
-    # fallback → regex antigos
-    for ln in lines[:5]:
-        for pat in HEADER_PATTERNS:
-            m = pat.match(ln)
-            if m:
-                return m.group(1).strip(), m.group(2).strip().upper()
-    for pat in TICK_ANYWHERE:
-        m = pat.search(body)
-        if m:
-            return None, m.group(1).strip().upper()
+    # Nome da empresa = antes da primeira aspa
+    company = header_clean.split('"')[0].strip()
 
-    return company if company else None, None
+    # Apenas o primeiro ticker
+    ticker = tickers[0].strip().upper() if tickers else None
+
+    return company if company else None, ticker
 
 def extract_bulletin_type(body: str) -> str | None:
     """Captura todas as linhas da seção BULLETIN TYPE/NOTICE TYPE até o próximo cabeçalho."""
@@ -122,7 +114,7 @@ def extract_bulletin_type(body: str) -> str | None:
             collected.append(ln.split(":", 1)[1].strip())
             continue
         if capturing:
-            if re.match(r"^[A-Z ]+:", ln):
+            if re.match(r"^[A-Z ]+:", ln):  # próxima seção
                 break
             collected.append(ln.strip())
     if not collected:
