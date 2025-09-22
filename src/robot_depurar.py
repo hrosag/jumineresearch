@@ -39,6 +39,8 @@ def normalize_date(raw: str) -> str | None:
     if not raw:
         return None
     raw = raw.strip().replace("  ", " ")
+    # Corrige vírgula grudada no ano
+    raw = re.sub(r",(\d{4})", r", \1", raw)
     formats = [
         "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
         "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"
@@ -88,14 +90,9 @@ def extract_company_ticker(body: str):
         return None, None
 
     header = lines[0]
-
-    # Remove brackets [formerly ...]
     header = re.sub(r"\[formerly.*?\]", "", header, flags=re.IGNORECASE).strip()
 
-    # Captura tickers entre aspas
     tickers = re.findall(r'"([A-Z0-9\.\-]+)"', header)
-
-    # Nome da empresa = antes da primeira aspa
     company = header.split('"')[0].strip()
 
     if tickers:
@@ -125,7 +122,7 @@ def extract_bulletin_type(body: str) -> str | None:
             collected.append(ln.split(":", 1)[1].strip())
             continue
         if capturing:
-            if re.match(r"^[A-Z ]+:", ln):  # próxima seção
+            if re.match(r"^[A-Z ]+:", ln):
                 break
             collected.append(ln.strip())
     if not collected:
