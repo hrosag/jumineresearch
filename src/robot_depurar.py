@@ -1,7 +1,7 @@
 import os, re, unicodedata
 import pandas as pd
 import requests
-from datetime import datetime      # <<< ADIÇÃO >>>
+from datetime import datetime
 from supabase import create_client
 
 # ---------------------------------------------------------------------
@@ -14,9 +14,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BUCKET = "uploads"
 
 # ---------------------------------------------------------------------
-# Regex e padrões – exatamente como no Python_Depurar original
+# Regex e padrões
 # ---------------------------------------------------------------------
-BULLETIN_TYPE_RE = re.compile(r'BULLETIN TYPE:\s*(.+)', re.IGNORECASE)
 BULLETIN_DATE_RE = re.compile(r'BULLETIN DATE:\s*(.+)', re.IGNORECASE)
 TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
 BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
@@ -31,10 +30,9 @@ TICK_ANYWHERE = [
 ]
 
 # ---------------------------------------------------------------------
-# <<< ADIÇÃO >>> Funções de normalização
+# Funções de normalização
 # ---------------------------------------------------------------------
 def normalize_date(raw: str) -> str | None:
-    """Converte várias formas de data para DD/MM/AAAA."""
     if not raw:
         return None
     for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
@@ -46,7 +44,6 @@ def normalize_date(raw: str) -> str | None:
     return raw.strip()
 
 def normalize_tier(raw: str) -> str | None:
-    """Reduz descrição longa para Tier 1, Tier 2 ou Nex."""
     if not raw:
         return None
     txt = raw.lower()
@@ -84,24 +81,38 @@ def extract_company_ticker(body: str):
             return None, m.group(1).strip().upper()
     return None, None
 
+def extract_bulletin_type(body: str) -> str | None:
+    """Captura todas as linhas da seção BULLETIN TYPE até o próximo cabeçalho."""
+    lines = body.splitlines()
+    capturing = False
+    collected = []
+    for ln in lines:
+        if ln.upper().startswith("BULLETIN TYPE:"):
+            capturing = True
+            collected.append(ln.split(":", 1)[1].strip())
+            continue
+        if capturing:
+            if re.match(r"^[A-Z ]+:", ln):  # próxima seção encontrada
+                break
+            collected.append(ln.strip())
+    if not collected:
+        return None
+    return " ".join(collected).replace(" ,", ",").strip()
+
 def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
     body = normalize_text(b)
     company, ticker = extract_company_ticker(body)
-    mtype = BULLETIN_TYPE_RE.search(body)
     mdate = BULLETIN_DATE_RE.search(body)
     mtier = TIER_RE.search(body)
     return {
-        # <<< ADIÇÃO >>> — só nome limpo do arquivo
         "source_file": source_file.split("-")[-1],
         "block_id": block_id,
         "company": company,
         "ticker": ticker,
-        "bulletin_type": mtype.group(1).strip() if mtype else None,
-        # <<< ADIÇÃO >>> normalização de data e tier
+        "bulletin_type": extract_bulletin_type(body),
         "bulletin_date": normalize_date(mdate.group(1)) if mdate else None,
         "tier": normalize_tier(mtier.group(1)) if mtier else None,
         "body_text": body,
-        # composite_key para upsert idempotente
         "composite_key": f"{source_file.split('-')[-1]}-{block_id}"
     }
 
