@@ -33,27 +33,31 @@ TICK_ANYWHERE = [
 # Funções de normalização
 # ---------------------------------------------------------------------
 def normalize_date(raw: str) -> str | None:
-    """Converte datas variadas para YYYY-MM-DD (ISO, compatível com Postgres DATE)."""
+    """Converte datas para YYYY-MM-DD (ISO). Corrige vírgulas grudadas antes do parse."""
     if not raw:
         return None
-    formats = [
-        "%Y-%m-%d",   # 2008-01-16
-        "%d-%m-%Y",   # 16-01-2008
-        "%Y/%m/%d",   # 2008/01/16
-        "%d/%m/%Y",   # 16/01/2008
-        "%d-%b-%Y",   # 16-Jan-2008
-        "%d %b %Y",   # 16 Jan 2008
-        "%b %d, %Y",  # Jan 11, 2008
-        "%d-%B-%Y",   # 16-January-2008
-        "%d %B %Y",   # 16 January 2008
-        "%B %d, %Y"   # January 11, 2008
+
+    txt = raw.strip()
+    # Corrige casos como "January 4,2008" → "January 4, 2008"
+    txt = re.sub(r",(\d{4})", r", \1", txt)
+
+    date_formats = [
+        "%Y-%m-%d",   # 2008-01-04
+        "%d-%m-%Y",   # 04-01-2008
+        "%Y/%m/%d",   # 2008/01/04
+        "%d/%m/%Y",   # 04/01/2008
+        "%d-%b-%Y",   # 04-Jan-2008
+        "%B %d, %Y",  # January 4, 2008
+        "%b %d, %Y",  # Jan 4, 2008
     ]
-    for fmt in formats:
+
+    for fmt in date_formats:
         try:
-            d = datetime.strptime(raw.strip(), fmt)
+            d = datetime.strptime(txt, fmt)
             return d.strftime("%Y-%m-%d")
         except ValueError:
             continue
+
     return None
 
 def normalize_tier(raw: str) -> str | None:
