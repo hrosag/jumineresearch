@@ -20,7 +20,7 @@ BULLETIN_DATE_RE = re.compile(r'(BULLETIN DATE|NOTICE DATE):\s*(.+)', re.IGNOREC
 TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
 BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
 
-# Mantidos para fallback
+# Padrões alternativos para header
 HEADER_PATTERNS = [
     re.compile(r'^(.+?)\s*\(\s*"?([A-Z0-9][A-Z0-9\.\-]*)"?\s*\)$', re.IGNORECASE),
     re.compile(r'^(.+?)\s*\(\s*(?:TSXV|TSX[-\s]?V)\s*:\s*([A-Z0-9][A-Z0-9\.\-]*)\s*\)$', re.IGNORECASE)
@@ -65,15 +65,15 @@ def normalize_tier(raw: str) -> str | None:
         return "Nex"
     return raw.strip()
 
-# ---------------------------------------------------------------------
-# Funções auxiliares
-# ---------------------------------------------------------------------
 def normalize_text(s: str) -> str:
     if s is None: return ""
     s = unicodedata.normalize("NFKC", s)
     s = re.sub(r"[ \t]+", " ", s)
     return s.strip()
 
+# ---------------------------------------------------------------------
+# Funções auxiliares
+# ---------------------------------------------------------------------
 def parse_blocks(txt: str):
     t = txt.replace("\r\n", "\n").replace("\r", "\n")
     return [b.strip() for b in BLOCK_SPLITTER.split(t) if b.strip()]
@@ -83,7 +83,7 @@ def extract_company_ticker(body: str):
     Extrai o nome da empresa e 1 ou mais tickers.
     - Remove seções do tipo [formerly ...]
     - Captura todos os tickers entre aspas
-    - Company = texto antes da primeira aspa
+    - Company = texto antes do primeiro parêntese com ticker
     """
     lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
     if not lines:
@@ -92,8 +92,17 @@ def extract_company_ticker(body: str):
     header = lines[0]
     header = re.sub(r"\[formerly.*?\]", "", header, flags=re.IGNORECASE).strip()
 
+    # Captura tickers entre aspas
     tickers = re.findall(r'"([A-Z0-9\.\-]+)"', header)
-    company = header.split('"')[0].strip()
+
+    # Company = parte antes do primeiro parêntese que contém aspas
+    if "(" in header and '"' in header:
+        company = header.split("(")[0].strip()
+    else:
+        company = header.split('"')[0].strip()
+
+    # Remove parêntese final solto, se existir
+    company = re.sub(r'\(\s*$', '', company).strip()
 
     if tickers:
         return company if company else None, ", ".join(tickers)
