@@ -20,6 +20,7 @@ BULLETIN_DATE_RE = re.compile(r'(BULLETIN DATE|NOTICE DATE):\s*(.+)', re.IGNOREC
 TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
 BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
 
+# Mantidos para fallback
 HEADER_PATTERNS = [
     re.compile(r'^(.+?)\s*\(\s*"?([A-Z0-9][A-Z0-9\.\-]*)"?\s*\)$', re.IGNORECASE),
     re.compile(r'^(.+?)\s*\(\s*(?:TSXV|TSX[-\s]?V)\s*:\s*([A-Z0-9][A-Z0-9\.\-]*)\s*\)$', re.IGNORECASE)
@@ -38,7 +39,6 @@ def normalize_date(raw: str) -> str | None:
     if not raw:
         return None
     raw = raw.strip().replace("  ", " ")
-    # padrões aceitos
     formats = [
         "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
         "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"
@@ -78,32 +78,41 @@ def parse_blocks(txt: str):
 
 def extract_company_ticker(body: str):
     """
-    Extrai o nome da empresa e o primeiro ticker.
-    - Se houver múltiplos tickers, pega apenas o primeiro.
-    - Se não conseguir achar a empresa, tenta pegar o texto antes do primeiro parêntese.
+    Extrai o nome da empresa e 1 ou mais tickers.
+    - Remove seções do tipo [formerly ...]
+    - Captura todos os tickers entre aspas
+    - Company = texto antes da primeira aspa
     """
     lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    if not lines:
+        return None, None
 
+    header = lines[0]
+
+    # Remove brackets [formerly ...]
+    header = re.sub(r"\[formerly.*?\]", "", header, flags=re.IGNORECASE).strip()
+
+    # Captura tickers entre aspas
+    tickers = re.findall(r'"([A-Z0-9\.\-]+)"', header)
+
+    # Nome da empresa = antes da primeira aspa
+    company = header.split('"')[0].strip()
+
+    if tickers:
+        return company if company else None, ", ".join(tickers)
+
+    # fallback → regex antigos
     for ln in lines[:5]:
         for pat in HEADER_PATTERNS:
             m = pat.match(ln)
             if m:
-                company = m.group(1).strip()
-                ticker = m.group(2).strip().upper()
-                return company, ticker
-
-        if re.search(r'\("[A-Z0-9\.\-]+"\)', ln):
-            tickers = re.findall(r'\("([A-Z0-9\.\-]+)"\)', ln)
-            ticker = tickers[0].strip().upper() if tickers else None
-            company = ln.split("(")[0].strip()
-            return company if company else None, ticker
-
+                return m.group(1).strip(), m.group(2).strip().upper()
     for pat in TICK_ANYWHERE:
         m = pat.search(body)
         if m:
             return None, m.group(1).strip().upper()
 
-    return None, None
+    return company if company else None, None
 
 def extract_bulletin_type(body: str) -> str | None:
     """Captura todas as linhas da seção BULLETIN TYPE/NOTICE TYPE até o próximo cabeçalho."""
@@ -116,7 +125,7 @@ def extract_bulletin_type(body: str) -> str | None:
             collected.append(ln.split(":", 1)[1].strip())
             continue
         if capturing:
-            if re.match(r"^[A-Z ]+:", ln):  # próxima seção encontrada
+            if re.match(r"^[A-Z ]+:", ln):  # próxima seção
                 break
             collected.append(ln.strip())
     if not collected:
