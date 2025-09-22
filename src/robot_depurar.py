@@ -16,10 +16,10 @@ BUCKET = "uploads"
 # ---------------------------------------------------------------------
 # Regex e padrões
 # ---------------------------------------------------------------------
-# Aceita BULLETIN DATE ou NOTICE DATE
-BULLETIN_DATE_RE = re.compile(r'(BULLETIN|NOTICE)\s+DATE:\s*(.+)', re.IGNORECASE)
-TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
-BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
+DATE_RE = re.compile(r'(BULLETIN|NOTICE) DATE:\s*(.+)', re.IGNORECASE)
+TYPE_RE = re.compile(r'(BULLETIN|NOTICE) TYPE:\s*(.+)', re.IGNORECASE)
+TIER_RE = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
+BLOCK_SPLITTER = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
 
 HEADER_PATTERNS = [
     re.compile(r'^(.+?)\s*\(\s*"?([A-Z0-9][A-Z0-9\.\-]*)"?\s*\)$', re.IGNORECASE),
@@ -34,15 +34,17 @@ TICK_ANYWHERE = [
 # Funções de normalização
 # ---------------------------------------------------------------------
 def normalize_date(raw: str) -> str | None:
-    """Converte datas para YYYY-MM-DD (formato ISO)."""
+    """Converte datas para YYYY-MM-DD (ISO, compatível com Postgres DATE)."""
     if not raw:
         return None
-    raw = raw.replace(",", ", ")       # garante espaço após vírgula (caso grudado)
-    raw = re.sub(r"\s+", " ", raw)     # normaliza espaços extras
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
-                "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"):
+    txt = raw.strip().replace("  ", " ")
+    txt = re.sub(r',(\d{4})', r', \1', txt)  # garante espaço antes do ano
+    for fmt in (
+        "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
+        "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"
+    ):
         try:
-            d = datetime.strptime(raw.strip(), fmt)
+            d = datetime.strptime(txt, fmt)
             return d.strftime("%Y-%m-%d")
         except ValueError:
             continue
@@ -52,12 +54,9 @@ def normalize_tier(raw: str) -> str | None:
     if not raw:
         return None
     txt = raw.lower()
-    if "tier 1" in txt:
-        return "Tier 1"
-    if "tier 2" in txt:
-        return "Tier 2"
-    if "nex" in txt:
-        return "Nex"
+    if "tier 1" in txt: return "Tier 1"
+    if "tier 2" in txt: return "Tier 2"
+    if "nex" in txt: return "Nex"
     return raw.strip()
 
 # ---------------------------------------------------------------------
@@ -87,27 +86,30 @@ def extract_company_ticker(body: str):
     return None, None
 
 def extract_bulletin_type(body: str) -> str | None:
-    """Captura TYPE (BULLETIN ou NOTICE) até o próximo cabeçalho."""
+    """Captura todas as linhas da seção TYPE até o próximo cabeçalho."""
     lines = body.splitlines()
     capturing = False
     collected = []
     for ln in lines:
-        if re.match(r'^(BULLETIN|NOTICE)\s+TYPE:', ln, re.IGNORECASE):
+        if re.match(r'^(BULLETIN|NOTICE) TYPE:', ln, re.IGNORECASE):
             capturing = True
             collected.append(ln.split(":", 1)[1].strip())
             continue
         if capturing:
-            if re.match(r"^[A-Z ]+:", ln):  # próxima seção
+            if re.match(r"^[A-Z ]+:", ln):  # próximo cabeçalho encontrado
                 break
             collected.append(ln.strip())
     if not collected:
         return None
     return " ".join(collected).replace(" ,", ",").strip()
 
+# ---------------------------------------------------------------------
+# Parser principal
+# ---------------------------------------------------------------------
 def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
     body = normalize_text(b)
     company, ticker = extract_company_ticker(body)
-    mdate = BULLETIN_DATE_RE.search(body)
+    mdate = DATE_RE.search(body)
     mtier = TIER_RE.search(body)
     return {
         "source_file": source_file.split("-")[-1],
