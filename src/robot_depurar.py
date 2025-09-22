@@ -33,13 +33,25 @@ TICK_ANYWHERE = [
 # Funções de normalização
 # ---------------------------------------------------------------------
 def normalize_date(raw: str) -> str | None:
-    """Converte datas para YYYY-MM-DD (formato ISO, compatível com Postgres DATE)."""
+    """Converte datas variadas para YYYY-MM-DD (ISO, compatível com Postgres DATE)."""
     if not raw:
         return None
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y", "%d-%b-%Y"):
+    formats = [
+        "%Y-%m-%d",   # 2008-01-16
+        "%d-%m-%Y",   # 16-01-2008
+        "%Y/%m/%d",   # 2008/01/16
+        "%d/%m/%Y",   # 16/01/2008
+        "%d-%b-%Y",   # 16-Jan-2008
+        "%d %b %Y",   # 16 Jan 2008
+        "%b %d, %Y",  # Jan 11, 2008
+        "%d-%B-%Y",   # 16-January-2008
+        "%d %B %Y",   # 16 January 2008
+        "%B %d, %Y"   # January 11, 2008
+    ]
+    for fmt in formats:
         try:
             d = datetime.strptime(raw.strip(), fmt)
-            return d.strftime("%Y-%m-%d")  # <<< formato ISO DATE
+            return d.strftime("%Y-%m-%d")
         except ValueError:
             continue
     return None
