@@ -16,15 +16,15 @@ BUCKET = "uploads"
 # ---------------------------------------------------------------------
 # Regex e padrões
 # ---------------------------------------------------------------------
-DATE_RE = re.compile(r'(BULLETIN|NOTICE) DATE:\s*(.+)', re.IGNORECASE)
-TYPE_RE = re.compile(r'(BULLETIN|NOTICE) TYPE:\s*(.+)', re.IGNORECASE)
-TIER_RE = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
-BLOCK_SPLITTER = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
+BULLETIN_DATE_RE = re.compile(r'(BULLETIN DATE|NOTICE DATE):\s*(.+)', re.IGNORECASE)
+TIER_RE          = re.compile(r'(TSX Venture Tier\s+\d+ Company|NEX Company)', re.IGNORECASE)
+BLOCK_SPLITTER   = re.compile(r'\nTSX-X\s*\n\s*_+\s*\n|\n_{5,}\n', re.IGNORECASE)
 
 HEADER_PATTERNS = [
     re.compile(r'^(.+?)\s*\(\s*"?([A-Z0-9][A-Z0-9\.\-]*)"?\s*\)$', re.IGNORECASE),
     re.compile(r'^(.+?)\s*\(\s*(?:TSXV|TSX[-\s]?V)\s*:\s*([A-Z0-9][A-Z0-9\.\-]*)\s*\)$', re.IGNORECASE)
 ]
+
 TICK_ANYWHERE = [
     re.compile(r'"([A-Z0-9][A-Z0-9\.\-]*)"'),
     re.compile(r'\(TSXV:\s*([A-Z0-9][A-Z0-9\.\-]*)\)')
@@ -37,14 +37,15 @@ def normalize_date(raw: str) -> str | None:
     """Converte datas para YYYY-MM-DD (ISO, compatível com Postgres DATE)."""
     if not raw:
         return None
-    txt = raw.strip().replace("  ", " ")
-    txt = re.sub(r',(\d{4})', r', \1', txt)  # garante espaço antes do ano
-    for fmt in (
+    raw = raw.strip().replace("  ", " ")
+    # padrões aceitos
+    formats = [
         "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y",
         "%d-%b-%Y", "%B %d, %Y", "%b %d, %Y"
-    ):
+    ]
+    for fmt in formats:
         try:
-            d = datetime.strptime(txt, fmt)
+            d = datetime.strptime(raw, fmt)
             return d.strftime("%Y-%m-%d")
         except ValueError:
             continue
@@ -54,9 +55,12 @@ def normalize_tier(raw: str) -> str | None:
     if not raw:
         return None
     txt = raw.lower()
-    if "tier 1" in txt: return "Tier 1"
-    if "tier 2" in txt: return "Tier 2"
-    if "nex" in txt: return "Nex"
+    if "tier 1" in txt:
+        return "Tier 1"
+    if "tier 2" in txt:
+        return "Tier 2"
+    if "nex" in txt:
+        return "Nex"
     return raw.strip()
 
 # ---------------------------------------------------------------------
@@ -73,43 +77,56 @@ def parse_blocks(txt: str):
     return [b.strip() for b in BLOCK_SPLITTER.split(t) if b.strip()]
 
 def extract_company_ticker(body: str):
+    """
+    Extrai o nome da empresa e o primeiro ticker.
+    - Se houver múltiplos tickers, pega apenas o primeiro.
+    - Se não conseguir achar a empresa, tenta pegar o texto antes do primeiro parêntese.
+    """
     lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+
     for ln in lines[:5]:
         for pat in HEADER_PATTERNS:
             m = pat.match(ln)
             if m:
-                return m.group(1).strip(), m.group(2).strip().upper()
+                company = m.group(1).strip()
+                ticker = m.group(2).strip().upper()
+                return company, ticker
+
+        if re.search(r'\("[A-Z0-9\.\-]+"\)', ln):
+            tickers = re.findall(r'\("([A-Z0-9\.\-]+)"\)', ln)
+            ticker = tickers[0].strip().upper() if tickers else None
+            company = ln.split("(")[0].strip()
+            return company if company else None, ticker
+
     for pat in TICK_ANYWHERE:
         m = pat.search(body)
         if m:
             return None, m.group(1).strip().upper()
+
     return None, None
 
 def extract_bulletin_type(body: str) -> str | None:
-    """Captura todas as linhas da seção TYPE até o próximo cabeçalho."""
+    """Captura todas as linhas da seção BULLETIN TYPE/NOTICE TYPE até o próximo cabeçalho."""
     lines = body.splitlines()
     capturing = False
     collected = []
     for ln in lines:
-        if re.match(r'^(BULLETIN|NOTICE) TYPE:', ln, re.IGNORECASE):
+        if ln.upper().startswith("BULLETIN TYPE:") or ln.upper().startswith("NOTICE TYPE:"):
             capturing = True
             collected.append(ln.split(":", 1)[1].strip())
             continue
         if capturing:
-            if re.match(r"^[A-Z ]+:", ln):  # próximo cabeçalho encontrado
+            if re.match(r"^[A-Z ]+:", ln):  # próxima seção encontrada
                 break
             collected.append(ln.strip())
     if not collected:
         return None
     return " ".join(collected).replace(" ,", ",").strip()
 
-# ---------------------------------------------------------------------
-# Parser principal
-# ---------------------------------------------------------------------
 def parse_one_block(b: str, source_file: str, block_id: int) -> dict:
     body = normalize_text(b)
     company, ticker = extract_company_ticker(body)
-    mdate = DATE_RE.search(body)
+    mdate = BULLETIN_DATE_RE.search(body)
     mtier = TIER_RE.search(body)
     return {
         "source_file": source_file.split("-")[-1],
