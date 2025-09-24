@@ -14,7 +14,7 @@ export type GlossaryRow = {
   category: string | null;
   fonte: string;
   tags: string[] | null;
-  parent_id?: number | null;
+  parent_id: number | null;
 };
 
 export type GlossaryRowInput = Omit<GlossaryRow, "id">;
