@@ -3,18 +3,12 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-import { GlossaryRow, Lang, RealExample } from "../types";
+import { RealExample, TermViewProps } from "../types";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
-
-type TermViewProps = {
-  selectedTerm: GlossaryRow | null;
-  selectedLang: Lang;
-  isAdmin: boolean;
-};
 
 export default function TermView({
   selectedTerm,
