@@ -21,10 +21,13 @@ export default function DBAdminDashboard() {
       const res = await fetch("/api/dbadmin/list");
       const data = await res.json();
       if (data.success) {
-        const semPlaceholder = data.files.filter(
+        const filteredFiles = data.files.filter(
           (f: UploadedFile) => !f.name.startsWith(".")
-        );  
-        setUploadedFiles(data.files);
+        );
+        setUploadedFiles(filteredFiles);
+        setChecked((prev) =>
+          prev.filter((name) => filteredFiles.some((file: UploadedFile) => file.name === name))
+        );
       }
     } catch (err) {
       console.error("Erro ao buscar arquivos:", err);

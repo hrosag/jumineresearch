@@ -26,6 +26,8 @@ export default function FileList({
 }: FileListProps) {
   const allChecked = files.length > 0 && checked.length === files.length;
 
+  const hasSelection = checked.length > 0
+
   const toggleAll = () => {
     if (allChecked) {
       files.forEach((f) => toggleCheck(f.name));
@@ -98,20 +100,36 @@ export default function FileList({
         </div>
 
         {/* Barra de ações */}
-        <div className="mt-6 flex justify-start gap-4">
-          <button
-            onClick={handleDepurarTodos}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-md shadow transition"
-          >
-            🛠️ Depurar
-          </button>
-          <button
-            onClick={() => handleDelete(checked)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-md shadow transition"
-          >
-            🗑️ Deletar
-          </button>
-        </div>
+          <div className="mt-6 flex justify-start gap-4">
+            <button
+              onClick={handleDepurarTodos}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-md shadow transition"
+            >
+              🛠️ Depurar
+            </button>
+            <button
+              onClick={() => handleDepurar(checked)}
+              disabled={!hasSelection}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 font-medium rounded-md shadow transition ${
+                hasSelection
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              ⚙️ Depurar selecionados
+            </button>
+            <button
+              onClick={() => handleDelete(checked)}
+              disabled={!hasSelection}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 font-medium rounded-md shadow transition ${
+                hasSelection
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              🗑️ Deletar
+            </button>
+          </div>
       </div>
     </section>
   );
