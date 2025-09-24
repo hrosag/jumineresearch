@@ -21,8 +21,8 @@ export default function TermView({
   selectedLang,
   isAdmin,
 }: TermViewProps) {
-  const [realExample, setRealExample] = useState<RealExample | null>(null);
-  const [isLoadingExample, setIsLoadingExample] = useState(false);
+  const [realExamples, setRealExamples] = useState<RealExample[]>([]);
+  const [isLoadingExamples, setIsLoadingExamples] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -30,28 +30,41 @@ export default function TermView({
     const loadExample = async () => {
       if (!selectedTerm?.fonte) {
         if (isMounted) {
-          setRealExample(null);
+          setRealExamples([]);
+          setIsLoadingExamples(false);
         }
         return;
       }
 
-      setIsLoadingExample(true);
+      const fonteKeys = selectedTerm.fonte
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      if (fonteKeys.length === 0) {
+        if (isMounted) {
+          setRealExamples([]);
+          setIsLoadingExamples(false);
+        }
+        return;
+      }
+
+      setIsLoadingExamples(true);
       const { data, error } = await supabase
         .from("all_data")
         .select("composite_key, body_text")
-        .eq("composite_key", selectedTerm.fonte)
-        .maybeSingle();
+        .in("composite_key", fonteKeys);
 
       if (!isMounted) return;
 
-      if (error && error.code !== "PGRST116") {
-        console.error("Erro ao buscar exemplo real:", error.message);
-        setRealExample(null);
+      if (error) {
+        console.error("Erro ao buscar exemplos reais:", error.message);
+        setRealExamples([]);
       } else {
-        setRealExample(data ?? null);
+        setRealExamples(data ?? []);
       }
 
-      setIsLoadingExample(false);
+      setIsLoadingExamples(false);
     };
 
     loadExample();
@@ -93,28 +106,29 @@ export default function TermView({
       <div className="border-t pt-4 mt-4 space-y-3">
         <div>
           <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-            Fonte
+            Fonte(s)
           </h3>
           <p className="text-gray-900">
             {selectedTerm.fonte ? selectedTerm.fonte : "Sem fonte cadastrada."}
           </p>
         </div>
 
-        {isLoadingExample && (
-          <p className="text-sm text-gray-500">Carregando exemplo real...</p>
+        {isLoadingExamples && (
+          <p className="text-sm text-gray-500">Carregando boletins...</p>
         )}
 
-        {!isLoadingExample && realExample && (
-          <div className="rounded-lg border bg-gray-50 p-4">
-            <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-              Exemplo real
-            </h4>
-            <p className="text-gray-900 whitespace-pre-line">
-              {realExample.body_text || "Sem conteúdo disponível."}
-            </p>
-            <p className="mt-2 text-xs text-gray-500">
-              Boletim: {realExample.composite_key}
-            </p>
+        {!isLoadingExamples && realExamples.length > 0 && (
+          <div className="space-y-2">
+            {realExamples.map((example) => (
+              <details key={example.composite_key} className="rounded-lg border bg-gray-50 p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-gray-700">
+                  {example.composite_key}
+                </summary>
+                <div className="mt-2 text-gray-900 whitespace-pre-line">
+                  {example.body_text || "Sem conteúdo disponível."}
+                </div>
+              </details>
+            ))}
           </div>
         )}
       </div>
