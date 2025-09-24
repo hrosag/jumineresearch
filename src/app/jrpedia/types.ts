@@ -12,7 +12,7 @@ export type GlossaryRow = {
   definition_en: string | null;
   definition_fr: string | null;
   category: string | null;
-  fonte: string | null;
+  fonte: string;
   tags: string[] | null;
   parent_id?: number | null;
 };

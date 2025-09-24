@@ -61,7 +61,17 @@ export default function JRpediaPage() {
     if (error) {
       console.error("Erro ao carregar termos:", error.message);
     } else if (data) {
-      setEntries(data);
+      const normalized = data.map((row) => ({
+        ...row,
+        fonte:
+          typeof row.fonte === "string"
+            ? row.fonte
+            : row.fonte != null
+            ? String(row.fonte)
+            : "",
+      })) as GlossaryRow[];
+
+      setEntries(normalized);
     }
   }, []);
 
