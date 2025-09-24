@@ -1,19 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import { GlossaryRow, GlossaryNode, Lang } from "../types";
-
-type SidebarProps = {
-  tree: GlossaryNode[];
-  selectedTerm: GlossaryRow | null;
-  setSelectedTerm: (t: GlossaryRow) => void;
-  selectedLang: Lang;
-};
+import { GlossaryRow, GlossaryNode, SidebarProps } from "../types";
 
 export default function Sidebar({
   tree,
   selectedTerm,
   setSelectedTerm,
   selectedLang,
+  onAddTerm,
 }: SidebarProps) {
   function TreeNode({
     node,
@@ -69,7 +63,17 @@ export default function Sidebar({
 
   return (
     <aside className="w-64 bg-[#1e2a38] text-white flex flex-col p-3 overflow-y-auto">
-      <h3 className="font-bold text-[#d4af37] mb-2">JRpedia</h3>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="font-bold text-[#d4af37]">JRpedia</h3>
+        <button
+          type="button"
+          onClick={onAddTerm}
+          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] text-black font-bold hover:bg-[#f0c75e]"
+          aria-label="Adicionar novo termo"
+        >
+          +
+        </button>
+      </div>
       {tree.map((node) => (
         <TreeNode key={node.id} node={node} activeTerm={selectedTerm} />
       ))}

@@ -1,3 +1,5 @@
+import { Dispatch, SetStateAction } from "react";
+
 // src/app/jrpedia/types.ts
 
 export type Lang = "pt" | "en" | "fr";
@@ -29,8 +31,9 @@ export type RealExample = {
 export type SidebarProps = {
   tree: GlossaryNode[];
   selectedTerm: GlossaryRow | null;
-  setSelectedTerm: (t: GlossaryRow | null) => void;
+  setSelectedTerm: Dispatch<SetStateAction<GlossaryRow | null>>;
   selectedLang: Lang;
+  onAddTerm: () => void;
 };
 
 export type TermViewProps = {
@@ -41,10 +44,11 @@ export type TermViewProps = {
 
 export type CrudModalsProps = {
   selectedTerm: GlossaryRow | null;
-  setSelectedTerm: (t: GlossaryRow | null) => void;
+  setSelectedTerm: Dispatch<SetStateAction<GlossaryRow | null>>;
   fetchEntries: () => void;
   showNewModal: boolean;
   setShowNewModal: (v: boolean) => void;
+  newParentId: number | null;
   showEditModal: boolean;
   setShowEditModal: (v: boolean) => void;
   showDeleteModal: boolean;

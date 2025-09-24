@@ -1,14 +1,15 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GlossaryRow, GlossaryRowInput } from "../types";
 
 type GlossaryFormProps = {
   initialData?: GlossaryRow;
+  initialParentId?: number | null;
   onSave: (data: GlossaryRowInput) => Promise<void>;
   onCancel: () => void;
 };
 
-export default function GlossaryForm({ initialData, onSave, onCancel }: GlossaryFormProps) {
+export default function GlossaryForm({ initialData, initialParentId, onSave, onCancel }: GlossaryFormProps) {
   const [form, setForm] = useState<GlossaryRowInput>({
     term: initialData?.term ?? "",
     pt: initialData?.pt ?? "",
@@ -20,10 +21,26 @@ export default function GlossaryForm({ initialData, onSave, onCancel }: Glossary
     category: initialData?.category ?? "General",
     fonte: initialData?.fonte ?? "",
     tags: initialData?.tags ?? [],
-    parent_id: initialData?.parent_id ?? null,
+    parent_id: initialData?.parent_id ?? initialParentId ?? null,
   });
 
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      term: initialData?.term ?? "",
+      pt: initialData?.pt ?? "",
+      en: initialData?.en ?? "",
+      fr: initialData?.fr ?? "",
+      definition_pt: initialData?.definition_pt ?? "",
+      definition_en: initialData?.definition_en ?? "",
+      definition_fr: initialData?.definition_fr ?? "",
+      category: initialData?.category ?? "General",
+      fonte: initialData?.fonte ?? "",
+      tags: initialData?.tags ?? [],
+      parent_id: initialData?.parent_id ?? initialParentId ?? null,
+    });
+  }, [initialData, initialParentId]);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     const { name, value } = e.target;

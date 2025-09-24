@@ -47,11 +47,13 @@ export default function JRpediaPage() {
   // 🔑 Controle Admin
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [shouldOpenCreateAfterLogin, setShouldOpenCreateAfterLogin] = useState(false);
 
   // estados dos modais
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [newTermParentId, setNewTermParentId] = useState<number | null>(null);
 
   // Fetch de dados
   const fetchEntries = useCallback(async () => {
@@ -81,13 +83,31 @@ export default function JRpediaPage() {
     fetchEntries();
   }, [fetchEntries]);
 
-  const handleAdminToggle = () => {
-    if (isAdmin) {
-      setIsAdmin(false);
+  const handleSetShowNewModal = (value: boolean) => {
+    setShowNewModal(value);
+    if (!value) {
+      setNewTermParentId(null);
+      setShouldOpenCreateAfterLogin(false);
+    }
+  };
+
+  const handleAddTerm = () => {
+    const parentId = selectedTerm?.id ?? null;
+    setNewTermParentId(parentId);
+
+    if (!isAdmin) {
+      setShouldOpenCreateAfterLogin(true);
+      setShowPasswordModal(true);
       return;
     }
 
-    setShowPasswordModal(true);
+    setShouldOpenCreateAfterLogin(false);
+    handleSetShowNewModal(true);
+  };
+
+  const handleExitAdmin = () => {
+    setIsAdmin(false);
+    handleSetShowNewModal(false);
   };
 
   // aplica pesquisa (em qualquer campo de tradução ou termo base)
@@ -107,6 +127,7 @@ export default function JRpediaPage() {
         selectedTerm={selectedTerm}
         setSelectedTerm={setSelectedTerm}
         selectedLang={selectedLang}
+        onAddTerm={handleAddTerm}
       />
 
       {/* Main panel */}
@@ -143,17 +164,28 @@ export default function JRpediaPage() {
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={handleAdminToggle}
-              className={`px-3 py-1 rounded font-medium transition ${
-                isAdmin
-                  ? "bg-red-100 text-red-700 hover:bg-red-200"
-                  : "bg-green-100 text-green-700 hover:bg-green-200"
-              }`}
-            >
-              {isAdmin ? "Sair do modo admin" : "Entrar como admin"}
-            </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={handleExitAdmin}
+                className="px-3 py-1 rounded font-medium transition bg-red-100 text-red-700 hover:bg-red-200"
+              >
+                Sair do modo admin
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setNewTermParentId(null);
+                  setShouldOpenCreateAfterLogin(false);
+                  setShowPasswordModal(true);
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded bg-green-100 text-lg transition hover:bg-green-200"
+                aria-label="Entrar como admin"
+              >
+                🔑
+              </button>
+            )}
           </div>
         </div>
 
@@ -175,7 +207,8 @@ export default function JRpediaPage() {
       {isAdmin && (
         <CrudModals
           showNewModal={showNewModal}
-          setShowNewModal={setShowNewModal}
+          setShowNewModal={handleSetShowNewModal}
+          newParentId={newTermParentId}
           showEditModal={showEditModal}
           setShowEditModal={setShowEditModal}
           showDeleteModal={showDeleteModal}
@@ -191,8 +224,16 @@ export default function JRpediaPage() {
           onSuccess={() => {
             setIsAdmin(true);
             setShowPasswordModal(false);
+            if (shouldOpenCreateAfterLogin) {
+              handleSetShowNewModal(true);
+            }
+            setShouldOpenCreateAfterLogin(false);
           }}
-          onClose={() => setShowPasswordModal(false)}
+          onClose={() => {
+            setShowPasswordModal(false);
+            setShouldOpenCreateAfterLogin(false);
+            setNewTermParentId(null);
+          }}
         />
       )}
     </div>
