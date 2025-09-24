@@ -10,17 +10,17 @@ type GlossaryFormProps = {
 
 export default function GlossaryForm({ initialData, onSave, onCancel }: GlossaryFormProps) {
   const [form, setForm] = useState<GlossaryRowInput>({
-    term: initialData?.term || "",
-    pt: initialData?.pt || "",
-    en: initialData?.en || "",
-    fr: initialData?.fr || "",
-    definition_pt: initialData?.definition_pt || "",
-    definition_en: initialData?.definition_en || "",
-    definition_fr: initialData?.definition_fr || "",
-    category: initialData?.category || "General",
-    fonte: initialData?.fonte || "",
-    tags: initialData?.tags || [],
-    parent_id: initialData?.parent_id || null,
+    term: initialData?.term ?? "",
+    pt: initialData?.pt ?? "",
+    en: initialData?.en ?? "",
+    fr: initialData?.fr ?? "",
+    definition_pt: initialData?.definition_pt ?? "",
+    definition_en: initialData?.definition_en ?? "",
+    definition_fr: initialData?.definition_fr ?? "",
+    category: initialData?.category ?? "General",
+    fonte: initialData?.fonte ?? "",
+    tags: initialData?.tags ?? [],
+    parent_id: initialData?.parent_id ?? null,
   });
 
   const [loading, setLoading] = useState(false);
@@ -89,7 +89,13 @@ export default function GlossaryForm({ initialData, onSave, onCancel }: Glossary
       {/* Fonte */}
       <div>
         <label className="block text-sm">Fonte</label>
-        <input name="fonte" value={form.fonte || ""} onChange={handleChange} className="border p-2 w-full rounded" />
+        <input
+          type="text"
+          name="fonte"
+          value={form.fonte}
+          onChange={handleChange}
+          className="border p-2 w-full rounded"
+        />
       </div>
 
       {/* Tags */}
