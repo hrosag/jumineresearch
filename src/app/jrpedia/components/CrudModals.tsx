@@ -12,6 +12,7 @@ const supabase = createClient(
 export default function CrudModals({
   showNewModal,
   setShowNewModal,
+  newParentId,
   showEditModal,
   setShowEditModal,
   showDeleteModal,
@@ -29,6 +30,7 @@ export default function CrudModals({
         title="➕ Novo Termo"
       >
         <GlossaryForm
+          initialParentId={newParentId}
           onCancel={() => setShowNewModal(false)}
           onSave={async (formData: GlossaryRowInput) => {
             await supabase.from("glossary").insert(formData);
