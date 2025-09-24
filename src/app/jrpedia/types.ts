@@ -21,6 +21,11 @@ export type GlossaryRowInput = Omit<GlossaryRow, "id">;
 
 export type GlossaryNode = GlossaryRow & { children: GlossaryNode[] };
 
+export type RealExample = {
+  composite_key: string;
+  body_text: string | null;
+};
+
 export type SidebarProps = {
   tree: GlossaryNode[];
   selectedTerm: GlossaryRow | null;
