@@ -26,27 +26,32 @@ type Row = {
   company: string | null
   ticker: string | null
   bulletin_type: string | null
+  canonical_type: string | null
   bulletin_date: string | null
   body_text: string | null
 }
 
-type CompanyOption = { value: string; label: string }
+type Option = { value: string; label: string }
 
 export default function ReportsPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [globalMin, setGlobalMin] = useState('')
+  const [globalMax, setGlobalMax] = useState('')
   const [highlightSelect, setHighlightSelect] = useState(false)
+  const [showEvents, setShowEvents] = useState(50)
 
   const router = useRouter()
 
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
-        .from('all_data')
-        .select('id, source_file, company, ticker, bulletin_type, bulletin_date, body_text')
+        .from('vw_bulletins_with_canonical')
+        .select('id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, body_text')
         .throwOnError()
 
       if (!error && data) {
@@ -57,6 +62,8 @@ export default function ReportsPage() {
           const maxDate = dates.reduce((a, b) => (a > b ? a : b))
           setStartDate(minDate)
           setEndDate(maxDate)
+          setGlobalMin(minDate)
+          setGlobalMax(maxDate)
         }
       }
       setLoading(false)
@@ -66,16 +73,28 @@ export default function ReportsPage() {
 
   const companies = Array.from(new Set(rows.map(r => r.company).filter(Boolean))).sort() as string[]
 
+  const effectiveCompanies =
+    selectedCompanies.includes('__ALL__') ? companies : selectedCompanies
+
+  const typesForCompanies = Array.from(
+    new Set(
+      rows
+        .filter(r => effectiveCompanies.includes(r.company ?? ''))
+        .map(r => r.canonical_type)
+        .filter(Boolean)
+    )
+  ).sort() as string[]
+
   const filtered = rows.filter(r => {
     const companyOk =
-      selectedCompanies.length === 0
-        ? true
-        : selectedCompanies.includes(r.company ?? '')
+      effectiveCompanies.length === 0 ? true : effectiveCompanies.includes(r.company ?? '')
+    const typeOk =
+      selectedTypes.length === 0 ? true : selectedTypes.includes(r.canonical_type ?? '')
     const dateOk = r.bulletin_date
       ? (!startDate || r.bulletin_date >= startDate) &&
         (!endDate || r.bulletin_date <= endDate)
       : false
-    return companyOk && dateOk
+    return companyOk && typeOk && dateOk
   })
 
   const chartData = filtered
@@ -83,7 +102,7 @@ export default function ReportsPage() {
     .map(r => ({
       company: r.company!,
       ticker: r.ticker ?? '—',
-      bulletinType: r.bulletin_type ?? '—',
+      bulletinType: r.canonical_type ?? '—',
       date: new Date(r.bulletin_date + 'T00:00:00').getTime()
     }))
 
@@ -94,7 +113,7 @@ export default function ReportsPage() {
   const macro = {
     boletins: filtered.length,
     empresas: new Set(filtered.map(r => r.company)).size,
-    tipos: new Set(filtered.map(r => r.bulletin_type)).size,
+    tipos: new Set(filtered.map(r => r.canonical_type)).size,
     avisosGerais: filtered.filter(r => !r.company).length,
     arquivos: new Set(filtered.map(r => r.source_file).filter(Boolean)).size
   }
@@ -106,11 +125,14 @@ export default function ReportsPage() {
       return
     }
 
+    const selected =
+      selectedCompanies.includes('__ALL__') ? companies : selectedCompanies
+
     if (type === 'zip') {
       const url =
-        selectedCompanies.length === 1
-          ? `/api/reports/story?company=${encodeURIComponent(selectedCompanies[0])}`
-          : `/api/reports/story?multi=${encodeURIComponent(selectedCompanies.join(','))}`
+        selected.length === 1
+          ? `/api/reports/story?company=${encodeURIComponent(selected[0])}`
+          : `/api/reports/story?multi=${encodeURIComponent(selected.join(','))}`
       window.open(url, '_blank')
     }
 
@@ -119,7 +141,7 @@ export default function ReportsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          companies: selectedCompanies,
+          companies: selected,
           startDate,
           endDate
         })
@@ -142,13 +164,21 @@ export default function ReportsPage() {
     router.push(`/database/view?start=${startDate}&end=${endDate}`)
   }
 
+  const resetFilters = () => {
+    setSelectedCompanies([])
+    setSelectedTypes([])
+    setStartDate(globalMin)
+    setEndDate(globalMax)
+    setShowEvents(50)
+  }
+
   if (loading) return <p className="p-4">Carregando…</p>
 
   return (
     <div className="p-6">
+      {/* Topo com export */}
       <div className="flex items-center justify-between mb-4 gap-4">
         <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
-
         <div className="flex gap-2">
           <button
             onClick={() => handleDownload('zip')}
@@ -156,14 +186,12 @@ export default function ReportsPage() {
           >
             📄 Gerar Story (ZIP)
           </button>
-
           <button
             onClick={() => handleDownload('txt')}
             className="px-4 py-2 bg-green-500 text-black rounded hover:bg-green-600"
           >
             📜 Gerar Stories Consolidado
           </button>
-
           <button
             onClick={openDatabaseView}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
@@ -182,26 +210,32 @@ export default function ReportsPage() {
         <div><div className="text-xl font-bold">{macro.arquivos}</div><div className="text-xs text-gray-600">Arquivos no período</div></div>
       </div>
 
-      {/* Filtros */}
+      {/* Filtros principais */}
       <div className="flex gap-6 mb-6">
-        <div className="w-1/2">
+        <div className="w-1/3">
           <label className="font-semibold block mb-2">Selecionar empresa(s)</label>
-          <Select<CompanyOption, true>
+          <Select<Option, true>
             isMulti
-            options={companies.map(c => ({ value: c, label: c }))}
-            value={selectedCompanies.map(c => ({ value: c, label: c }))}
-            onChange={(selected: MultiValue<CompanyOption>) => {
+            options={[
+              { value: '__ALL__', label: '🌎 Todas as empresas' },
+              ...companies.map(c => ({ value: c, label: c }))
+            ]}
+            value={
+              selectedCompanies.includes('__ALL__')
+                ? [{ value: '__ALL__', label: '🌎 Todas as empresas' }]
+                : selectedCompanies.map(c => ({ value: c, label: c }))
+            }
+            onChange={(selected: MultiValue<Option>) => {
               const vals = (selected ?? []).map(s => s.value)
-              setSelectedCompanies(vals)
+              if (vals.includes('__ALL__')) {
+                setSelectedCompanies(['__ALL__'])
+              } else {
+                setSelectedCompanies(vals)
+              }
             }}
             placeholder="Escolha as empresas…"
             className={`text-black ${highlightSelect ? 'border-2 border-red-500 animate-pulse' : ''}`}
           />
-          {highlightSelect && (
-            <p className="text-red-600 font-semibold animate-pulse mt-2">
-              💡 Selecione ao menos uma empresa antes de fazer download.
-            </p>
-          )}
         </div>
 
         <div className="flex gap-4 items-end">
@@ -212,8 +246,16 @@ export default function ReportsPage() {
           </div>
           <div>
             <label className="font-semibold block mb-2">Data final</label>
-            <input type="date" className="border px-2 py-1 rounded text-black"
-              value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <div className="flex gap-2">
+              <input type="date" className="border px-2 py-1 rounded text-black"
+                value={endDate} onChange={e => setEndDate(e.target.value)} />
+              <button
+                onClick={resetFilters}
+                className="px-3 py-1 bg-gray-200 text-black rounded hover:bg-gray-300"
+              >
+                🔄 Resetar filtros
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -254,21 +296,48 @@ export default function ReportsPage() {
         </ScatterChart>
       </ResponsiveContainer>
 
-      {/* Lista de eventos */}
+      {/* Filtro por tipo - abaixo do gráfico */}
+      <div className="w-1/3 my-6">
+        <label className="font-semibold block mb-2">Filtrar por tipo</label>
+        <Select<Option, true>
+          isMulti
+          options={typesForCompanies.map(t => ({ value: t, label: t }))}
+          value={selectedTypes.map(t => ({ value: t, label: t }))}
+          onChange={(selected: MultiValue<Option>) => {
+            const vals = (selected ?? []).map(s => s.value)
+            setSelectedTypes(vals)
+          }}
+          placeholder="Escolha tipos…"
+          isDisabled={effectiveCompanies.length === 0}
+          className="text-black"
+        />
+      </div>
+
+      {/* Lista de eventos com paginação */}
       <div className="mt-8 space-y-4">
-        <h2 className="text-xl font-bold mb-2">Eventos (ordenados por data)</h2>
-        {events.map(ev => (
+        <h2 className="text-xl font-bold mb-2">
+          Eventos (ordenados por data) — Mostrando {Math.min(events.length, showEvents)} de {events.length}
+        </h2>
+        {events.slice(0, showEvents).map(ev => (
           <details key={ev.id} className="border-b pb-1 max-w-4xl">
             <summary className="cursor-pointer font-medium">
               {ev.bulletin_date
                 ? new Date(ev.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
-                : ''} — {ev.bulletin_type}
+                : ''} — {ev.canonical_type}
             </summary>
             <div className="w-full text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
               {ev.body_text}
             </div>
           </details>
         ))}
+        {showEvents < events.length && (
+          <button
+            onClick={() => setShowEvents(prev => prev + 50)}
+            className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+          >
+            Carregar mais
+          </button>
+        )}
       </div>
     </div>
   )

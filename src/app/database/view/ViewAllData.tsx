@@ -22,6 +22,7 @@ type Row = {
 type HiddenCols = {
   body_text: string | null
   composite_key: string | null
+  canonical_type: string | null
 }
 
 type FullRow = Row & HiddenCols
@@ -65,9 +66,9 @@ export default function ViewAllData() {
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
-        .from('all_data')
+        .from('vw_bulletins_with_canonical')
         .select(
-          'id, block_id, company, ticker, bulletin_type, bulletin_date, tier, body_text, composite_key'
+          'id, block_id, company, ticker, bulletin_type, canonical_type, bulletin_date, tier, body_text, composite_key'
         )
         .range(0, Number.MAX_SAFE_INTEGER)
 
@@ -75,11 +76,12 @@ export default function ViewAllData() {
         console.error(error)
       } else {
         const fullData = data as FullRow[]
-        setRows(fullData.map(({ body_text, composite_key, ...visible }) => visible))
+        setRows(fullData.map(({ body_text, composite_key, canonical_type, ...visible }) => visible))
         setHiddenCols(
-          fullData.map(({ body_text, composite_key }) => ({
+          fullData.map(({ body_text, composite_key, canonical_type }) => ({
             body_text,
             composite_key,
+            canonical_type,
           }))
         )
       }
@@ -147,13 +149,14 @@ export default function ViewAllData() {
       'Company',
       'Ticker',
       'Type',
+      'Canonical_Type',
       'Tier',
       'Body_Text',
       'Composite_Key',
     ].join(' | ')
 
     const lines = filtered.map((r, idx) => {
-      const hidden = hiddenCols[idx] || { body_text: '', composite_key: '' }
+      const hidden = hiddenCols[idx] || { body_text: '', composite_key: '', canonical_type: '' }
       const date = r.bulletin_date
         ? new Date(r.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
         : ''
@@ -163,6 +166,7 @@ export default function ViewAllData() {
         r.company ?? '',
         r.ticker ?? '',
         r.bulletin_type ?? '',
+        sanitizeCell(hidden.canonical_type),
         r.tier ?? '',
         sanitizeCell(hidden.body_text),
         sanitizeCell(hidden.composite_key),

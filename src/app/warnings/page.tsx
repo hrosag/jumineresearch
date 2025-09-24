@@ -17,6 +17,7 @@ type Row = {
   company: string | null;
   ticker: string | null;
   bulletin_type: string | null;
+  canonical_type: string | null;
   bulletin_date: string | null;
   tier: string | null;
 };
@@ -31,44 +32,46 @@ type SortConfig = {
 export default function WarningsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [comments, setComments] = useState<Record<number, string>>({});
+  const [comments, setComments] = useState<Record<string, string>>({});
   const [colWidths, setColWidths] = useState<Record<string, number>>({
     composite_key: 180,
-    date: 120,
+    bulletin_date: 120,
     block_id: 80,
     company: 200,
     ticker: 120,
-    type: 250,
+    bulletin_type: 250,
+    canonical_type: 250,
     tier: 120,
     comment: 200,
   });
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [authorized, setAuthorized] = useState(false);
 
-  // Carrega comentários e larguras do localStorage
+  // Carrega comentários do Supabase
   useEffect(() => {
-    const stored = localStorage.getItem('warnings-comments');
-    if (stored) setComments(JSON.parse(stored));
+    async function loadComments() {
+      const { data, error } = await supabase
+        .from('warnings_comments')
+        .select('composite_key, comment');
 
-    const storedWidths = localStorage.getItem('warnings-colwidths');
-    if (storedWidths) setColWidths(JSON.parse(storedWidths));
+      if (!error && data) {
+        const map: Record<string, string> = {};
+        data.forEach((c) => {
+          map[c.composite_key] = c.comment;
+        });
+        setComments(map);
+      }
+    }
+    loadComments();
   }, []);
 
-  // Salva comentários
-  useEffect(() => {
-    localStorage.setItem('warnings-comments', JSON.stringify(comments));
-  }, [comments]);
-
-  // Salva larguras
-  useEffect(() => {
-    localStorage.setItem('warnings-colwidths', JSON.stringify(colWidths));
-  }, [colWidths]);
-
+  // Busca dados
   useEffect(() => {
     async function fetchData() {
       const { data, error } = await supabase
-        .from('all_data')
+        .from('vw_bulletins_with_canonical')
         .select(
-          'id, block_id, composite_key, company, ticker, bulletin_type, bulletin_date, tier'
+          'id, block_id, composite_key, company, ticker, bulletin_type, canonical_type, bulletin_date, tier'
         );
 
       if (error) {
@@ -79,6 +82,7 @@ export default function WarningsPage() {
             !r.company?.trim() ||
             !r.ticker?.trim() ||
             !r.bulletin_type?.trim() ||
+            !r.canonical_type?.trim() ||
             !r.bulletin_date?.trim() ||
             !r.tier?.trim()
         );
@@ -100,8 +104,8 @@ export default function WarningsPage() {
     let valB: string | number | null;
 
     if (key === 'comment') {
-      valA = comments[a.id] || '';
-      valB = comments[b.id] || '';
+      valA = comments[a.composite_key] || '';
+      valB = comments[b.composite_key] || '';
     } else {
       valA = a[key as RowKey] ?? '';
       valB = b[key as RowKey] ?? '';
@@ -148,9 +152,34 @@ export default function WarningsPage() {
     );
   };
 
+  // Senha admin
+  function askPassword() {
+    const pwd = prompt('Digite a senha de administrador para habilitar edição:');
+    if (pwd === process.env.NEXT_PUBLIC_DBADMIN_PASSWORD) {
+      setAuthorized(true);
+    } else {
+      alert('Senha incorreta ❌');
+    }
+  }
+
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">⚠️ Avisos</h1>
+      {/* Header com botão alinhado à direita */}
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold">⚠️ Avisos</h1>
+        <div>
+          {!authorized ? (
+            <button
+              onClick={askPassword}
+              className="px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500 text-sm"
+            >
+              🔒 Digite a senha para habilitar edição
+            </button>
+          ) : (
+            <p className="text-green-600 font-semibold">✅ Edição habilitada (admin)</p>
+          )}
+        </div>
+      </div>
 
       {rows.length === 0 ? (
         <p className="text-green-600">Nenhum aviso encontrado 🎉</p>
@@ -160,11 +189,12 @@ export default function WarningsPage() {
             <thead>
               <tr>
                 <ResizableHeader columnKey="composite_key" label="Composite Key" />
-                <ResizableHeader columnKey="date" label="Date" />
+                <ResizableHeader columnKey="bulletin_date" label="Date" />
                 <ResizableHeader columnKey="block_id" label="Block ID" />
                 <ResizableHeader columnKey="company" label="Company" />
                 <ResizableHeader columnKey="ticker" label="Ticker" />
-                <ResizableHeader columnKey="type" label="Type" />
+                <ResizableHeader columnKey="bulletin_type" label="Type (Original)" />
+                <ResizableHeader columnKey="canonical_type" label="Type (Canonical)" />
                 <ResizableHeader columnKey="tier" label="Tier" />
                 <ResizableHeader columnKey="comment" label="Comentário" />
               </tr>
@@ -172,13 +202,10 @@ export default function WarningsPage() {
             <tbody>
               {sortedRows.map((r) => (
                 <tr key={r.id} className="bg-red-50">
-                  <td
-                    className="border px-2 py-2 font-mono text-xs text-gray-600"
-                    style={{ minWidth: colWidths.composite_key }}
-                  >
+                  <td className="border px-2 py-2 font-mono text-xs text-gray-600" style={{ minWidth: colWidths.composite_key }}>
                     {r.composite_key}
                   </td>
-                  <td className="border px-2 py-2" style={{ minWidth: colWidths.date }}>
+                  <td className="border px-2 py-2" style={{ minWidth: colWidths.bulletin_date }}>
                     {r.bulletin_date
                       ? new Date(r.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
                       : <span className="text-red-600">[vazio]</span>}
@@ -192,8 +219,11 @@ export default function WarningsPage() {
                   <td className="border px-2 py-2" style={{ minWidth: colWidths.ticker }}>
                     {r.ticker || <span className="text-red-600">[vazio]</span>}
                   </td>
-                  <td className="border px-2 py-2" style={{ minWidth: colWidths.type }}>
+                  <td className="border px-2 py-2" style={{ minWidth: colWidths.bulletin_type }}>
                     {r.bulletin_type || <span className="text-red-600">[vazio]</span>}
+                  </td>
+                  <td className="border px-2 py-2 text-gray-700 font-semibold" style={{ minWidth: colWidths.canonical_type }}>
+                    {r.canonical_type || <span className="text-red-600">[vazio]</span>}
                   </td>
                   <td className="border px-2 py-2" style={{ minWidth: colWidths.tier }}>
                     {r.tier || <span className="text-red-600">[vazio]</span>}
@@ -201,11 +231,34 @@ export default function WarningsPage() {
                   <td className="border px-2 py-2" style={{ minWidth: colWidths.comment }}>
                     <input
                       type="text"
+                      disabled={!authorized}
                       aria-label={`Comentário para linha ${r.composite_key}`}
-                      value={comments[r.id] || ''}
-                      onChange={(e) => setComments({ ...comments, [r.id]: e.target.value })}
-                      placeholder="Adicionar comentário..."
-                      className="w-full p-1 border rounded text-xs"
+                      value={comments[r.composite_key] || ''}
+                      onChange={async (e) => {
+                        if (!authorized) return;
+                        const newComment = e.target.value;
+                        setComments({ ...comments, [r.composite_key]: newComment });
+
+                        const { error } = await supabase
+                          .from('warnings_comments')
+                          .upsert({
+                            composite_key: r.composite_key,
+                            comment: newComment,
+                          });
+
+                        if (error) {
+                          console.error('Erro ao salvar comentário:', error.message);
+                          alert('⚠️ Não foi possível salvar no banco.');
+                        }
+                      }}
+                      placeholder={
+                        authorized
+                          ? 'Adicionar comentário...'
+                          : '🔒 Apenas administrador pode comentar'
+                      }
+                      className={`w-full p-1 border rounded text-xs ${
+                        !authorized ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''
+                      }`}
                     />
                   </td>
                 </tr>
