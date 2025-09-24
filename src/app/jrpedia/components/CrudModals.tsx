@@ -15,10 +15,7 @@ export default function CrudModals({
   newParentId,
   showEditModal,
   setShowEditModal,
-  showDeleteModal,
-  setShowDeleteModal,
   selectedTerm,
-  setSelectedTerm,
   fetchEntries,
 }: CrudModalsProps) {
   return (
@@ -56,40 +53,6 @@ export default function CrudModals({
               fetchEntries();
             }}
           />
-        )}
-      </Modal>
-
-      {/* Excluir */}
-      <Modal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        title="🗑 Excluir Termo"
-      >
-        {selectedTerm && (
-          <div>
-            <p>
-              Tem certeza que deseja excluir <b>{selectedTerm.term}</b>?
-            </p>
-            <div className="flex justify-end space-x-2 mt-4">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="px-3 py-1 bg-gray-300 rounded"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={async () => {
-                  await supabase.from("glossary").delete().eq("id", selectedTerm.id);
-                  setSelectedTerm(null);
-                  setShowDeleteModal(false);
-                  fetchEntries();
-                }}
-                className="px-3 py-1 bg-red-600 text-white rounded"
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
         )}
       </Modal>
     </>
