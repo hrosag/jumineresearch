@@ -15,21 +15,27 @@ export default function Sidebar({
   setSelectedTerm,
   selectedLang,
 }: SidebarProps) {
-  function TreeNode({ node }: { node: GlossaryNode }) {
+  function TreeNode({
+    node,
+    activeTerm,
+  }: {
+    node: GlossaryNode
+    activeTerm: GlossaryRow | null
+  }) {
     const [collapsed, setCollapsed] = useState(true);
-    const isSelected = selectedTerm?.id === node.id;
+    const isSelected = activeTerm?.id === node.id;
 
     // 🔑 Mantém o caminho expandido se o termo selecionado estiver neste branch
     useEffect(() => {
-      if (!selectedTerm) return;
+      if (!activeTerm) return;
 
       const expandPath = (n: GlossaryNode): boolean => {
-        if (n.id === selectedTerm.id) return true;
+        if (n.id === activeTerm.id) return true;
         return n.children.some(expandPath);
       };
 
       if (expandPath(node)) setCollapsed(false);
-    }, [selectedTerm]);
+    }, [activeTerm, node]);
 
     return (
       <div className="ml-2">
@@ -53,7 +59,7 @@ export default function Sidebar({
         {!collapsed && node.children.length > 0 && (
           <div className="ml-4 border-l border-gray-600 pl-2">
             {node.children.map((child) => (
-              <TreeNode key={child.id} node={child} />
+              <TreeNode key={child.id} node={child} activeTerm={activeTerm} />
             ))}
           </div>
         )}
@@ -65,7 +71,7 @@ export default function Sidebar({
     <aside className="w-64 bg-[#1e2a38] text-white flex flex-col p-3 overflow-y-auto">
       <h3 className="font-bold text-[#d4af37] mb-2">JRpedia</h3>
       {tree.map((node) => (
-        <TreeNode key={node.id} node={node} />
+        <TreeNode key={node.id} node={node} activeTerm={selectedTerm} />
       ))}
     </aside>
   );

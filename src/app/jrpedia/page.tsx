@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // importa os componentes
@@ -52,7 +52,7 @@ export default function JRpediaPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   // Fetch de dados
-  async function fetchEntries() {
+  const fetchEntries = useCallback(async () => {
     const { data, error } = await supabase
       .from("glossary")
       .select("*")
@@ -63,11 +63,25 @@ export default function JRpediaPage() {
     } else if (data) {
       setEntries(data);
     }
-  }
+  }, []);
 
   useEffect(() => {
     fetchEntries();
-  }, []);
+  }, [fetchEntries]);
+
+  const handleAdminToggle = () => {
+    if (isAdmin) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const password = prompt("Digite a senha de administrador:");
+    if (password === process.env.NEXT_PUBLIC_JRPEDIA_PASSWORD) {
+      setIsAdmin(true);
+    } else if (password) {
+      alert("Senha incorreta");
+    }
+  };
 
   // aplica pesquisa (em qualquer campo de tradução ou termo base)
   const filteredEntries = entries.filter((row) =>
@@ -121,6 +135,18 @@ export default function JRpediaPage() {
                 </button>
               ))}
             </div>
+
+            <button
+              type="button"
+              onClick={handleAdminToggle}
+              className={`px-3 py-1 rounded font-medium transition ${
+                isAdmin
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : "bg-green-100 text-green-700 hover:bg-green-200"
+              }`}
+            >
+              {isAdmin ? "Sair do modo admin" : "Entrar como admin"}
+            </button>
           </div>
         </div>
 

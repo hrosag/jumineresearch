@@ -76,7 +76,7 @@ export default function BulletinsPage() {
     setTotalCount(total);
 
     // Tabela base
-    let tableResult: DataItem[] = Object.entries(counts).map(([type, count]) => ({
+    const tableResult: DataItem[] = Object.entries(counts).map(([type, count]) => ({
       type,
       count,
       percent: (count / total) * 100,

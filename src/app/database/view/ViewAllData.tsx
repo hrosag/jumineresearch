@@ -31,7 +31,7 @@ type SortDirection = 'asc' | 'desc'
 
 export default function ViewAllData() {
   const [rows, setRows] = useState<Row[]>([])
-  const [hiddenCols, setHiddenCols] = useState<HiddenCols[]>([])
+  const [hiddenCols, setHiddenCols] = useState<Record<number, HiddenCols>>({})
   const [loading, setLoading] = useState(true)
 
   // filtros
@@ -76,14 +76,20 @@ export default function ViewAllData() {
         console.error(error)
       } else {
         const fullData = data as FullRow[]
-        setRows(fullData.map(({ body_text, composite_key, canonical_type, ...visible }) => visible))
-        setHiddenCols(
-          fullData.map(({ body_text, composite_key, canonical_type }) => ({
+        const visibleRows: Row[] = []
+        const hiddenById: Record<number, HiddenCols> = {}
+
+        fullData.forEach(({ body_text, composite_key, canonical_type, ...visible }) => {
+          visibleRows.push(visible)
+          hiddenById[visible.id] = {
             body_text,
             composite_key,
             canonical_type,
-          }))
-        )
+          }
+        })
+
+        setRows(visibleRows)
+        setHiddenCols(hiddenById)
       }
       setLoading(false)
     }
@@ -155,8 +161,8 @@ export default function ViewAllData() {
       'Composite_Key',
     ].join(' | ')
 
-    const lines = filtered.map((r, idx) => {
-      const hidden = hiddenCols[idx] || { body_text: '', composite_key: '', canonical_type: '' }
+    const lines = filtered.map((r) => {
+      const hidden = hiddenCols[r.id] || { body_text: '', composite_key: '', canonical_type: '' }
       const date = r.bulletin_date
         ? new Date(r.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
         : ''
