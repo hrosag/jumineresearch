@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import Sidebar from "./components/Sidebar";
 import TermView from "./components/TermView";
 import CrudModals from "./components/CrudModals";
+import PasswordModal from "../dbadmin/components/PasswordModal";
 
 // importa os tipos
 import { GlossaryRow, GlossaryNode, Lang } from "./types";
@@ -45,6 +46,7 @@ export default function JRpediaPage() {
 
   // 🔑 Controle Admin
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   // estados dos modais
   const [showNewModal, setShowNewModal] = useState(false);
@@ -85,12 +87,7 @@ export default function JRpediaPage() {
       return;
     }
 
-    const password = prompt("Digite a senha de administrador:");
-    if (password === process.env.NEXT_PUBLIC_JRPEDIA_PASSWORD) {
-      setIsAdmin(true);
-    } else if (password) {
-      alert("Senha incorreta");
-    }
+    setShowPasswordModal(true);
   };
 
   // aplica pesquisa (em qualquer campo de tradução ou termo base)
@@ -186,6 +183,16 @@ export default function JRpediaPage() {
           selectedTerm={selectedTerm}
           setSelectedTerm={setSelectedTerm}
           fetchEntries={fetchEntries}
+        />
+      )}
+
+      {showPasswordModal && (
+        <PasswordModal
+          onSuccess={() => {
+            setIsAdmin(true);
+            setShowPasswordModal(false);
+          }}
+          onClose={() => setShowPasswordModal(false)}
         />
       )}
     </div>
