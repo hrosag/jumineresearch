@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+import Modal from "./Modal";
 import { RealExample, TermViewProps } from "../types";
 
 const supabase = createClient(
@@ -14,9 +15,14 @@ export default function TermView({
   selectedTerm,
   selectedLang,
   isAdmin,
+  onEditTerm,
+  onDeleteSuccess,
 }: TermViewProps) {
   const [realExamples, setRealExamples] = useState<RealExample[]>([]);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -68,6 +74,43 @@ export default function TermView({
     };
   }, [selectedTerm?.fonte]);
 
+  useEffect(() => {
+    setShowDeleteConfirm(false);
+    setIsDeleting(false);
+    setDeleteError(null);
+  }, [selectedTerm?.id]);
+
+  const handleCloseDeleteModal = () => {
+    if (isDeleting) {
+      return;
+    }
+
+    setShowDeleteConfirm(false);
+    setDeleteError(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedTerm) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    const { error } = await supabase
+      .from("glossary")
+      .delete()
+      .eq("id", selectedTerm.id);
+
+    if (error) {
+      console.error("Erro ao excluir termo:", error.message);
+      setDeleteError("Erro ao excluir termo. Tente novamente.");
+    } else {
+      setShowDeleteConfirm(false);
+      onDeleteSuccess();
+    }
+
+    setIsDeleting(false);
+  };
+
   if (!selectedTerm) {
     return (
       <p className="text-gray-500">Selecione um termo na barra lateral.</p>
@@ -75,7 +118,8 @@ export default function TermView({
   }
 
   return (
-    <div className="border rounded-lg bg-white shadow-sm p-6">
+    <>
+      <div className="border rounded-lg bg-white shadow-sm p-6">
       {/* Título no idioma ativo */}
       <h2 className="text-xl font-bold mb-1">
         {selectedTerm[selectedLang] || selectedTerm.term}
@@ -127,19 +171,57 @@ export default function TermView({
         )}
       </div>
 
-      {isAdmin && (
-        <div className="mt-4 flex space-x-2">
-          <button className="px-3 py-1 bg-green-500 text-white rounded">
-            + Novo
+        {isAdmin && (
+          <div className="mt-4 flex space-x-2">
+            <button
+              type="button"
+              onClick={onEditTerm}
+              className="px-3 py-1 rounded bg-yellow-500 text-white transition hover:bg-yellow-600"
+            >
+              ✏️ Editar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteError(null);
+                setShowDeleteConfirm(true);
+              }}
+              className="px-3 py-1 rounded bg-red-600 text-white transition hover:bg-red-700"
+            >
+              🗑 Excluir
+            </button>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        isOpen={showDeleteConfirm}
+        onClose={handleCloseDeleteModal}
+        title="Confirmar exclusão"
+      >
+        <p className="mb-4 text-gray-700">Confirma exclusão deste termo?</p>
+        {deleteError && (
+          <p className="mb-3 text-sm text-red-600">{deleteError}</p>
+        )}
+        <div className="flex justify-end space-x-2">
+          <button
+            type="button"
+            onClick={handleCloseDeleteModal}
+            className="px-3 py-1 rounded bg-gray-200 text-gray-700 transition hover:bg-gray-300"
+            disabled={isDeleting}
+          >
+            Não
           </button>
-          <button className="px-3 py-1 bg-yellow-500 text-white rounded">
-            ✏️ Editar
-          </button>
-          <button className="px-3 py-1 bg-red-600 text-white rounded">
-            🗑 Excluir
+          <button
+            type="button"
+            onClick={handleConfirmDelete}
+            className="px-3 py-1 rounded bg-red-600 text-white transition hover:bg-red-700 disabled:opacity-70"
+            disabled={isDeleting}
+          >
+            {isDeleting ? "Excluindo..." : "Sim"}
           </button>
         </div>
-      )}
-    </div>
+      </Modal>
+    </>
   );
 }

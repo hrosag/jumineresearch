@@ -52,7 +52,6 @@ export default function JRpediaPage() {
   // estados dos modais
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [newTermParentId, setNewTermParentId] = useState<number | null>(null);
 
   // Fetch de dados
@@ -164,28 +163,27 @@ export default function JRpediaPage() {
               ))}
             </div>
 
-            {isAdmin ? (
-              <button
-                type="button"
-                onClick={handleExitAdmin}
-                className="px-3 py-1 rounded font-medium transition bg-red-100 text-red-700 hover:bg-red-200"
-              >
-                Sair do modo admin
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setNewTermParentId(null);
-                  setShouldOpenCreateAfterLogin(false);
-                  setShowPasswordModal(true);
-                }}
-                className="flex h-9 w-9 items-center justify-center rounded bg-green-100 text-lg transition hover:bg-green-200"
-                aria-label="Entrar como admin"
-              >
-                🔑
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (isAdmin) {
+                  handleExitAdmin();
+                  return;
+                }
+
+                setNewTermParentId(null);
+                setShouldOpenCreateAfterLogin(false);
+                setShowPasswordModal(true);
+              }}
+              className={`flex h-9 w-9 items-center justify-center rounded text-lg font-medium transition ${
+                isAdmin
+                  ? "bg-red-100 text-red-600 hover:bg-red-200"
+                  : "bg-green-100 text-green-600 hover:bg-green-200"
+              }`}
+              aria-label={isAdmin ? "Sair do modo admin" : "Entrar como admin"}
+            >
+              🔑
+            </button>
           </div>
         </div>
 
@@ -199,6 +197,11 @@ export default function JRpediaPage() {
             selectedTerm={selectedTerm}
             selectedLang={selectedLang}
             isAdmin={isAdmin}
+            onEditTerm={() => setShowEditModal(true)}
+            onDeleteSuccess={() => {
+              setSelectedTerm(null);
+              fetchEntries();
+            }}
           />
         )}
       </main>
@@ -211,10 +214,7 @@ export default function JRpediaPage() {
           newParentId={newTermParentId}
           showEditModal={showEditModal}
           setShowEditModal={setShowEditModal}
-          showDeleteModal={showDeleteModal}
-          setShowDeleteModal={setShowDeleteModal}
           selectedTerm={selectedTerm}
-          setSelectedTerm={setSelectedTerm}
           fetchEntries={fetchEntries}
         />
       )}

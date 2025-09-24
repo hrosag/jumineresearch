@@ -40,17 +40,16 @@ export type TermViewProps = {
   selectedTerm: GlossaryRow | null;
   selectedLang: Lang;
   isAdmin: boolean;
+  onEditTerm: () => void;
+  onDeleteSuccess: () => void;
 };
 
 export type CrudModalsProps = {
   selectedTerm: GlossaryRow | null;
-  setSelectedTerm: Dispatch<SetStateAction<GlossaryRow | null>>;
   fetchEntries: () => void;
   showNewModal: boolean;
   setShowNewModal: (v: boolean) => void;
   newParentId: number | null;
   showEditModal: boolean;
   setShowEditModal: (v: boolean) => void;
-  showDeleteModal: boolean;
-  setShowDeleteModal: (v: boolean) => void;
 };
