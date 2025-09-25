@@ -42,7 +42,6 @@ export type TermViewProps = {
   isAdmin: boolean;
   onEditTerm: () => void;
   onDeleteSuccess: () => void;
-  glossaryData: GlossaryRow[];
 };
 
 export type CrudModalsProps = {

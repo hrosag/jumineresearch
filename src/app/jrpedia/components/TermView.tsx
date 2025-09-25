@@ -24,49 +24,53 @@ function escapeRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function highlightWithTags(text: string, glossary: GlossaryRow[]) {
+function highlightWithTags(text: string, term: GlossaryRow | null) {
   if (!text) {
     return "";
   }
 
   const sanitized = escapeHtml(text);
+
+  if (!term) {
+    return sanitized;
+  }
+
+  const patterns = [term.term, ...(term.tags ?? [])]
+    .map((rawPattern) => rawPattern?.trim())
+    .filter((pattern): pattern is string => Boolean(pattern));
+
+  if (patterns.length === 0) {
+    return sanitized;
+  }
+
   let result = sanitized;
   const seenPatterns = new Set<string>();
 
-  glossary.forEach((glossaryRow) => {
-    const patterns = [glossaryRow.term, ...(glossaryRow.tags || [])];
+  patterns.forEach((pattern) => {
+    const dedupeKey = pattern.toLowerCase();
+    if (seenPatterns.has(dedupeKey)) {
+      return;
+    }
+    seenPatterns.add(dedupeKey);
 
-    patterns.forEach((rawPattern) => {
-      const pattern = rawPattern?.trim();
-      if (!pattern) {
-        return;
-      }
+    try {
+      const escapedPattern = escapeRegExp(pattern);
+      const regex = new RegExp(`(?<!&)\\b(${escapedPattern})\\b`, "gi");
 
-      const dedupeKey = pattern.toLowerCase();
-      if (seenPatterns.has(dedupeKey)) {
-        return;
-      }
-      seenPatterns.add(dedupeKey);
+      result = result.replace(regex, (match, _group, offset, original) => {
+        const preceding = original.slice(0, offset);
+        const lastOpen = preceding.lastIndexOf("<mark");
+        const lastClose = preceding.lastIndexOf("</mark>");
 
-      try {
-        const escapedPattern = escapeRegExp(pattern);
-        const regex = new RegExp(`(?<!&)\\b(${escapedPattern})\\b`, "gi");
+        if (lastOpen > lastClose) {
+          return match;
+        }
 
-        result = result.replace(regex, (match, _group, offset, original) => {
-          const preceding = original.slice(0, offset);
-          const lastOpen = preceding.lastIndexOf("<mark");
-          const lastClose = preceding.lastIndexOf("</mark>");
-
-          if (lastOpen > lastClose) {
-            return match;
-          }
-
-          return `<mark class="bg-yellow-200">${match}</mark>`;
-        });
-      } catch (err) {
-        console.warn("Regex error for pattern:", pattern, err);
-      }
-    });
+        return `<mark class="bg-yellow-200">${match}</mark>`;
+      });
+    } catch (err) {
+      console.warn("Regex error for pattern:", pattern, err);
+    }
   });
 
   return result;
@@ -78,7 +82,6 @@ export default function TermView({
   isAdmin,
   onEditTerm,
   onDeleteSuccess,
-  glossaryData,
 }: TermViewProps) {
   const [realExamples, setRealExamples] = useState<RealExample[]>([]);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
@@ -234,7 +237,7 @@ export default function TermView({
                     <div
                       className="mt-2 text-gray-900 whitespace-pre-line"
                       dangerouslySetInnerHTML={{
-                        __html: highlightWithTags(bodyText, glossaryData),
+                        __html: highlightWithTags(bodyText, selectedTerm),
                       }}
                     />
                   ) : (
