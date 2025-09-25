@@ -202,6 +202,7 @@ export default function JRpediaPage() {
               setSelectedTerm(null);
               fetchEntries();
             }}
+            glossaryData={entries}
           />
         )}
       </main>

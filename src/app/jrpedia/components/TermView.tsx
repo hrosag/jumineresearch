@@ -4,12 +4,73 @@ import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 import Modal from "./Modal";
-import { RealExample, TermViewProps } from "../types";
+import { GlossaryRow, RealExample, TermViewProps } from "../types";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeRegExp(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightWithTags(text: string, glossary: GlossaryRow[]) {
+  if (!text) {
+    return "";
+  }
+
+  const sanitized = escapeHtml(text);
+  let result = sanitized;
+  const seenPatterns = new Set<string>();
+
+  glossary.forEach((glossaryRow) => {
+    const patterns = [glossaryRow.term, ...(glossaryRow.tags || [])];
+
+    patterns.forEach((rawPattern) => {
+      const pattern = rawPattern?.trim();
+      if (!pattern) {
+        return;
+      }
+
+      const dedupeKey = pattern.toLowerCase();
+      if (seenPatterns.has(dedupeKey)) {
+        return;
+      }
+      seenPatterns.add(dedupeKey);
+
+      try {
+        const escapedPattern = escapeRegExp(pattern);
+        const regex = new RegExp(`(?<!&)\\b(${escapedPattern})\\b`, "gi");
+
+        result = result.replace(regex, (match, _group, offset, original) => {
+          const preceding = original.slice(0, offset);
+          const lastOpen = preceding.lastIndexOf("<mark");
+          const lastClose = preceding.lastIndexOf("</mark>");
+
+          if (lastOpen > lastClose) {
+            return match;
+          }
+
+          return `<mark class="bg-yellow-200">${match}</mark>`;
+        });
+      } catch (err) {
+        console.warn("Regex error for pattern:", pattern, err);
+      }
+    });
+  });
+
+  return result;
+}
 
 export default function TermView({
   selectedTerm,
@@ -17,6 +78,7 @@ export default function TermView({
   isAdmin,
   onEditTerm,
   onDeleteSuccess,
+  glossaryData,
 }: TermViewProps) {
   const [realExamples, setRealExamples] = useState<RealExample[]>([]);
   const [isLoadingExamples, setIsLoadingExamples] = useState(false);
@@ -157,16 +219,32 @@ export default function TermView({
 
         {!isLoadingExamples && realExamples.length > 0 && (
           <div className="space-y-2">
-            {realExamples.map((example) => (
-              <details key={example.composite_key} className="rounded-lg border bg-gray-50 p-4">
-                <summary className="cursor-pointer text-sm font-semibold text-gray-700">
-                  {example.composite_key}
-                </summary>
-                <div className="mt-2 text-gray-900 whitespace-pre-line">
-                  {example.body_text || "Sem conteúdo disponível."}
-                </div>
-              </details>
-            ))}
+            {realExamples.map((example) => {
+              const bodyText = example.body_text;
+
+              return (
+                <details
+                  key={example.composite_key}
+                  className="rounded-lg border bg-gray-50 p-4"
+                >
+                  <summary className="cursor-pointer text-sm font-semibold text-gray-700">
+                    {example.composite_key}
+                  </summary>
+                  {bodyText ? (
+                    <div
+                      className="mt-2 text-gray-900 whitespace-pre-line"
+                      dangerouslySetInnerHTML={{
+                        __html: highlightWithTags(bodyText, glossaryData),
+                      }}
+                    />
+                  ) : (
+                    <div className="mt-2 text-gray-900 whitespace-pre-line">
+                      Sem conteúdo disponível.
+                    </div>
+                  )}
+                </details>
+              );
+            })}
           </div>
         )}
       </div>
