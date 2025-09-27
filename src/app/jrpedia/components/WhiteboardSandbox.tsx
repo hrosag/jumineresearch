@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
 import type {
-  AppState,
   BinaryFileData,
   ExcalidrawAPI,
 } from "@excalidraw/excalidraw";
@@ -20,6 +19,19 @@ type SceneElement = {
   [key: string]: unknown;
 };
 
+// Tipagem mínima local para o appState do Excalidraw
+type SceneAppState = {
+  theme?: "light" | "dark";
+  viewModeEnabled?: boolean;
+  selectionElement?: {
+    x: number;
+    y: number;
+    width?: number;
+    height?: number;
+  };
+  [key: string]: unknown;
+};
+
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
   { ssr: false }
@@ -32,7 +44,7 @@ const supabase = createClient(
 
 type SceneData = {
   elements?: SceneElement[];
-  appState?: AppState;
+  appState?: SceneAppState;
   files?: Record<string, BinaryFileData>;
 };
 
@@ -140,7 +152,7 @@ export default function WhiteboardSandbox() {
         }
         onChange={(
           elements: SceneElement[],
-          appState: AppState,
+          appState: SceneAppState,
           files: Record<string, BinaryFileData>
         ) => {
           const nextScene: SceneData = {
