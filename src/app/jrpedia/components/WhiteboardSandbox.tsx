@@ -3,12 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
-import type {
-  ExcalidrawElement,
-  AppState,
-  BinaryFileData,
-  ExcalidrawAPI,
-} from "@excalidraw/excalidraw";
+import type { ExcalidrawAPI } from "@excalidraw/excalidraw";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/types/element/types";
+import type { AppState, BinaryFileData } from "@excalidraw/excalidraw/types/types";
 
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
@@ -171,3 +168,4 @@ export default function WhiteboardSandbox() {
     </div>
   );
 }
+
