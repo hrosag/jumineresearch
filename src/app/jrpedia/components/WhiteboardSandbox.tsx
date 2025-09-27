@@ -108,8 +108,12 @@ export default function WhiteboardSandbox() {
   return (
     <div style={{ height: "100vh" }}>
       <Excalidraw
-        viewModeEnabled={!isAdmin}
-        initialData={initialData ?? { elements: [], appState: { theme: "light" } }}
+        initialData={
+          initialData ?? {
+            elements: [],
+            appState: { theme: "light", viewModeEnabled: !isAdmin },
+          }
+        }
         onChange={(
           elements: ExcalidrawElement[],
           appState: AppState,
