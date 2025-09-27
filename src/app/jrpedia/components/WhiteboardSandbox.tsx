@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
-import type { ExcalidrawAPI } from "@excalidraw/excalidraw";
 
 // Tipagem mínima local para elementos da cena
 type SceneElement = {
@@ -36,6 +35,13 @@ type SceneBinaryFileData = {
   [key: string]: unknown;
 };
 
+// API mínima local para a ref do Excalidraw
+type SceneExcalidrawAPI = {
+  scrollToContent?: () => void;
+  updateScene?: (data: SceneData) => void;
+  [key: string]: any;
+};
+
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
   { ssr: false }
@@ -56,7 +62,7 @@ export default function WhiteboardSandbox() {
   const [scene, setScene] = useState<SceneData | null>(null);
   const [initialData, setInitialData] = useState<SceneData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const excalidrawRef = useRef<ExcalidrawAPI | null>(null);
+  const excalidrawRef = useRef<SceneExcalidrawAPI | null>(null);
 
   // Carregar a lousa salva no Supabase ao abrir
   useEffect(() => {
