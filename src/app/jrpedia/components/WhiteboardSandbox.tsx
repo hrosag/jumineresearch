@@ -4,9 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
 import type {
+  ExcalidrawElement,
   AppState,
   BinaryFileData,
   ExcalidrawAPI,
+  ExcalidrawInitialData,
 } from "@excalidraw/excalidraw";
 
 const Excalidraw = dynamic(
@@ -19,11 +21,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type SceneData = {
-  elements: any[];
-  appState: AppState;
-  files: Record<string, BinaryFileData>;
-};
+type SceneData = ExcalidrawInitialData;
 
 export default function WhiteboardSandbox() {
   const [scene, setScene] = useState<SceneData | null>(null);
@@ -73,19 +71,22 @@ export default function WhiteboardSandbox() {
 
   // Exportar área delimitada pelo retângulo de seleção
   function exportArea() {
-    if (!scene?.appState?.selectionElement) {
+    const currentScene = scene;
+    const selectionElement = currentScene?.appState?.selectionElement;
+
+    if (!selectionElement || !currentScene || !currentScene.appState) {
       alert("Nenhuma área de seleção desenhada.");
       return;
     }
 
-    const { x, y, width, height } = scene.appState.selectionElement;
+    const { x, y, width = 0, height = 0 } = selectionElement;
 
-    const elementsInBox = scene.elements.filter((el) => {
-      const elRight = el.x + (el.width ?? 0);
-      const elBottom = el.y + (el.height ?? 0);
+    const elementsInBox = (currentScene.elements ?? []).filter((element) => {
+      const elRight = element.x + (element.width ?? 0);
+      const elBottom = element.y + (element.height ?? 0);
       return (
-        el.x >= x &&
-        el.y >= y &&
+        element.x >= x &&
+        element.y >= y &&
         elRight <= x + width &&
         elBottom <= y + height
       );
@@ -96,10 +97,10 @@ export default function WhiteboardSandbox() {
       return;
     }
 
-    const data = {
+    const data: SceneData = {
       elements: elementsInBox,
-      appState: scene.appState,
-      files: scene.files,
+      appState: currentScene.appState,
+      files: currentScene.files ?? {},
     };
 
     const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -125,10 +126,18 @@ export default function WhiteboardSandbox() {
           }
         }
         onChange={(
-          elements: any[],
+          elements: ExcalidrawElement[],
           appState: AppState,
           files: Record<string, BinaryFileData>
-        ) => setScene({ elements, appState, files })}
+        ) => {
+          const nextScene: SceneData = {
+            elements,
+            appState,
+            files,
+          };
+
+          setScene(nextScene);
+        }}
       />
       {!isAdmin && (
         <button
