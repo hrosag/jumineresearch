@@ -24,12 +24,10 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "@types/jszip": "^3.4.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/react-resizable": "^3.0.8",
-    "@types/react-select": "^5.0.0",
     "@types/recharts": "^1.8.29",
     "eslint": "^9",
     "eslint-config-next": "15.5.3",
