@@ -7,7 +7,7 @@ const config = {
   theme: {
     extend: {},
   },
-  plugins: [],
+  plugins: [], // 🚀 sem tailwind-scrollbar (foi o que quebrou no build)
 };
 
 export default config;
