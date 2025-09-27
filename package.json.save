@@ -1,0 +1,44 @@
+{
+  "name": "juniorminingcompany",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build --turbopack",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@headlessui/react": "^2.2.8",
+    "@supabase/supabase-js": "^2.57.4",
+    "framer-motion": "^12.23.19",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.544.0",
+    "next": "15.5.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-resizable": "^3.0.5",
+    "react-select": "^5.10.2",
+<<<<<<< HEAD
+    "recharts": "^3.2.1"
+=======
+    "recharts": "^3.2.1",    "@excalidraw/excalidraw": "0.18.0"
+>>>>>>> origin/main
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/jszip": "^3.4.0",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/react-resizable": "^3.0.8",
+    "@types/react-select": "^5.0.0",
+    "@types/recharts": "^1.8.29",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.3",
+    "supabase": "^2.40.7",
+    "tailwindcss": "^4",
+    "typescript": "^5.9.2"
+  }
+}
