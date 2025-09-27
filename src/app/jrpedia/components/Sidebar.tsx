@@ -34,7 +34,11 @@ export default function Sidebar({
     }, [activeTerm, node]);
 
     const fontSize =
-      level === 0 ? "text-base font-bold" : level === 1 ? "text-sm" : "text-xs text-gray-300";
+      level === 0
+        ? "text-lg font-semibold"
+        : level === 1
+        ? "text-base font-medium"
+        : "text-sm text-gray-300";
 
     return (
       <div className="ml-2">
@@ -67,22 +71,28 @@ export default function Sidebar({
 
   return (
     <aside
-      className="ml-1 w-64 min-w-[220px] max-w-[400px] resize-x overflow-y-auto rounded-md border border-gray-700 bg-[#1e2a38] p-3 text-white shadow-sm scrollbar-thin"
+      className="ml-1 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm"
     >
-      <div className="mb-2 flex items-center justify-between">
+      <div className="flex items-center justify-between px-3 pt-3 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
           type="button"
           onClick={onAddTerm}
-          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] text-black font-bold hover:bg-[#f0c75e]"
+          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] font-bold text-black hover:bg-[#f0c75e]"
           aria-label="Adicionar novo termo"
         >
           +
         </button>
       </div>
-      {tree.map((node) => (
-        <TreeNode key={node.id} node={node} activeTerm={selectedTerm} level={0} />
-      ))}
+      <div className="flex-1 overflow-hidden px-3 pb-3">
+        <div className="h-full border-r border-gray-600 bg-[#1c2833] pt-3">
+          <div className="h-full space-y-1 overflow-y-auto pl-1 pr-1 text-sm scrollbar-hide">
+            {tree.map((node) => (
+              <TreeNode key={node.id} node={node} activeTerm={selectedTerm} level={0} />
+            ))}
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }

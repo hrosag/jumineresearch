@@ -47,4 +47,12 @@ body {
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background-color: #6b7280;
   }
+
+  .scrollbar-hide {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
