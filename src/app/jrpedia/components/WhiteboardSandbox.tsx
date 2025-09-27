@@ -8,6 +8,7 @@ import type {
   AppState,
   BinaryFileData,
   ExcalidrawAPI,
+  ExcalidrawInitialDataState,
 } from "@excalidraw/excalidraw";
 
 const Excalidraw = dynamic(
@@ -119,7 +120,12 @@ export default function WhiteboardSandbox() {
       <Excalidraw
         ref={excalidrawRef}
         viewModeEnabled={!isAdmin}
-        initialData={initialData ?? { elements: [], appState: { theme: "light" } }}
+        initialData={
+          (initialData as ExcalidrawInitialDataState) ?? {
+            elements: [],
+            appState: { theme: "light", viewModeEnabled: !isAdmin },
+          }
+        }
         onChange={(
           elements: ExcalidrawElement[],
           appState: AppState,
