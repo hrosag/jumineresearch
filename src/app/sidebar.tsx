@@ -32,9 +32,9 @@ export default function Sidebar() {
   return (
     <aside
       className={`
-        h-full bg-black text-yellow-400 shadow-lg transition-all duration-300
-        ${isOpen ? "w-64 p-6" : "w-16 p-4"}
-        flex flex-col relative
+        h-full bg-black text-[#d4af37] shadow-lg transition-all duration-300
+        flex flex-col relative pt-4
+        ${isOpen ? "w-64 px-6 pb-6" : "w-16 px-4 pb-4"}
       `}
     >
       {/* Toggle */}

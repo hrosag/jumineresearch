@@ -21,20 +21,23 @@ export default function Sidebar({
     const [collapsed, setCollapsed] = useState(true);
     const isSelected = activeTerm?.id === node.id;
 
-    // 🔑 Mantém o caminho expandido se o termo selecionado estiver neste branch
+    // 🔑 Mantém caminho expandido até o termo selecionado
     useEffect(() => {
       if (!activeTerm) return;
-
-      const expandPath = (n: GlossaryNode): boolean => {
-        if (n.id === activeTerm.id) return true;
-        return n.children.some(expandPath);
-      };
+      const expandPath = (n: GlossaryNode): boolean =>
+        n.id === activeTerm.id || n.children.some(expandPath);
 
       if (expandPath(node)) setCollapsed(false);
     }, [activeTerm, node]);
 
     const fontSize =
-      level === 0 ? "text-base font-bold" : level === 1 ? "text-sm" : "text-xs text-gray-300";
+      level === 0
+        ? "text-lg font-semibold" // ~18px
+        : level === 1
+        ? "text-base font-medium" // ~16px
+        : level === 2
+        ? "text-sm" // ~14px
+        : "text-xs text-gray-300"; // ~12px
 
     return (
       <div className="ml-2">
@@ -42,7 +45,7 @@ export default function Sidebar({
           onClick={() => {
             if (node.children.length > 0) {
               setCollapsed(!collapsed);
-              setSelectedTerm(node); // 🔧 garante seleção mesmo em nós com filhos
+              setSelectedTerm(node);
             } else {
               setSelectedTerm(node);
             }
@@ -57,7 +60,12 @@ export default function Sidebar({
         {!collapsed && node.children.length > 0 && (
           <div className="ml-4 border-l border-gray-600 pl-2">
             {node.children.map((child) => (
-              <TreeNode key={child.id} node={child} activeTerm={activeTerm} level={level + 1} />
+              <TreeNode
+                key={child.id}
+                node={child}
+                activeTerm={activeTerm}
+                level={level + 1}
+              />
             ))}
           </div>
         )}
@@ -66,23 +74,32 @@ export default function Sidebar({
   }
 
   return (
-    <aside
-      className="ml-1 w-64 min-w-[220px] max-w-[400px] resize-x overflow-y-auto rounded-md border border-gray-700 bg-[#1e2a38] p-3 text-white shadow-sm scrollbar-thin scrollbar-track-gray-800 scrollbar-thumb-gray-600 hover:scrollbar-thumb-gray-500"
-    >
-      <div className="mb-2 flex items-center justify-between">
+    <aside className="ml-1 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
+      <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
           type="button"
           onClick={onAddTerm}
-          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] text-black font-bold hover:bg-[#f0c75e]"
+          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] font-bold text-black hover:bg-[#f0c75e]"
           aria-label="Adicionar novo termo"
         >
           +
         </button>
       </div>
-      {tree.map((node) => (
-        <TreeNode key={node.id} node={node} activeTerm={selectedTerm} level={0} />
-      ))}
+      <div className="flex-1 overflow-hidden px-2 pb-3">
+        <div className="h-full border-r border-gray-600 bg-[#1c2833] pt-3">
+          <div className="h-full space-y-1 overflow-y-auto pl-1 pr-1 text-sm scrollbar-hide">
+            {tree.map((node) => (
+              <TreeNode
+                key={node.id}
+                node={node}
+                activeTerm={selectedTerm}
+                level={0}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }

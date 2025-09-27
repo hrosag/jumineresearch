@@ -7,7 +7,7 @@ const config = {
   theme: {
     extend: {},
   },
-  plugins: [require("tailwind-scrollbar")({ nocompatible: true })],
+  plugins: [], // 🚀 sem tailwind-scrollbar (foi o que quebrou no build)
 };
 
 export default config;
