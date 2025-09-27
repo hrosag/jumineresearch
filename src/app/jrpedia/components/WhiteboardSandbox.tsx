@@ -1,14 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
-import type {
-  ExcalidrawElement,
-  AppState,
-  BinaryFileData,
-  ExcalidrawAPI,
-} from "@excalidraw/excalidraw";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/types/element/types";
+import type { AppState, BinaryFileData } from "@excalidraw/excalidraw/types/types";
 
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
@@ -30,9 +26,7 @@ export default function WhiteboardSandbox() {
   const [scene, setScene] = useState<SceneData | null>(null);
   const [initialData, setInitialData] = useState<SceneData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const excalidrawRef = useRef<ExcalidrawAPI | null>(null);
 
-  // Carregar a lousa salva no Supabase ao abrir
   useEffect(() => {
     async function loadScene() {
       const { data, error } = await supabase
@@ -49,7 +43,6 @@ export default function WhiteboardSandbox() {
     loadScene();
   }, []);
 
-  // Salvar sobrescrevendo sempre o mesmo registro
   async function saveScene() {
     if (!scene) return;
     const { error } = await supabase.from("whiteboards").upsert({
@@ -61,7 +54,6 @@ export default function WhiteboardSandbox() {
     else alert("Lousa salva!");
   }
 
-  // Pedir senha do DBAdmin
   function requestAdmin() {
     const pwd = prompt("Digite a senha do DBAdmin:");
     if (pwd === process.env.NEXT_PUBLIC_DBADMIN_PWD) {
@@ -72,7 +64,6 @@ export default function WhiteboardSandbox() {
     }
   }
 
-  // Exportar área delimitada pelo retângulo de seleção
   function exportArea() {
     if (!scene?.appState?.selectionElement) {
       alert("Nenhuma área de seleção desenhada.");
@@ -117,7 +108,6 @@ export default function WhiteboardSandbox() {
   return (
     <div style={{ height: "100vh" }}>
       <Excalidraw
-        ref={excalidrawRef}
         viewModeEnabled={!isAdmin}
         initialData={initialData ?? { elements: [], appState: { theme: "light" } }}
         onChange={(
