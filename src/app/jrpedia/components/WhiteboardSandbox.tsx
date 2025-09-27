@@ -114,7 +114,11 @@ export default function WhiteboardSandbox() {
   return (
     <div style={{ height: "100vh" }}>
       <Excalidraw
-        excalidrawRef={excalidrawRef}
+        ref={(api) => {
+          if (api) {
+            excalidrawRef.current = api;
+          }
+        }}
         viewModeEnabled={!isAdmin}
         initialData={initialData ?? { elements: [], appState: { theme: "light" } }}
         onChange={(
