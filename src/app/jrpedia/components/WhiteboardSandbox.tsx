@@ -114,7 +114,7 @@ export default function WhiteboardSandbox() {
   return (
     <div style={{ height: "100vh" }}>
       <Excalidraw
-        ref={(api) => {
+        excalidrawAPI={(api) => {
           if (api) {
             excalidrawRef.current = api;
           }
