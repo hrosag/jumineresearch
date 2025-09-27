@@ -3,10 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
-import type {
-  BinaryFileData,
-  ExcalidrawAPI,
-} from "@excalidraw/excalidraw";
+import type { ExcalidrawAPI } from "@excalidraw/excalidraw";
 
 // Tipagem mínima local para elementos da cena
 type SceneElement = {
@@ -32,6 +29,13 @@ type SceneAppState = {
   [key: string]: unknown;
 };
 
+type SceneBinaryFileData = {
+  id: string;
+  data?: Blob | ArrayBuffer;
+  mimeType?: string;
+  [key: string]: unknown;
+};
+
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
   { ssr: false }
@@ -45,7 +49,7 @@ const supabase = createClient(
 type SceneData = {
   elements?: SceneElement[];
   appState?: SceneAppState;
-  files?: Record<string, BinaryFileData>;
+  files?: Record<string, SceneBinaryFileData>;
 };
 
 export default function WhiteboardSandbox() {
@@ -153,7 +157,7 @@ export default function WhiteboardSandbox() {
         onChange={(
           elements: SceneElement[],
           appState: SceneAppState,
-          files: Record<string, BinaryFileData>
+          files: Record<string, SceneBinaryFileData>
         ) => {
           const nextScene: SceneData = {
             elements,
