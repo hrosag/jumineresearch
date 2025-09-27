@@ -12,9 +12,11 @@ export default function Sidebar({
   function TreeNode({
     node,
     activeTerm,
+    level = 0,
   }: {
     node: GlossaryNode;
     activeTerm: GlossaryRow | null;
+    level?: number;
   }) {
     const [collapsed, setCollapsed] = useState(true);
     const isSelected = activeTerm?.id === node.id;
@@ -31,6 +33,9 @@ export default function Sidebar({
       if (expandPath(node)) setCollapsed(false);
     }, [activeTerm, node]);
 
+    const fontSize =
+      level === 0 ? "text-base font-bold" : level === 1 ? "text-sm" : "text-xs text-gray-300";
+
     return (
       <div className="ml-2">
         <button
@@ -42,10 +47,8 @@ export default function Sidebar({
               setSelectedTerm(node);
             }
           }}
-          className={`block w-full text-left px-2 py-1 rounded ${
-            isSelected
-              ? "bg-[#d4af37] text-black font-bold"
-              : "hover:bg-[#2e3b4a]"
+          className={`block w-full text-left px-2 py-1 rounded ${fontSize} ${
+            isSelected ? "bg-[#d4af37] text-black" : "hover:bg-[#2e3b4a]"
           }`}
         >
           {node[selectedLang] || node.term}
@@ -54,7 +57,7 @@ export default function Sidebar({
         {!collapsed && node.children.length > 0 && (
           <div className="ml-4 border-l border-gray-600 pl-2">
             {node.children.map((child) => (
-              <TreeNode key={child.id} node={child} activeTerm={activeTerm} />
+              <TreeNode key={child.id} node={child} activeTerm={activeTerm} level={level + 1} />
             ))}
           </div>
         )}
@@ -63,9 +66,11 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="w-64 bg-[#1e2a38] text-white flex flex-col p-3 overflow-y-auto">
+    <aside
+      className="ml-1 w-64 min-w-[220px] max-w-[400px] resize-x overflow-y-auto rounded-md border border-gray-700 bg-[#1e2a38] p-3 text-white shadow-sm scrollbar-thin scrollbar-track-gray-800 scrollbar-thumb-gray-600 hover:scrollbar-thumb-gray-500"
+    >
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-bold text-[#d4af37]">JRpedia</h3>
+        <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
           type="button"
           onClick={onAddTerm}
@@ -76,7 +81,7 @@ export default function Sidebar({
         </button>
       </div>
       {tree.map((node) => (
-        <TreeNode key={node.id} node={node} activeTerm={selectedTerm} />
+        <TreeNode key={node.id} node={node} activeTerm={selectedTerm} level={0} />
       ))}
     </aside>
   );
