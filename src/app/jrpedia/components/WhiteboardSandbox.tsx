@@ -8,7 +8,6 @@ import type {
   AppState,
   BinaryFileData,
   ExcalidrawAPI,
-  ExcalidrawInitialData,
 } from "@excalidraw/excalidraw";
 
 const Excalidraw = dynamic(
@@ -21,7 +20,11 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type SceneData = ExcalidrawInitialData;
+type SceneData = {
+  elements?: ExcalidrawElement[];
+  appState?: AppState;
+  files?: Record<string, BinaryFileData>;
+};
 
 export default function WhiteboardSandbox() {
   const [scene, setScene] = useState<SceneData | null>(null);
