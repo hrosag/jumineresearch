@@ -3,12 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
-import type {
-  ExcalidrawElement,
-  AppState,
-  BinaryFileData,
-  ExcalidrawAPI,
-} from "@excalidraw/excalidraw";
+import type { ExcalidrawImperativeAPI as ExcalidrawAPI } from "@excalidraw/excalidraw/types/types";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/types/element/types";
+import type { AppState, BinaryFileData } from "@excalidraw/excalidraw/types/types";
 
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
@@ -117,7 +114,11 @@ export default function WhiteboardSandbox() {
   return (
     <div style={{ height: "100vh" }}>
       <Excalidraw
-        ref={excalidrawRef}
+        excalidrawAPI={(api) => {
+          if (api) {
+            excalidrawRef.current = api;
+          }
+        }}
         viewModeEnabled={!isAdmin}
         initialData={initialData ?? { elements: [], appState: { theme: "light" } }}
         onChange={(
@@ -171,3 +172,4 @@ export default function WhiteboardSandbox() {
     </div>
   );
 }
+
