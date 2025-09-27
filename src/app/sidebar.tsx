@@ -130,6 +130,12 @@ export default function Sidebar() {
             >
               - Em construção
             </Link>
+            <Link
+              href="/sandbox/whiteboard"
+              className={`transition-colors ${pathname === "/sandbox/whiteboard" ? "text-white" : "hover:text-white"}`}
+            >
+              - Whiteboard
+            </Link>
           </div>
         )}
 
