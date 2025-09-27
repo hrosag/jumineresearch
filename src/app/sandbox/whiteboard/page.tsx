@@ -11,3 +11,7 @@ const config = {
 };
 
 export default config;
+export default function Page() {
+  return <div>Whiteboard sandbox indisponível.</div>;
+}
+

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-// <<< AJUSTE >>> removido req não usado
 export async function POST() {
   try {
     const res = await fetch(
