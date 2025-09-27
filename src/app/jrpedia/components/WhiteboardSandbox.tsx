@@ -7,11 +7,7 @@ import type {
   AppState,
   BinaryFileData,
   ExcalidrawAPI,
-  ExcalidrawInitialDataState,
 } from "@excalidraw/excalidraw";
-
-// Garantir tipagem correta dos elementos
-type ExcalidrawElementType = ExcalidrawInitialDataState["elements"][number];
 
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
@@ -24,7 +20,7 @@ const supabase = createClient(
 );
 
 type SceneData = {
-  elements: ExcalidrawElementType[];
+  elements: any[];
   appState: AppState;
   files: Record<string, BinaryFileData>;
 };
@@ -123,13 +119,13 @@ export default function WhiteboardSandbox() {
         ref={excalidrawRef}
         viewModeEnabled={!isAdmin}
         initialData={
-          (initialData as ExcalidrawInitialDataState) ?? {
+          initialData ?? {
             elements: [],
             appState: { theme: "light", viewModeEnabled: !isAdmin },
           }
         }
         onChange={(
-          elements: ExcalidrawElementType[],
+          elements: any[],
           appState: AppState,
           files: Record<string, BinaryFileData>
         ) => setScene({ elements, appState, files })}
