@@ -10,8 +10,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <body className="flex min-h-screen bg-gray-100">
-        <Sidebar /> {/* 👈 carrega o Client Component */}
-        <main className="flex-1 p-10">{children}</main>
+        <Sidebar /> {/* 👈 Sidebar global */}
+        <main className="flex-1">{children}</main>
       </body>
     </html>
   );
