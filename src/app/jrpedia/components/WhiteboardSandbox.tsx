@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, forwardRef } from "react";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
 
@@ -30,16 +30,21 @@ type SceneAppState = {
 
 // Tipagem mínima local para API do Excalidraw
 type SceneExcalidrawAPI = {
-  scrollToContent: () => void;
-  updateScene: (scene: SceneData) => void;
-  resetScene: () => void;
+  scrollToContent?: () => void;
+  updateScene?: (scene: SceneData) => void;
+  resetScene?: () => void;
   [key: string]: unknown;
 };
 
-const Excalidraw = dynamic(
+const RawExcalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
   { ssr: false }
 );
+
+const Excalidraw = forwardRef<SceneExcalidrawAPI, any>((props, ref) => {
+  return <RawExcalidraw ref={ref as any} {...props} />;
+});
+Excalidraw.displayName = "Excalidraw";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
