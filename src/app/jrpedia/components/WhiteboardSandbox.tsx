@@ -28,18 +28,12 @@ type SceneAppState = {
   [key: string]: unknown;
 };
 
-type SceneBinaryFileData = {
-  id: string;
-  data?: Blob | ArrayBuffer;
-  mimeType?: string;
-  [key: string]: unknown;
-};
-
-// API mínima local para a ref do Excalidraw
+// Tipagem mínima local para API do Excalidraw
 type SceneExcalidrawAPI = {
-  scrollToContent?: () => void;
-  updateScene?: (data: SceneData) => void;
-  [key: string]: any;
+  scrollToContent: () => void;
+  updateScene: (scene: SceneData) => void;
+  resetScene: () => void;
+  [key: string]: unknown;
 };
 
 const Excalidraw = dynamic(
@@ -55,7 +49,7 @@ const supabase = createClient(
 type SceneData = {
   elements?: SceneElement[];
   appState?: SceneAppState;
-  files?: Record<string, SceneBinaryFileData>;
+  files?: Record<string, unknown>;
 };
 
 export default function WhiteboardSandbox() {
@@ -163,14 +157,13 @@ export default function WhiteboardSandbox() {
         onChange={(
           elements: SceneElement[],
           appState: SceneAppState,
-          files: Record<string, SceneBinaryFileData>
+          files: Record<string, unknown>
         ) => {
           const nextScene: SceneData = {
             elements,
             appState,
             files,
           };
-
           setScene(nextScene);
         }}
       />
@@ -191,17 +184,24 @@ export default function WhiteboardSandbox() {
         </button>
       )}
       {isAdmin && (
-        <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: "8px" }}>
+        <div
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            display: "flex",
+            gap: "8px",
+          }}
+        >
           <button
             onClick={saveScene}
             style={{
               background: "black",
               color: "white",
               padding: "8px 12px",
-              borderRadius: "6px",
             }}
           >
-            Salvar no Supabase
+            Salvar
           </button>
           <button
             onClick={exportArea}
@@ -209,7 +209,6 @@ export default function WhiteboardSandbox() {
               background: "blue",
               color: "white",
               padding: "8px 12px",
-              borderRadius: "6px",
             }}
           >
             Exportar Área
