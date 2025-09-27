@@ -67,7 +67,7 @@ export default function Sidebar({
 
   return (
     <aside
-      className="ml-1 w-64 min-w-[220px] max-w-[400px] resize-x overflow-y-auto rounded-md border border-gray-700 bg-[#1e2a38] p-3 text-white shadow-sm scrollbar-thin scrollbar-track-gray-800 scrollbar-thumb-gray-600 hover:scrollbar-thumb-gray-500"
+      className="ml-1 w-64 min-w-[220px] max-w-[400px] resize-x overflow-y-auto rounded-md border border-gray-700 bg-[#1e2a38] p-3 text-white shadow-sm scrollbar-thin"
     >
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
