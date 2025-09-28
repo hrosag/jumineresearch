@@ -52,7 +52,8 @@ function highlightWithTags(
 
       try {
         const escapedPattern = escapeRegExp(value);
-        const regex = new RegExp(`(?<!&)\\b(${escapedPattern})\\b`, "i");
+        // Sem \b para suportar termos compostos (ex: "common shares")
+        const regex = new RegExp(`(${escapedPattern})`, "i");
         const newResult = result.replace(
           regex,
           `<mark class="${className}">$1</mark>`,
