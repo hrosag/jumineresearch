@@ -36,29 +36,24 @@ function highlightWithTags(
     };
   }
 
-  const applyHighlight = (
-    text: string,
-    patterns: { value: string; className: string }[],
-  ) => {
-    let result = text; // trabalhar no texto cru
-    const seenPatterns = new Set<string>();
+  const patterns = [
+    { value: term.term, className: "bg-yellow-200" },
+    ...(term.tags ?? []).map((t) => ({
+      value: t,
+      className: "bg-green-200",
+    })),
+  ].filter((p) => p.value && p.value.trim().length > 0);
 
+  const applyHighlight = (text: string, patterns: typeof patterns) => {
+    let result = text; // usa texto cru para regex
     for (const { value, className } of patterns) {
-      const dedupeKey = value.toLowerCase();
-      if (seenPatterns.has(dedupeKey)) {
-        continue;
-      }
-      seenPatterns.add(dedupeKey);
-
       try {
         const escapedPattern = escapeRegExp(value);
-        // Sem \b para suportar termos compostos (ex: "common shares")
-        const regex = new RegExp(`(${escapedPattern})`, "i");
+        const regex = new RegExp(`(${escapedPattern})`, "i"); // só primeira ocorrência
         const newResult = result.replace(
           regex,
           `<mark class="${className}">$1</mark>`,
         );
-
         if (newResult !== result) {
           result = newResult;
           break;
@@ -67,22 +62,13 @@ function highlightWithTags(
         console.warn("Regex error for pattern:", value, err);
       }
     }
-
-    // Escapar HTML mas preservar <mark>
-    return result
-      .replace(/&/g, "&amp;")
-      .replace(/</g, (m) => (m === "<" ? "&lt;" : m))
-      .replace(/>/g, (m) => (m === ">" ? "&gt;" : m))
+    // escapa HTML preservando <mark>
+    return escapeHtml(result)
       .replace(/&lt;mark class="[^"]+"&gt;/g, (m) =>
         m.replace("&lt;", "<").replace("&gt;", ">"),
       )
       .replace(/&lt;\/mark&gt;/g, "</mark>");
   };
-
-  const patterns = [
-    { value: term.term, className: "bg-yellow-200" },
-    ...(term.tags ?? []).map((t) => ({ value: t, className: "bg-green-200" })),
-  ].filter((p) => p.value && p.value.trim().length > 0);
 
   const bodyHighlighted = body ? applyHighlight(body, patterns) : "";
   const foundInBody = bodyHighlighted.includes("<mark");
