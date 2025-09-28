@@ -29,6 +29,8 @@ function highlightWithTags(
   body: string | null,
   term: GlossaryRow | null,
 ) {
+  type Pattern = { value: string; className: string };
+
   if (!term) {
     return {
       header: escapeHtml(header ?? ""),
@@ -36,31 +38,23 @@ function highlightWithTags(
     };
   }
 
-  const applyHighlight = (
-    text: string,
-    patterns: { value: string; className: string }[],
-  ) => {
-    let result = text; // trabalhar no texto cru
-    const seenPatterns = new Set<string>();
+  const patterns: Pattern[] = [
+    { value: term.term, className: "bg-yellow-200" },
+    ...(term.tags ?? []).map((t) => ({ value: t, className: "bg-green-200" })),
+  ].filter((p) => p.value && p.value.trim().length > 0);
+
+  const applyHighlight = (raw: string, patterns: Pattern[]) => {
+    let safe = escapeHtml(raw);
 
     for (const { value, className } of patterns) {
-      const dedupeKey = value.toLowerCase();
-      if (seenPatterns.has(dedupeKey)) {
-        continue;
-      }
-      seenPatterns.add(dedupeKey);
-
       try {
-        const escapedPattern = escapeRegExp(value);
-        // Sem \b para suportar termos compostos (ex: "common shares")
-        const regex = new RegExp(`(${escapedPattern})`, "i");
-        const newResult = result.replace(
+        const regex = new RegExp(`(${escapeRegExp(value)})`, "i");
+        const newSafe = safe.replace(
           regex,
           `<mark class="${className}">$1</mark>`,
         );
-
-        if (newResult !== result) {
-          result = newResult;
+        if (newSafe !== safe) {
+          safe = newSafe;
           break;
         }
       } catch (err) {
@@ -68,21 +62,8 @@ function highlightWithTags(
       }
     }
 
-    // Escapar HTML mas preservar <mark>
-    return result
-      .replace(/&/g, "&amp;")
-      .replace(/</g, (m) => (m === "<" ? "&lt;" : m))
-      .replace(/>/g, (m) => (m === ">" ? "&gt;" : m))
-      .replace(/&lt;mark class="[^"]+"&gt;/g, (m) =>
-        m.replace("&lt;", "<").replace("&gt;", ">"),
-      )
-      .replace(/&lt;\/mark&gt;/g, "</mark>");
+    return safe;
   };
-
-  const patterns = [
-    { value: term.term, className: "bg-yellow-200" },
-    ...(term.tags ?? []).map((t) => ({ value: t, className: "bg-green-200" })),
-  ].filter((p) => p.value && p.value.trim().length > 0);
 
   const bodyHighlighted = body ? applyHighlight(body, patterns) : "";
   const foundInBody = bodyHighlighted.includes("<mark");
