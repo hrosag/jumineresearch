@@ -130,7 +130,7 @@ export default function JRpediaPage() {
       />
 
       {/* Main panel */}
-      <main className="flex-1 ml-4 rounded-md border border-gray-300 shadow-sm bg-white px-6 py-4 overflow-y-auto">
+      <main className="flex-1 ml-2 rounded-md border border-gray-300 shadow-sm bg-white px-6 py-4 overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           {/* título */}
           <h1 className="text-2xl font-bold">JRpedia</h1>
