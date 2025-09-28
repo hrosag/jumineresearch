@@ -74,7 +74,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
+    <aside className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
       <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
