@@ -29,12 +29,17 @@ function buildTree(
   nodes: ParentNode[],
   parentId: number | null = null,
   level: number = 0,
+  maxDepth: number = 1,
 ): ParentOption[] {
+  if (level > maxDepth) {
+    return [];
+  }
+
   return nodes
     .filter((node) => node.parent_id === parentId)
     .flatMap((node) => [
       { value: node.id, label: `${"— ".repeat(level)}${node.term}` },
-      ...buildTree(nodes, node.id, level + 1),
+      ...buildTree(nodes, node.id, level + 1, maxDepth),
     ]);
 }
 
