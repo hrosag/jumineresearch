@@ -40,7 +40,7 @@ function highlightWithTags(
     text: string,
     patterns: { value: string; className: string }[],
   ) => {
-    let result = text; // trabalhar no texto cru
+    let safe = escapeHtml(text);
     const seenPatterns = new Set<string>();
 
     for (const { value, className } of patterns) {
@@ -52,31 +52,18 @@ function highlightWithTags(
 
       try {
         const escapedPattern = escapeRegExp(value);
-        // Sem \b para suportar termos compostos (ex: "common shares")
+        // "i" = case-insensitive, 1ª ocorrência apenas
         const regex = new RegExp(`(${escapedPattern})`, "i");
-        const newResult = result.replace(
+        safe = safe.replace(
           regex,
           `<mark class="${className}">$1</mark>`,
         );
-
-        if (newResult !== result) {
-          result = newResult;
-          break;
-        }
       } catch (err) {
         console.warn("Regex error for pattern:", value, err);
       }
     }
 
-    // Escapar HTML mas preservar <mark>
-    return result
-      .replace(/&/g, "&amp;")
-      .replace(/</g, (m) => (m === "<" ? "&lt;" : m))
-      .replace(/>/g, (m) => (m === ">" ? "&gt;" : m))
-      .replace(/&lt;mark class="[^"]+"&gt;/g, (m) =>
-        m.replace("&lt;", "<").replace("&gt;", ">"),
-      )
-      .replace(/&lt;\/mark&gt;/g, "</mark>");
+    return safe;
   };
 
   const patterns = [
