@@ -24,56 +24,68 @@ function escapeRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function highlightWithTags(text: string, term: GlossaryRow | null) {
-  if (!text) {
-    return "";
-  }
-
-  const sanitized = escapeHtml(text);
-
+function highlightWithTags(
+  header: string | null,
+  body: string | null,
+  term: GlossaryRow | null,
+) {
   if (!term) {
-    return sanitized;
+    return {
+      header: escapeHtml(header ?? ""),
+      body: escapeHtml(body ?? ""),
+    };
   }
 
-  const patterns = [term.term, ...(term.tags ?? [])]
-    .map((rawPattern) => rawPattern?.trim())
-    .filter((pattern): pattern is string => Boolean(pattern));
+  const applyHighlight = (
+    text: string,
+    patterns: { value: string; className: string }[],
+  ) => {
+    let result = escapeHtml(text);
+    const seenPatterns = new Set<string>();
 
-  if (patterns.length === 0) {
-    return sanitized;
-  }
+    for (const { value, className } of patterns) {
+      const dedupeKey = value.toLowerCase();
+      if (seenPatterns.has(dedupeKey)) {
+        continue;
+      }
+      seenPatterns.add(dedupeKey);
 
-  let result = sanitized;
-  const seenPatterns = new Set<string>();
+      try {
+        const escapedPattern = escapeRegExp(value);
+        const regex = new RegExp(`(?<!&)\\b(${escapedPattern})\\b`, "i");
+        const newResult = result.replace(
+          regex,
+          `<mark class="${className}">$1</mark>`,
+        );
 
-  patterns.forEach((pattern) => {
-    const dedupeKey = pattern.toLowerCase();
-    if (seenPatterns.has(dedupeKey)) {
-      return;
-    }
-    seenPatterns.add(dedupeKey);
-
-    try {
-      const escapedPattern = escapeRegExp(pattern);
-      const regex = new RegExp(`(?<!&)\\b(${escapedPattern})\\b`, "gi");
-
-      result = result.replace(regex, (match, _group, offset, original) => {
-        const preceding = original.slice(0, offset);
-        const lastOpen = preceding.lastIndexOf("<mark");
-        const lastClose = preceding.lastIndexOf("</mark>");
-
-        if (lastOpen > lastClose) {
-          return match;
+        if (newResult !== result) {
+          result = newResult;
+          break;
         }
-
-        return `<mark class="bg-yellow-200">${match}</mark>`;
-      });
-    } catch (err) {
-      console.warn("Regex error for pattern:", pattern, err);
+      } catch (err) {
+        console.warn("Regex error for pattern:", value, err);
+      }
     }
-  });
 
-  return result;
+    return result;
+  };
+
+  const patterns = [
+    { value: term.term, className: "bg-yellow-200" },
+    ...(term.tags ?? []).map((t) => ({
+      value: t,
+      className: "bg-green-200",
+    })),
+  ].filter((p) => p.value && p.value.trim().length > 0);
+
+  const bodyHighlighted = body ? applyHighlight(body, patterns) : "";
+  const foundInBody = bodyHighlighted.includes("<mark");
+
+  const headerHighlighted = header
+    ? applyHighlight(header, foundInBody ? [] : patterns)
+    : "";
+
+  return { header: headerHighlighted, body: bodyHighlighted };
 }
 
 export default function TermView({
@@ -223,22 +235,25 @@ export default function TermView({
         {!isLoadingExamples && realExamples.length > 0 && (
           <div className="space-y-2">
             {realExamples.map((example) => {
-              const bodyText = example.body_text;
+              const { header, body } = highlightWithTags(
+                example.composite_key,
+                example.body_text,
+                selectedTerm,
+              );
 
               return (
                 <details
                   key={example.composite_key}
                   className="rounded-lg border bg-gray-50 p-4"
                 >
-                  <summary className="cursor-pointer text-sm font-semibold text-gray-700">
-                    {example.composite_key}
-                  </summary>
-                  {bodyText ? (
+                  <summary
+                    className="cursor-pointer text-sm font-semibold text-gray-700"
+                    dangerouslySetInnerHTML={{ __html: header }}
+                  />
+                  {body ? (
                     <div
                       className="mt-2 text-gray-900 whitespace-pre-line"
-                      dangerouslySetInnerHTML={{
-                        __html: highlightWithTags(bodyText, selectedTerm),
-                      }}
+                      dangerouslySetInnerHTML={{ __html: body }}
                     />
                   ) : (
                     <div className="mt-2 text-gray-900 whitespace-pre-line">
