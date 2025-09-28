@@ -40,7 +40,7 @@ function highlightWithTags(
     text: string,
     patterns: { value: string; className: string }[],
   ) => {
-    let result = escapeHtml(text);
+    let result = text; // trabalhar no texto cru
     const seenPatterns = new Set<string>();
 
     for (const { value, className } of patterns) {
@@ -68,7 +68,15 @@ function highlightWithTags(
       }
     }
 
-    return result;
+    // Escapar HTML mas preservar <mark>
+    return result
+      .replace(/&/g, "&amp;")
+      .replace(/</g, (m) => (m === "<" ? "&lt;" : m))
+      .replace(/>/g, (m) => (m === ">" ? "&gt;" : m))
+      .replace(/&lt;mark class="[^"]+"&gt;/g, (m) =>
+        m.replace("&lt;", "<").replace("&gt;", ">"),
+      )
+      .replace(/&lt;\/mark&gt;/g, "</mark>");
   };
 
   const patterns = [
