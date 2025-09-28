@@ -40,7 +40,7 @@ export default function Sidebar({
         : "text-xs text-gray-300"; // ~12px
 
     return (
-      <div className="ml-2">
+      <div className="ml-1">
         <button
           onClick={() => {
             if (node.children.length > 0) {
@@ -58,7 +58,7 @@ export default function Sidebar({
         </button>
 
         {!collapsed && node.children.length > 0 && (
-          <div className="ml-4 border-l border-gray-600 pl-2">
+          <div className="ml-2 border-l border-gray-600 pl-1">
             {node.children.map((child) => (
               <TreeNode
                 key={child.id}
@@ -74,7 +74,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="ml-1 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
+    <aside className="flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
       <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
@@ -86,9 +86,9 @@ export default function Sidebar({
           +
         </button>
       </div>
-      <div className="flex-1 overflow-hidden px-2 pb-3">
-        <div className="h-full border-r border-gray-600 bg-[#1c2833] pt-3">
-          <div className="h-full space-y-1 overflow-y-auto pl-1 pr-1 text-sm scrollbar-hide">
+      <div className="flex-1 overflow-hidden pb-3">
+        <div className="h-full border-r border-gray-600 bg-[#1c2833] pt-2">
+          <div className="h-full space-y-1 overflow-y-auto pr-1 text-sm scrollbar-hide">
             {tree.map((node) => (
               <TreeNode
                 key={node.id}
