@@ -28,7 +28,7 @@ body {
   margin: 0;
   padding: 0;
   /* 🔹 Respiro global entre barra do navegador e app */
-  padding-top: 8px; /* ajuste conforme necessidade */
+  padding-top: 16px; /* padronizado */
 }
 
 /* Scrollbar customizada para Sidebar JRpedia */
