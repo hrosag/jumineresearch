@@ -81,12 +81,7 @@ function highlightWithTags(
 
   const patterns = [
     { value: term.term, className: "bg-yellow-200" },
-    ...(term.tags ?? []).map((t, i) => {
-      let className = "bg-gray-200"; // padrão
-      if (i === 0) className = "bg-green-200"; // primeira tag
-      else if (i === 1) className = "bg-blue-200"; // segunda tag
-      return { value: t, className };
-    }),
+    ...(term.tags ?? []).map((t) => ({ value: t, className: "bg-green-200" })),
   ].filter((p) => p.value && p.value.trim().length > 0);
 
   const bodyHighlighted = body ? applyHighlight(body, patterns) : "";
