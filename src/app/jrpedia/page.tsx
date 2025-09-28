@@ -35,6 +35,20 @@ function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
   return roots;
 }
 
+// ---------------------- Sort helper ----------------------
+function sortTree(nodes: GlossaryNode[], lang: Lang): GlossaryNode[] {
+  return [...nodes]
+    .sort((a, b) => {
+      const labelA = (a[lang] || a.term || "").toLowerCase();
+      const labelB = (b[lang] || b.term || "").toLowerCase();
+      return labelA.localeCompare(labelB);
+    })
+    .map((n) => ({
+      ...n,
+      children: sortTree(n.children, lang),
+    }));
+}
+
 // ---------------------- JRpedia Page ----------------------
 export default function JRpediaPage() {
   const [entries, setEntries] = useState<GlossaryRow[]>([]);
@@ -116,7 +130,7 @@ export default function JRpediaPage() {
       .some((val) => val!.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const tree = buildTree(filteredEntries);
+  const tree = sortTree(buildTree(filteredEntries), selectedLang);
 
   return (
     <div className="flex h-screen bg-[#fdf8f0]">
