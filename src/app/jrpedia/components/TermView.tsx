@@ -81,6 +81,25 @@ function highlightWithTags(
   return { header: headerHighlighted, body: bodyHighlighted };
 }
 
+function normalizeBodyText(raw: string): string {
+  const [header, ...rest] = raw.split(/\n\s*\n/);
+  const normalizedRest = rest
+    .map((par) => par.replace(/\n+/g, " "))
+    .join("\n\n");
+  return [header, normalizedRest].filter(Boolean).join("\n\n");
+}
+
+function splitDualLanguage(text: string): { en: string; fr: string | null } {
+  const frIndex = text.search(/TYPE DE BULLETIN|DATE DU BULLETIN|Société du groupe/i);
+  if (frIndex > -1) {
+    return {
+      en: text.slice(0, frIndex).trim(),
+      fr: text.slice(frIndex).trim(),
+    };
+  }
+  return { en: text, fr: null };
+}
+
 export default function TermView({
   selectedTerm,
   selectedLang,
@@ -228,32 +247,51 @@ export default function TermView({
         {!isLoadingExamples && realExamples.length > 0 && (
           <div className="space-y-2">
             {realExamples.map((example) => {
-              const { header, body } = highlightWithTags(
-                example.composite_key,
-                example.body_text,
-                selectedTerm,
-              );
+              const normalized = normalizeBodyText(example.body_text || "");
+              const { en, fr } = splitDualLanguage(normalized);
+
+              const blocks: { lang: string | null; text: string }[] = fr
+                ? [
+                    { lang: "English version", text: en },
+                    { lang: "Version française", text: fr },
+                  ]
+                : [{ lang: null, text: en }];
 
               return (
-                <details
-                  key={example.composite_key}
-                  className="rounded-lg border bg-gray-50 p-4"
-                >
-                  <summary
-                    className="cursor-pointer text-sm font-semibold text-gray-700"
-                    dangerouslySetInnerHTML={{ __html: header }}
-                  />
-                  {body ? (
-                    <div
-                      className="mt-2 text-gray-900 whitespace-pre-line"
-                      dangerouslySetInnerHTML={{ __html: body }}
-                    />
-                  ) : (
-                    <div className="mt-2 text-gray-900 whitespace-pre-line">
-                      Sem conteúdo disponível.
-                    </div>
-                  )}
-                </details>
+                <div key={example.composite_key} className="space-y-2">
+                  {blocks.map((blk, idx) => {
+                    const { header, body } = highlightWithTags(
+                      idx === 0
+                        ? example.composite_key
+                        : `${example.composite_key}_FR`,
+                      blk.text,
+                      selectedTerm,
+                    );
+                    return (
+                      <details
+                        key={`${example.composite_key}-${idx}`}
+                        className="rounded-lg border bg-gray-50 p-4"
+                      >
+                        <summary
+                          className="cursor-pointer text-sm font-semibold text-gray-700"
+                          dangerouslySetInnerHTML={{
+                            __html: blk.lang ? blk.lang : header,
+                          }}
+                        />
+                        {body ? (
+                          <div
+                            className="mt-2 text-gray-900 whitespace-pre-line"
+                            dangerouslySetInnerHTML={{ __html: body }}
+                          />
+                        ) : (
+                          <div className="mt-2 text-gray-900 whitespace-pre-line">
+                            Sem conteúdo disponível.
+                          </div>
+                        )}
+                      </details>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
