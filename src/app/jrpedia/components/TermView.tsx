@@ -95,19 +95,33 @@ function normalizeBodyText(raw: string): string {
   return [fixedHeader, normalizedRest].filter(Boolean).join("\n\n");
 }
 
-function splitDualLanguage(text: string): { en: string; fr: string | null } {
+type SplitResult = { lang: "en" | "fr"; text: string };
+
+function splitDualLanguage(text: string): SplitResult[] {
   const frIndex = text.search(
     /EXPLORATION TYPHON|TYPE DE BULLETIN|DATE DU BULLETIN|Société du groupe/i,
   );
+
   if (frIndex > -1) {
     const enBlock = text.slice(0, frIndex).trim();
     const frBlock = text.slice(frIndex).trim();
-    return {
-      en: normalizeBodyText(enBlock),
-      fr: normalizeBodyText(frBlock),
-    };
+    const blocks: SplitResult[] = [];
+
+    if (enBlock) {
+      blocks.push({ lang: "en", text: normalizeBodyText(enBlock) });
+    }
+
+    if (frBlock) {
+      blocks.push({ lang: "fr", text: normalizeBodyText(frBlock) });
+    }
+
+    if (blocks.length > 0) {
+      return blocks;
+    }
   }
-  return { en: normalizeBodyText(text), fr: null };
+
+  // Apenas bloco em inglês (ou sem delimitadores detectados)
+  return [{ lang: "en", text: normalizeBodyText(text) }];
 }
 
 export default function TermView({
@@ -257,35 +271,40 @@ export default function TermView({
         {!isLoadingExamples && realExamples.length > 0 && (
           <div className="space-y-2">
             {realExamples.map((example) => {
-              const normalized = normalizeBodyText(example.body_text || "");
-              const { en, fr } = splitDualLanguage(normalized);
-
-              const blocks: { lang: string | null; text: string }[] = fr
-                ? [
-                    { lang: "English version", text: en },
-                    { lang: "Version française", text: fr },
-                  ]
-                : [{ lang: null, text: en }];
+              const rawBlocks = splitDualLanguage(example.body_text || "");
+              const hasMultiple = rawBlocks.length > 1;
+              const blocks = rawBlocks.map((blk) => ({
+                langCode: blk.lang,
+                label:
+                  blk.lang === "fr"
+                    ? "Version française"
+                    : hasMultiple
+                    ? "English version"
+                    : null,
+                text: blk.text,
+              }));
 
               return (
                 <div key={example.composite_key} className="space-y-2">
-                  {blocks.map((blk, idx) => {
+                  {blocks.map((blk) => {
+                    const headerKey =
+                      blk.langCode === "fr"
+                        ? `${example.composite_key}_FR`
+                        : example.composite_key;
                     const { header, body } = highlightWithTags(
-                      idx === 0
-                        ? example.composite_key
-                        : `${example.composite_key}_FR`,
+                      headerKey,
                       blk.text,
                       selectedTerm,
                     );
                     return (
                       <details
-                        key={`${example.composite_key}-${idx}`}
+                        key={`${example.composite_key}-${blk.langCode}`}
                         className="rounded-lg border bg-gray-50 p-4"
                       >
                         <summary
                           className="cursor-pointer text-sm font-semibold text-gray-700"
                           dangerouslySetInnerHTML={{
-                            __html: blk.lang ? blk.lang : header,
+                            __html: blk.label ? blk.label : header,
                           }}
                         />
                         {body ? (
