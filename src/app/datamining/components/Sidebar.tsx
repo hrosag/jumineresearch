@@ -9,14 +9,14 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
   const reports = ["Bulletins", "Placeholder"];
 
   return (
-    <div className="w-64 bg-[#1e2a38] text-white h-full p-4">
-      <h2 className="text-lg font-bold mb-4">Data Mining</h2>
-      <ul>
+    <div className="flex h-full flex-col">
+      <h2 className="mb-4 px-3 text-lg font-bold">Data Mining</h2>
+      <ul className="flex-1 space-y-1 px-2">
         {reports.map((r) => (
           <li key={r}>
             <button
               onClick={() => setSelectedReport(r)}
-              className={`block w-full text-left px-2 py-1 rounded ${
+              className={`block w-full rounded px-2 py-1 text-left ${
                 selectedReport === r ? "bg-[#d4af37] text-black" : "hover:bg-[#2e3b4a]"
               }`}
             >
