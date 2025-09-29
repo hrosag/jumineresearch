@@ -90,14 +90,18 @@ function normalizeBodyText(raw: string): string {
 }
 
 function splitDualLanguage(text: string): { en: string; fr: string | null } {
-  const frIndex = text.search(/TYPE DE BULLETIN|DATE DU BULLETIN|Société du groupe/i);
+  const frIndex = text.search(
+    /EXPLORATION TYPHON|TYPE DE BULLETIN|DATE DU BULLETIN|Société du groupe/i,
+  );
   if (frIndex > -1) {
+    const enBlock = text.slice(0, frIndex).trim();
+    const frBlock = text.slice(frIndex).trim();
     return {
-      en: text.slice(0, frIndex).trim(),
-      fr: text.slice(frIndex).trim(),
+      en: normalizeBodyText(enBlock),
+      fr: normalizeBodyText(frBlock),
     };
   }
-  return { en: text, fr: null };
+  return { en: normalizeBodyText(text), fr: null };
 }
 
 export default function TermView({
