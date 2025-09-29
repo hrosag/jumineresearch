@@ -10,15 +10,15 @@ export const reportTree: ReportNode[] = [
     id: "bulletins",
     label: "Bulletins",
     children: [
-      { id: "storytelling", label: "Storytelling" },
-      { id: "sandbox", label: "Sandbox" },
+      { id: "notices", label: "Notices" },
+      { id: "canonical-map", label: "Canonical Map" },
     ],
   },
   {
-    id: "placeholder",
-    label: "Placeholder",
+    id: "lifecycle",
+    label: "Lifecycle",
     children: [
-      { id: "new-listings", label: "Novas Empresas" },
+      { id: "new-listings", label: "New Listings" },
     ],
   },
 ];

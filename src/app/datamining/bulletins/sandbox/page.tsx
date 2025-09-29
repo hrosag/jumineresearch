@@ -35,7 +35,7 @@ type DataItem = {
   percent: number;
 };
 
-export default function BulletinsPage() {
+export default function CanonicalMapPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [chartData, setChartData] = useState<DataItem[]>([]);
@@ -135,7 +135,7 @@ export default function BulletinsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Bulletins</h1>
+      <h1 className="text-2xl font-bold mb-1">Canonical Map</h1>
       <p className="text-gray-500 mb-6">
         Distribuição de tipos de boletim (Canonical) — Scatter + Pareto
       </p>
