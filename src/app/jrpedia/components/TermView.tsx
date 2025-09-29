@@ -83,10 +83,16 @@ function highlightWithTags(
 
 function normalizeBodyText(raw: string): string {
   const [header, ...rest] = raw.split(/\n\s*\n/);
+
+  // Cabeçalho deve ser preservado exatamente como veio (mantém quebras originais)
+  const fixedHeader = header || "";
+
+  // Corpo: cada parágrafo vira linha corrido, mantendo apenas parágrafos separados
   const normalizedRest = rest
     .map((par) => par.replace(/\n+/g, " "))
     .join("\n\n");
-  return [header, normalizedRest].filter(Boolean).join("\n\n");
+
+  return [fixedHeader, normalizedRest].filter(Boolean).join("\n\n");
 }
 
 function splitDualLanguage(text: string): { en: string; fr: string | null } {
