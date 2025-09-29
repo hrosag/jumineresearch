@@ -33,7 +33,7 @@ type Row = {
 
 type Option = { value: string; label: string }
 
-export default function ReportsPage() {
+export default function BulletinsPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
