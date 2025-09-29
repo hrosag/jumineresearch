@@ -8,8 +8,7 @@ export type ReportNode = {
 export const reportTree: ReportNode[] = [
   {
     id: "bulletins",
-    label: "Boletins",
-    defaultExpanded: true,
+    label: "Bulletins",
     children: [
       { id: "storytelling", label: "Storytelling" },
       { id: "sandbox", label: "Sandbox" },
