@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
-import BulletinsPage from "./bulletins/page";
+import StorytellingPage from "./bulletins/page";
+import SandboxBulletinsPage from "./bulletins/sandbox/page";
 import PlaceholderPage from "./placeholder/page";
 
 export default function DataMiningPage() {
-  const [selectedReport, setSelectedReport] = useState<string>("Bulletins");
+  const [selectedReport, setSelectedReport] = useState<string>("Storytelling");
 
   return (
     <div className="flex h-screen">
@@ -16,7 +17,8 @@ export default function DataMiningPage() {
         <Sidebar selectedReport={selectedReport} setSelectedReport={setSelectedReport} />
       </aside>
       <div className="ml-2 flex-1 overflow-y-auto rounded-md border border-gray-200 bg-white p-6 text-black">
-        {selectedReport === "Bulletins" && <BulletinsPage />}
+        {selectedReport === "Storytelling" && <StorytellingPage />}
+        {selectedReport === "Sandbox" && <SandboxBulletinsPage />}
         {selectedReport === "Placeholder" && <PlaceholderPage />}
       </div>
     </div>
