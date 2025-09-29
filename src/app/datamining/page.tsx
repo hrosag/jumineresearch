@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar";
 import StorytellingPage from "./bulletins/page";
 import SandboxBulletinsPage from "./bulletins/sandbox/page";
 import PlaceholderPage from "./placeholder/page";
+import NewListingsPage from "./placeholder/new-listings";
 
 export default function DataMiningPage() {
   const [selectedReport, setSelectedReport] = useState<string>("storytelling");
@@ -20,6 +21,7 @@ export default function DataMiningPage() {
         {selectedReport === "storytelling" && <StorytellingPage />}
         {selectedReport === "sandbox" && <SandboxBulletinsPage />}
         {selectedReport === "placeholder" && <PlaceholderPage />}
+        {selectedReport === "new-listings" && <NewListingsPage />}
       </div>
     </div>
   );
