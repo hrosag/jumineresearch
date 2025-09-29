@@ -17,5 +17,8 @@ export const reportTree: ReportNode[] = [
   {
     id: "placeholder",
     label: "Placeholder",
+    children: [
+      { id: "new-listings", label: "Novas Empresas" },
+    ],
   },
 ];
