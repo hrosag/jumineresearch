@@ -9,9 +9,9 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
   const reports = ["Bulletins", "Placeholder"];
 
   return (
-    <div className="w-64 bg-[#1e2a38] text-white h-full p-4">
+    <div className="h-full flex flex-col">
       <h2 className="text-lg font-bold mb-4">Data Mining</h2>
-      <ul>
+      <ul className="flex-1 space-y-1">
         {reports.map((r) => (
           <li key={r}>
             <button
