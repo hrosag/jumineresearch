@@ -33,7 +33,7 @@ type Row = {
 
 type Option = { value: string; label: string }
 
-export default function BulletinsPage() {
+export default function NoticesPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
@@ -178,7 +178,7 @@ export default function BulletinsPage() {
     <div className="p-6">
       {/* Topo com export */}
       <div className="flex items-center justify-between mb-4 gap-4">
-        <h1 className="text-2xl font-bold">TSXV 2008 — Storytelling por Empresa</h1>
+        <h1 className="text-2xl font-bold">Notices — TSXV 2008</h1>
         <div className="flex gap-2">
           <button
             onClick={() => handleDownload('zip')}
