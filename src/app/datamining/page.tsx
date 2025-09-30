@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
-import NoticesPage from "./bulletins/page";
-import CanonicalMapPage from "./bulletins/canonical-map";
-import NewListingsPage from "./placeholder/new-listings";
+import NoticesPage from "./bulletins/notices/page";
+import CanonicalMapPage from "./bulletins/canonical-map/page";
+import NewListingsPage from "./lifecycle/new-listings/page";
 
 export default function DataMiningPage() {
   const [selectedReport, setSelectedReport] = useState<string>("notices");
