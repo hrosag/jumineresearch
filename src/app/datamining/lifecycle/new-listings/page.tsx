@@ -26,6 +26,43 @@ type Row = {
   canonical_type: string | null;
 };
 
+type ChartDatum = Omit<Row, "company" | "ticker" | "bulletin_date"> & {
+  company: string;
+  ticker: string;
+  bulletin_date: string;
+  date: number;
+};
+
+type TypeOption = {
+  value: string;
+  label: string;
+  canonical: string;
+  color: string;
+};
+
+const typeOptions: TypeOption[] = [
+  {
+    value: "NEW LISTING-IPO-SHARES",
+    label: "IPO",
+    canonical: "NEW LISTING - IPO - SHARES",
+    color: "#1f77b4",
+  },
+  {
+    value: "NEW LISTING-CPC-SHARES",
+    label: "CPC",
+    canonical: "NEW LISTING - CPC - SHARES",
+    color: "#2ca02c",
+  },
+  {
+    value: "NEW LISTING-SHARES",
+    label: "Shares",
+    canonical: "NEW LISTING - SHARES",
+    color: "#ff7f0e",
+  },
+];
+
+const defaultSelectedTypes = typeOptions.map((opt) => opt.canonical);
+
 export default function NewListingsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,17 +70,9 @@ export default function NewListingsPage() {
   const [listingEndDate, setListingEndDate] = useState("");
   const [globalMinDate, setGlobalMinDate] = useState("");
   const [globalMaxDate, setGlobalMaxDate] = useState("");
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([
-    "NEW LISTING - IPO - SHARES",
-    "NEW LISTING - CPC - SHARES",
-    "NEW LISTING - SHARES",
-  ]);
-
-  const typeOptions: { value: string; label: string }[] = [
-    { value: "NEW LISTING-IPO-SHARES", label: "IPO" },
-    { value: "NEW LISTING-CPC-SHARES", label: "CPC" },
-    { value: "NEW LISTING-SHARES", label: "Shares" },
-  ];
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(
+    defaultSelectedTypes,
+  );
 
   useEffect(() => {
     setListingStartDate("");
@@ -109,6 +138,28 @@ export default function NewListingsPage() {
     return withinStart && withinEnd;
   });
 
+  const typeCounts = filteredRows.reduce<Record<string, number>>((acc, row) => {
+    const type = row.canonical_type;
+    if (!type) return acc;
+    acc[type] = (acc[type] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const chartData: ChartDatum[] = filteredRows
+    .filter((row): row is Row & { bulletin_date: string } => Boolean(row.bulletin_date))
+    .map((row) => ({
+      ...row,
+      ticker: row.ticker ?? "—",
+      company: row.company ?? "—",
+      bulletin_date: row.bulletin_date,
+      date: new Date(`${row.bulletin_date}T00:00:00`).getTime(),
+    }));
+
+  const scatterSeries = typeOptions.map((opt) => ({
+    ...opt,
+    data: chartData.filter((row) => row.canonical_type === opt.canonical),
+  }));
+
   const handleResetFilters = () => {
     setListingStartDate(globalMinDate);
     setListingEndDate(globalMaxDate);
@@ -116,11 +167,11 @@ export default function NewListingsPage() {
 
   return (
     <div className="p-6">
-      <h2 className="text-xl font-bold mb-4">New Listings (TSXV)</h2>
+      <h2 className="text-xl font-bold mb-4">New Issuers (TSXV)</h2>
 
       {/* Filtros */}
-      <div className="flex flex-wrap gap-6 mb-4">
-        <div>
+      <div className="flex flex-wrap items-end gap-6 mb-4">
+        <div className="flex flex-col">
           <label className="block text-sm font-medium mb-1">Start Date</label>
           <input
             type="date"
@@ -129,7 +180,7 @@ export default function NewListingsPage() {
             className="border rounded px-2 py-1"
           />
         </div>
-        <div>
+        <div className="flex flex-col">
           <label className="block text-sm font-medium mb-1">End Date</label>
           <input
             type="date"
@@ -138,7 +189,7 @@ export default function NewListingsPage() {
             className="border rounded px-2 py-1"
           />
         </div>
-        <div className="flex items-end">
+        <div className="flex items-end self-end">
           <button
             onClick={handleResetFilters}
             className="px-3 py-1 bg-gray-200 text-black rounded hover:bg-gray-300"
@@ -153,17 +204,20 @@ export default function NewListingsPage() {
               <input
                 type="checkbox"
                 id={opt.value}
-                checked={selectedTypes.includes(opt.value)}
+                checked={selectedTypes.includes(opt.canonical)}
                 onChange={() => {
+                  const canonical = opt.canonical;
                   setSelectedTypes((prev) =>
-                    prev.includes(opt.value)
-                      ? prev.filter((t) => t !== opt.value)
-                      : [...prev, opt.value]
+                    prev.includes(canonical)
+                      ? prev.filter((t) => t !== canonical)
+                      : [...prev, canonical]
                   );
                 }}
                 className="h-4 w-4"
               />
-              <label htmlFor={opt.value}>{opt.label}</label>
+              <label htmlFor={opt.value}>
+                {opt.label} ({typeCounts[opt.canonical] ?? 0})
+              </label>
             </div>
           ))}
         </div>
@@ -176,11 +230,63 @@ export default function NewListingsPage() {
           <ResponsiveContainer width="100%" height={500}>
             <ScatterChart>
               <CartesianGrid />
-              <XAxis dataKey="bulletin_date" name="Data" />
-              <YAxis dataKey="company" name="Empresa" type="category" />
-              <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-              <Legend />
-              <Scatter name="Nova Listagem" data={filteredRows} fill="#d4af37" />
+              <XAxis
+                type="number"
+                dataKey="date"
+                name="Data"
+                domain={["auto", "auto"]}
+                tickFormatter={(ts: number, index: number) => {
+                  const d = new Date(ts);
+                  const dayMonth = d.toLocaleDateString("pt-BR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                  });
+                  const year = d.getFullYear();
+                  const prevYear =
+                    index > 0 && chartData[index - 1]
+                      ? new Date(chartData[index - 1].date).getFullYear()
+                      : null;
+                  if (index === 0 || prevYear !== year)
+                    return `${dayMonth}/${String(year).slice(2)}`;
+                  return dayMonth;
+                }}
+              />
+              <YAxis dataKey="ticker" name="Ticker" type="category" />
+              <Tooltip
+                cursor={{ strokeDasharray: "3 3" }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length > 0) {
+                    const datum = payload[0].payload as ChartDatum;
+                    return (
+                      <div className="bg-white p-2 border rounded shadow text-sm">
+                        <div>
+                          <strong>Data:</strong>{" "}
+                          {new Date(datum.date).toLocaleDateString("pt-BR")}
+                        </div>
+                        <div>
+                          <strong>Empresa:</strong> {datum.company}
+                        </div>
+                        <div>
+                          <strong>Ticker:</strong> {datum.ticker}
+                        </div>
+                        <div>
+                          <strong>Tipo:</strong> {datum.canonical_type ?? "—"}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Legend verticalAlign="middle" align="right" />
+              {scatterSeries.map((series) => (
+                <Scatter
+                  key={series.canonical}
+                  name={series.label}
+                  data={series.data}
+                  fill={series.color}
+                />
+              ))}
             </ScatterChart>
           </ResponsiveContainer>
 
