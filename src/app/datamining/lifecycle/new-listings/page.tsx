@@ -234,7 +234,7 @@ export default function NewListingsPage() {
         <>
           <ResponsiveContainer width="100%" height={500}>
             <ScatterChart
-              margin={{ top: 20, right: 120, bottom: 20, left: 20 }}
+              margin={{ top: 20, right: 160, bottom: 20, left: 20 }}
             >
               <CartesianGrid />
               <XAxis
@@ -295,6 +295,11 @@ export default function NewListingsPage() {
                 layout="vertical"
                 verticalAlign="top"
                 align="right"
+                wrapperStyle={{
+                  paddingLeft: 8,
+                  fontSize: 12,
+                  lineHeight: "20px",
+                }}
               />
               {scatterSeries.map((series) => (
                 <Scatter
