@@ -44,19 +44,19 @@ const typeOptions: TypeOption[] = [
   {
     value: "NEW LISTING-IPO-SHARES",
     label: "IPO",
-    canonical: "NEW LISTING - IPO - SHARES",
+    canonical: "NEW LISTING-IPO-SHARES",
     color: "#1f77b4",
   },
   {
     value: "NEW LISTING-CPC-SHARES",
     label: "CPC",
-    canonical: "NEW LISTING - CPC - SHARES",
+    canonical: "NEW LISTING-CPC-SHARES",
     color: "#2ca02c",
   },
   {
     value: "NEW LISTING-SHARES",
     label: "Shares",
-    canonical: "NEW LISTING - SHARES",
+    canonical: "NEW LISTING-SHARES",
     color: "#ff7f0e",
   },
 ];
