@@ -18,7 +18,7 @@ export const reportTree: ReportNode[] = [
     id: "lifecycle",
     label: "Lifecycle",
     children: [
-      { id: "new-listings", label: "New Listings" },
+      { id: "new-listings", label: "New Issuers" },
     ],
   },
 ];
