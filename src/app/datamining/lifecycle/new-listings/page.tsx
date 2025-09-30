@@ -38,9 +38,9 @@ export default function NewListingsPage() {
   ]);
 
   const typeOptions: { value: string; label: string }[] = [
-    { value: "NEW LISTING - IPO - SHARES", label: "IPO" },
-    { value: "NEW LISTING - CPC - SHARES", label: "CPC" },
-    { value: "NEW LISTING - SHARES", label: "Shares" },
+    { value: "NEW LISTING-IPO-SHARES", label: "IPO" },
+    { value: "NEW LISTING-CPC-SHARES", label: "CPC" },
+    { value: "NEW LISTING-SHARES", label: "Shares" },
   ];
 
   useEffect(() => {
