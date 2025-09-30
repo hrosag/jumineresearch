@@ -233,7 +233,9 @@ export default function NewListingsPage() {
       ) : (
         <>
           <ResponsiveContainer width="100%" height={500}>
-            <ScatterChart>
+            <ScatterChart
+              margin={{ top: 20, right: 120, bottom: 20, left: 20 }}
+            >
               <CartesianGrid />
               <XAxis
                 type="number"
@@ -289,7 +291,11 @@ export default function NewListingsPage() {
                   return null;
                 }}
               />
-              <Legend verticalAlign="middle" align="right" />
+              <Legend
+                layout="vertical"
+                verticalAlign="top"
+                align="right"
+              />
               {scatterSeries.map((series) => (
                 <Scatter
                   key={series.canonical}
