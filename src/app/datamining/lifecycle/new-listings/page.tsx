@@ -74,6 +74,20 @@ export default function NewListingsPage() {
     defaultSelectedTypes,
   );
 
+  const startDateTs = listingStartDate
+    ? (() => {
+        const ts = new Date(listingStartDate).getTime();
+        return Number.isNaN(ts) ? null : ts;
+      })()
+    : null;
+
+  const endDateTs = listingEndDate
+    ? (() => {
+        const ts = new Date(listingEndDate).getTime();
+        return Number.isNaN(ts) ? null : ts;
+      })()
+    : null;
+
   useEffect(() => {
     setListingStartDate("");
     setListingEndDate("");
@@ -130,23 +144,10 @@ export default function NewListingsPage() {
     fetchData();
   }, [selectedTypes]);
 
-  const filteredRows = rows.filter((row) => {
-    if (!row.bulletin_date) return false;
-    const withinStart =
-      !listingStartDate || row.bulletin_date >= listingStartDate;
-    const withinEnd = !listingEndDate || row.bulletin_date <= listingEndDate;
-    return withinStart && withinEnd;
-  });
-
-  const typeCounts = filteredRows.reduce<Record<string, number>>((acc, row) => {
-    const type = row.canonical_type;
-    if (!type) return acc;
-    acc[type] = (acc[type] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  const chartData: ChartDatum[] = filteredRows
-    .filter((row): row is Row & { bulletin_date: string } => Boolean(row.bulletin_date))
+  const chartData: ChartDatum[] = rows
+    .filter(
+      (row): row is Row & { bulletin_date: string } => Boolean(row.bulletin_date),
+    )
     .map((row) => ({
       ...row,
       ticker: row.ticker ?? "—",
@@ -155,9 +156,25 @@ export default function NewListingsPage() {
       date: new Date(`${row.bulletin_date}T00:00:00`).getTime(),
     }));
 
+  const filteredChartData = chartData.filter((row) => {
+    const withinStart = startDateTs === null || row.date >= startDateTs;
+    const withinEnd = endDateTs === null || row.date <= endDateTs;
+    return withinStart && withinEnd;
+  });
+
+  const typeCounts = filteredChartData.reduce<Record<string, number>>(
+    (acc, row) => {
+      const type = row.canonical_type;
+      if (!type) return acc;
+      acc[type] = (acc[type] ?? 0) + 1;
+      return acc;
+    },
+    {},
+  );
+
   const scatterSeries = typeOptions.map((opt) => ({
     ...opt,
-    data: chartData.filter((row) => row.canonical_type === opt.canonical),
+    data: filteredChartData.filter((row) => row.canonical_type === opt.canonical),
   }));
 
   const handleResetFilters = () => {
@@ -243,8 +260,8 @@ export default function NewListingsPage() {
                   });
                   const year = d.getFullYear();
                   const prevYear =
-                    index > 0 && chartData[index - 1]
-                      ? new Date(chartData[index - 1].date).getFullYear()
+                    index > 0 && filteredChartData[index - 1]
+                      ? new Date(filteredChartData[index - 1].date).getFullYear()
                       : null;
                   if (index === 0 || prevYear !== year)
                     return `${dayMonth}/${String(year).slice(2)}`;
@@ -293,7 +310,7 @@ export default function NewListingsPage() {
           {/* Tabela de resultados */}
           <div className="mt-6 border rounded-lg p-4 bg-gray-50">
             <h2 className="text-lg font-semibold mb-2">Resultados</h2>
-            {filteredRows.length === 0 ? (
+            {filteredChartData.length === 0 ? (
               <p className="text-gray-400">Nenhuma empresa encontrada no filtro.</p>
             ) : (
               <table className="w-full text-sm border">
@@ -306,7 +323,7 @@ export default function NewListingsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => (
+                  {filteredChartData.map((row) => (
                     <tr key={row.id} className="hover:bg-gray-100">
                       <td className="border px-2 py-1">{row.company}</td>
                       <td className="border px-2 py-1">{row.ticker}</td>
