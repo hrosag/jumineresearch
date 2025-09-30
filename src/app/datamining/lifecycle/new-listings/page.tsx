@@ -74,20 +74,6 @@ export default function NewListingsPage() {
     defaultSelectedTypes,
   );
 
-  const startDateTs = listingStartDate
-    ? (() => {
-        const ts = new Date(listingStartDate).getTime();
-        return Number.isNaN(ts) ? null : ts;
-      })()
-    : null;
-
-  const endDateTs = listingEndDate
-    ? (() => {
-        const ts = new Date(listingEndDate).getTime();
-        return Number.isNaN(ts) ? null : ts;
-      })()
-    : null;
-
   useEffect(() => {
     setListingStartDate("");
     setListingEndDate("");
@@ -156,9 +142,11 @@ export default function NewListingsPage() {
       date: new Date(`${row.bulletin_date}T00:00:00`).getTime(),
     }));
 
+  // Filtro de datas deve usar bulletin_date (string ISO), como em /Notices
   const filteredChartData = chartData.filter((row) => {
-    const withinStart = startDateTs === null || row.date >= startDateTs;
-    const withinEnd = endDateTs === null || row.date <= endDateTs;
+    const withinStart =
+      !listingStartDate || row.bulletin_date >= listingStartDate;
+    const withinEnd = !listingEndDate || row.bulletin_date <= listingEndDate;
     return withinStart && withinEnd;
   });
 
@@ -268,7 +256,13 @@ export default function NewListingsPage() {
                   return dayMonth;
                 }}
               />
-              <YAxis dataKey="ticker" name="Ticker" type="category" />
+              {/* Alinhar ao padrão do /Notices: eixo Y oculto (empresa) */}
+              <YAxis
+                type="category"
+                dataKey="company"
+                tick={false}
+                axisLine={false}
+              />
               <Tooltip
                 cursor={{ strokeDasharray: "3 3" }}
                 content={({ active, payload }) => {
