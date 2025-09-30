@@ -118,16 +118,47 @@ export default function NewListingsPage() {
       {loading ? (
         <div>⏳ Carregando...</div>
       ) : (
-        <ResponsiveContainer width="100%" height={500}>
-          <ScatterChart>
-            <CartesianGrid />
-            <XAxis dataKey="bulletin_date" name="Data" />
-            <YAxis dataKey="company" name="Empresa" type="category" />
-            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-            <Legend />
-            <Scatter name="Nova Listagem" data={rows} fill="#d4af37" />
-          </ScatterChart>
-        </ResponsiveContainer>
+        <>
+          <ResponsiveContainer width="100%" height={500}>
+            <ScatterChart>
+              <CartesianGrid />
+              <XAxis dataKey="bulletin_date" name="Data" />
+              <YAxis dataKey="company" name="Empresa" type="category" />
+              <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+              <Legend />
+              <Scatter name="Nova Listagem" data={rows} fill="#d4af37" />
+            </ScatterChart>
+          </ResponsiveContainer>
+
+          {/* Tabela de resultados */}
+          <div className="mt-6 border rounded-lg p-4 bg-gray-50">
+            <h2 className="text-lg font-semibold mb-2">Resultados</h2>
+            {rows.length === 0 ? (
+              <p className="text-gray-400">Nenhuma empresa encontrada no filtro.</p>
+            ) : (
+              <table className="w-full text-sm border">
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border px-2 py-1 text-left">Empresa</th>
+                    <th className="border px-2 py-1 text-left">Ticker</th>
+                    <th className="border px-2 py-1 text-left">Data</th>
+                    <th className="border px-2 py-1 text-left">Tipo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.id} className="hover:bg-gray-100">
+                      <td className="border px-2 py-1">{row.company}</td>
+                      <td className="border px-2 py-1">{row.ticker}</td>
+                      <td className="border px-2 py-1">{row.bulletin_date}</td>
+                      <td className="border px-2 py-1">{row.canonical_type}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
