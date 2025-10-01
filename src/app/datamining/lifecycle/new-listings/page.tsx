@@ -373,11 +373,15 @@ export default function NewListingsPage() {
                   <LabelList
                     dataKey="percent"
                     position="right"
-                    formatter={(label: number | string) =>
-                      typeof label === "number"
-                        ? `${label.toFixed(1)}%`
-                        : label
-                    }
+                    formatter={(label: unknown) => {
+                      if (typeof label === "number") {
+                        return `${label.toFixed(1)}%`;
+                      }
+                      if (typeof label === "string") {
+                        return label;
+                      }
+                      return "";
+                    }}
                   />
                 </Bar>
               </BarChart>
