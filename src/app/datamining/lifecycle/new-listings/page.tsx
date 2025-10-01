@@ -29,6 +29,7 @@ type Row = {
   bulletin_date: string | null;
   canonical_type: string | null;
   composite_key: string | null;
+  body_text: string | null;
 };
 
 type ChartDatum = Row & {
@@ -78,6 +79,7 @@ export default function NewListingsPage() {
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     defaultSelectedTypes,
   );
+  const [selectedBody, setSelectedBody] = useState<string | null>(null);
 
   useEffect(() => {
     setListingStartDate("");
@@ -100,7 +102,7 @@ export default function NewListingsPage() {
       const { data, error } = await supabase
         .from("vw_bulletins_with_canonical")
         .select(
-          "id, company, ticker, bulletin_date, canonical_type, composite_key",
+          "id, company, ticker, bulletin_date, canonical_type, composite_key, body_text",
         )
         .in("canonical_type", selectedTypes)
         .order("bulletin_date", { ascending: true });
@@ -518,7 +520,13 @@ export default function NewListingsPage() {
                           <td className="border px-2 py-1">{row.company}</td>
                           <td className="border px-2 py-1">{row.ticker}</td>
                           <td className="border px-2 py-1">
-                            {row.composite_key ?? "—"}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedBody(row.body_text)}
+                              className="text-blue-600 hover:underline"
+                            >
+                              {row.composite_key ?? "—"}
+                            </button>
                           </td>
                           <td className="border px-2 py-1">{row.bulletin_date}</td>
                         </tr>
@@ -529,6 +537,23 @@ export default function NewListingsPage() {
               ))
             )}
           </div>
+          {selectedBody && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+              <div className="bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold">Boletim Completo</h3>
+                  <button
+                    type="button"
+                    className="text-sm text-gray-600 hover:text-gray-800"
+                    onClick={() => setSelectedBody(null)}
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <pre className="whitespace-pre-wrap text-sm">{selectedBody}</pre>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
