@@ -503,23 +503,27 @@ export default function NewListingsPage() {
                   <summary className="cursor-pointer bg-gray-200 px-2 py-1 font-medium">
                     {type} ({rows.length})
                   </summary>
-                  <table className="w-full text-sm border">
+                  <table className="w-full text-sm border table-fixed">
                     <thead>
                       <tr className="bg-gray-100">
-                        <th className="border px-2 py-1 text-left">Empresa</th>
-                        <th className="border px-2 py-1 text-left">Ticker</th>
-                        <th className="border px-2 py-1 text-left">
+                        <th className="border px-2 py-1 text-left w-[40%]">
+                          Empresa
+                        </th>
+                        <th className="border px-2 py-1 text-left w-[15%]">
+                          Ticker
+                        </th>
+                        <th className="border px-2 py-1 text-left w-[25%]">
                           Composite Key
                         </th>
-                        <th className="border px-2 py-1 text-left">Data</th>
+                        <th className="border px-2 py-1 text-left w-[20%]">Data</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((row) => (
                         <tr key={row.id} className="hover:bg-gray-50">
-                          <td className="border px-2 py-1">{row.company}</td>
-                          <td className="border px-2 py-1">{row.ticker}</td>
-                          <td className="border px-2 py-1">
+                          <td className="border px-2 py-1 w-[40%]">{row.company}</td>
+                          <td className="border px-2 py-1 w-[15%]">{row.ticker}</td>
+                          <td className="border px-2 py-1 w-[25%]">
                             <button
                               type="button"
                               onClick={() => setSelectedBody(row.body_text)}
@@ -528,7 +532,9 @@ export default function NewListingsPage() {
                               {row.composite_key ?? "—"}
                             </button>
                           </td>
-                          <td className="border px-2 py-1">{row.bulletin_date}</td>
+                          <td className="border px-2 py-1 w-[20%]">
+                            {row.bulletin_date}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -538,17 +544,17 @@ export default function NewListingsPage() {
             )}
           </div>
           {selectedBody && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-              <div className="bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
-                <div className="flex justify-between items-center mb-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
+              <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+                <button
+                  type="button"
+                  className="absolute top-3 right-3 text-sm text-gray-600 hover:text-gray-800"
+                  onClick={() => setSelectedBody(null)}
+                >
+                  Fechar
+                </button>
+                <div className="flex justify-between items-center mb-4 pr-12">
                   <h3 className="text-lg font-semibold">Boletim Completo</h3>
-                  <button
-                    type="button"
-                    className="text-sm text-gray-600 hover:text-gray-800"
-                    onClick={() => setSelectedBody(null)}
-                  >
-                    Fechar
-                  </button>
                 </div>
                 <pre className="whitespace-pre-wrap text-sm">{selectedBody}</pre>
               </div>
