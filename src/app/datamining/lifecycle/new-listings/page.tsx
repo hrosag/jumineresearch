@@ -373,8 +373,10 @@ export default function NewListingsPage() {
                   <LabelList
                     dataKey="percent"
                     position="right"
-                    formatter={(label: any) =>
-                      typeof label === "number" ? `${label.toFixed(1)}%` : label
+                    formatter={(label: number | string) =>
+                      typeof label === "number"
+                        ? `${label.toFixed(1)}%`
+                        : label
                     }
                   />
                 </Bar>
