@@ -19,10 +19,6 @@ type BaseRow = {
   tier: string | null
 }
 
-type Row = BaseRow & {
-  date: number | null
-}
-
 type HiddenCols = {
   body_text: string | null
   composite_key: string | null
@@ -31,13 +27,7 @@ type HiddenCols = {
 
 type FullRow = BaseRow & HiddenCols
 type SortColumn = keyof BaseRow | null
-type MaybeDateString = string | null
-
-function toTimestamp(value: MaybeDateString) {
-  if (!value) return null
-  const timestamp = new Date(`${value}T00:00:00`).getTime()
-  return Number.isNaN(timestamp) ? null : timestamp
-}
+type Row = BaseRow
 type SortDirection = 'asc' | 'desc'
 
 export default function ViewAllData() {
@@ -53,8 +43,8 @@ export default function ViewAllData() {
   const [filterTier, setFilterTier] = useState('')
 
   // intervalo de datas
-  const [startDate, setStartDate] = useState<MaybeDateString>(null)
-  const [endDate, setEndDate] = useState<MaybeDateString>(null)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
 
   // ordenação
   const [sortColumn, setSortColumn] = useState<SortColumn>(null)
@@ -67,8 +57,8 @@ export default function ViewAllData() {
 
   // inicializa filtros de data via URL
   useEffect(() => {
-    setStartDate(searchParams.get('startDate'))
-    setEndDate(searchParams.get('endDate'))
+    setStartDate(searchParams.get('startDate') ?? '')
+    setEndDate(searchParams.get('endDate') ?? '')
   }, [searchParams])
 
   // busca dados
@@ -78,7 +68,7 @@ export default function ViewAllData() {
       let query = supabase
         .from('vw_bulletins_with_canonical')
         .select(
-          'id, block_id, company, ticker, bulletin_type, canonical_type, bulletin_date::date, tier, body_text, composite_key'
+          'id, block_id, company, ticker, bulletin_type, canonical_type, bulletin_date, tier, body_text, composite_key'
         )
         .range(0, Number.MAX_SAFE_INTEGER)
 
@@ -101,12 +91,7 @@ export default function ViewAllData() {
 
         fullData.forEach(({ body_text, composite_key, canonical_type, ...visible }) => {
           const baseRow = visible as BaseRow
-          const normalizedRow: Row = {
-            ...baseRow,
-            date: toTimestamp(baseRow.bulletin_date),
-          }
-
-          visibleRows.push(normalizedRow)
+          visibleRows.push(baseRow)
           hiddenById[baseRow.id] = {
             body_text,
             composite_key,
@@ -128,9 +113,6 @@ export default function ViewAllData() {
     return String(val ?? '').toLowerCase().includes(filter.toLowerCase())
   }
 
-  const startTimestamp = toTimestamp(startDate)
-  const endTimestamp = toTimestamp(endDate)
-
   const filtered = rows.filter((r) => {
     const textOk =
       check(r.block_id, filterBlockId) &&
@@ -139,9 +121,9 @@ export default function ViewAllData() {
       check(r.bulletin_type, filterType) &&
       check(r.tier, filterTier)
 
-    const dateOk = r.date != null
-      ? (!startTimestamp || r.date >= startTimestamp) &&
-        (!endTimestamp || r.date <= endTimestamp)
+    const date = r.bulletin_date ?? ''
+    const dateOk = r.bulletin_date
+      ? (!startDate || date >= startDate) && (!endDate || date <= endDate)
       : false
 
     return textOk && dateOk
@@ -150,13 +132,10 @@ export default function ViewAllData() {
   const sorted = [...filtered].sort((a, b) => {
     if (!sortColumn) return 0
     if (sortColumn === 'bulletin_date') {
-      const dateA = a.date
-      const dateB = b.date
-      if (dateA == null) return 1
-      if (dateB == null) return -1
-      if (dateA < dateB) return sortDirection === 'asc' ? -1 : 1
-      if (dateA > dateB) return sortDirection === 'asc' ? 1 : -1
-      return 0
+      const dateA = a.bulletin_date ?? ''
+      const dateB = b.bulletin_date ?? ''
+      const result = dateA.localeCompare(dateB)
+      return sortDirection === 'asc' ? result : -result
     }
     const valA = a[sortColumn]
     const valB = b[sortColumn]
@@ -201,7 +180,9 @@ export default function ViewAllData() {
 
     const lines = filtered.map((r) => {
       const hidden = hiddenCols[r.id] || { body_text: '', composite_key: '', canonical_type: '' }
-      const date = r.date ? new Date(r.date).toLocaleDateString('pt-BR') : ''
+      const date = r.bulletin_date
+        ? new Date(`${r.bulletin_date}T00:00:00`).toLocaleDateString('pt-BR')
+        : ''
       return [
         date,
         r.block_id ?? '',
@@ -274,8 +255,8 @@ export default function ViewAllData() {
           <input
             type="date"
             className="border rounded p-1 text-sm"
-            value={startDate ?? ''}
-            onChange={(e) => setStartDate(e.target.value || null)}
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
           />
         </div>
         <div>
@@ -288,8 +269,8 @@ export default function ViewAllData() {
           <input
             type="date"
             className="border rounded p-1 text-sm"
-            value={endDate ?? ''}
-            onChange={(e) => setEndDate(e.target.value || null)}
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
           />
         </div>
       </div>
@@ -370,7 +351,9 @@ export default function ViewAllData() {
           {sorted.map((r) => (
             <tr key={r.id}>
               <td className="border px-4 py-2">
-                {r.date ? new Date(r.date).toLocaleDateString('pt-BR') : ''}
+                {r.bulletin_date
+                  ? new Date(`${r.bulletin_date}T00:00:00`).toLocaleDateString('pt-BR')
+                  : ''}
               </td>
               <td className="border px-4 py-2">{r.block_id}</td>
               <td className="border px-4 py-2">{r.company}</td>
