@@ -11,11 +11,11 @@ const supabase = createClient(
 
 type Row = {
   id: number
-  block_id: number
+  block_id: number | null
   company: string | null
   ticker: string | null
   bulletin_type: string | null
-  bulletin_date: string | null // YYYY-MM-DD
+  bulletin_date: string | null
   tier: string | null
 }
 
@@ -42,8 +42,8 @@ export default function ViewAllData() {
   const [filterTier, setFilterTier] = useState('')
 
   // intervalo de datas
-  const [minDate, setMinDate] = useState('')
-  const [maxDate, setMaxDate] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
 
   // ordenação
   const [sortColumn, setSortColumn] = useState<SortColumn>(null)
@@ -56,24 +56,32 @@ export default function ViewAllData() {
 
   // inicializa filtros de data via URL
   useEffect(() => {
-    const start = searchParams.get('start')
-    const end = searchParams.get('end')
-    if (start) setMinDate(start)
-    if (end) setMaxDate(end)
+    setStartDate(searchParams.get('start') ?? '')
+    setEndDate(searchParams.get('end') ?? '')
   }, [searchParams])
 
   // busca dados
   useEffect(() => {
     async function fetchData() {
-      const { data, error } = await supabase
+      setLoading(true)
+      let query = supabase
         .from('vw_bulletins_with_canonical')
         .select(
           'id, block_id, company, ticker, bulletin_type, canonical_type, bulletin_date, tier, body_text, composite_key'
         )
         .range(0, Number.MAX_SAFE_INTEGER)
 
+      if (startDate) {
+        query = query.gte('bulletin_date', startDate)
+      }
+      if (endDate) {
+        query = query.lte('bulletin_date', endDate)
+      }
+
+      const { data, error } = await query
+
       if (error) {
-        console.error(error)
+        console.error('Erro Supabase:', error.message, error.details)
       } else {
         const fullData = data as FullRow[]
         const visibleRows: Row[] = []
@@ -94,7 +102,7 @@ export default function ViewAllData() {
       setLoading(false)
     }
     fetchData()
-  }, [])
+  }, [startDate, endDate])
 
   function check(val: string | number | null, filter: string) {
     if (!filter) return true
@@ -111,8 +119,8 @@ export default function ViewAllData() {
       check(r.tier, filterTier)
 
     const dateOk = r.bulletin_date
-      ? (!minDate || new Date(r.bulletin_date) >= new Date(minDate)) &&
-        (!maxDate || new Date(r.bulletin_date) <= new Date(maxDate))
+      ? (!startDate || r.bulletin_date >= startDate) &&
+        (!endDate || r.bulletin_date <= endDate)
       : false
 
     return textOk && dateOk
@@ -120,6 +128,12 @@ export default function ViewAllData() {
 
   const sorted = [...filtered].sort((a, b) => {
     if (!sortColumn) return 0
+    if (sortColumn === 'bulletin_date') {
+      const dateA = a.bulletin_date ?? ''
+      const dateB = b.bulletin_date ?? ''
+      const result = dateA.localeCompare(dateB)
+      return sortDirection === 'asc' ? result : -result
+    }
     const valA = a[sortColumn]
     const valB = b[sortColumn]
     if (valA == null) return 1
@@ -164,7 +178,7 @@ export default function ViewAllData() {
     const lines = filtered.map((r) => {
       const hidden = hiddenCols[r.id] || { body_text: '', composite_key: '', canonical_type: '' }
       const date = r.bulletin_date
-        ? new Date(r.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
+        ? new Date(`${r.bulletin_date}T00:00:00`).toLocaleDateString('pt-BR')
         : ''
       return [
         date,
@@ -183,8 +197,8 @@ export default function ViewAllData() {
 
     // nome dinâmico
     const fmt = (d: string) => d.replaceAll('-', '')
-    const startStr = minDate ? fmt(minDate) : 'inicio'
-    const endStr = maxDate ? fmt(maxDate) : 'fim'
+    const startStr = startDate ? fmt(startDate) : 'inicio'
+    const endStr = endDate ? fmt(endDate) : 'fim'
     const filename = `all_data_export_TSXV_${startStr}_${endStr}.txt`
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
@@ -238,22 +252,20 @@ export default function ViewAllData() {
           <input
             type="date"
             className="border rounded p-1 text-sm"
-            value={minDate}
-            onChange={(e) => setMinDate(e.target.value)}
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
           />
         </div>
         <div>
           <label className="block text-sm font-semibold">
             Data máxima
-            <span className="ml-2 text-gray-600 text-xs">
-              ({filtered.length} registros)
-            </span>
+            <span className="ml-2 text-gray-600 text-xs">({filtered.length} registros)</span>
           </label>
           <input
             type="date"
             className="border rounded p-1 text-sm"
-            value={maxDate}
-            onChange={(e) => setMaxDate(e.target.value)}
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
           />
         </div>
       </div>
@@ -335,7 +347,7 @@ export default function ViewAllData() {
             <tr key={r.id}>
               <td className="border px-4 py-2">
                 {r.bulletin_date
-                  ? new Date(r.bulletin_date + 'T00:00:00').toLocaleDateString('pt-BR')
+                  ? new Date(`${r.bulletin_date}T00:00:00`).toLocaleDateString('pt-BR')
                   : ''}
               </td>
               <td className="border px-4 py-2">{r.block_id}</td>
