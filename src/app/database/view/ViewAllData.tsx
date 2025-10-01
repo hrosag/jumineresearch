@@ -78,7 +78,7 @@ export default function ViewAllData() {
       let query = supabase
         .from('vw_bulletins_with_canonical')
         .select(
-          'id, block_id, company, ticker, bulletin_type, canonical_type, bulletin_date, tier, body_text, composite_key'
+          'id, block_id, company, ticker, bulletin_type, canonical_type, bulletin_date::date, tier, body_text, composite_key'
         )
         .range(0, Number.MAX_SAFE_INTEGER)
 
