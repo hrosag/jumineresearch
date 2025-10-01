@@ -28,6 +28,7 @@ type Row = {
   ticker: string | null;
   bulletin_date: string | null;
   canonical_type: string | null;
+  composite_key: string | null;
 };
 
 type ChartDatum = Row & {
@@ -98,7 +99,9 @@ export default function NewListingsPage() {
       setLoading(true);
       const { data, error } = await supabase
         .from("vw_bulletins_with_canonical")
-        .select("id, company, ticker, bulletin_date, canonical_type")
+        .select(
+          "id, company, ticker, bulletin_date, canonical_type, composite_key",
+        )
         .in("canonical_type", selectedTypes)
         .order("bulletin_date", { ascending: true });
 
@@ -503,6 +506,9 @@ export default function NewListingsPage() {
                       <tr className="bg-gray-100">
                         <th className="border px-2 py-1 text-left">Empresa</th>
                         <th className="border px-2 py-1 text-left">Ticker</th>
+                        <th className="border px-2 py-1 text-left">
+                          Composite Key
+                        </th>
                         <th className="border px-2 py-1 text-left">Data</th>
                       </tr>
                     </thead>
@@ -511,6 +517,9 @@ export default function NewListingsPage() {
                         <tr key={row.id} className="hover:bg-gray-50">
                           <td className="border px-2 py-1">{row.company}</td>
                           <td className="border px-2 py-1">{row.ticker}</td>
+                          <td className="border px-2 py-1">
+                            {row.composite_key ?? "—"}
+                          </td>
                           <td className="border px-2 py-1">{row.bulletin_date}</td>
                         </tr>
                       ))}
