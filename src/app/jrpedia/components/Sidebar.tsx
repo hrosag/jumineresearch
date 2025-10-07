@@ -20,9 +20,10 @@ export default function Sidebar({
     level?: number;
   }) {
     const [collapsed, setCollapsed] = useState(true);
-    const isSamePath = activeTerm?.path && node.path
-      ? activeTerm.path === node.path
-      : activeTerm?.id === node.id;
+    const isSamePath =
+      activeTerm?.path && node.path
+        ? activeTerm.path === node.path
+        : activeTerm?.id === node.id;
     const isSelected = Boolean(isSamePath);
 
     useEffect(() => {
@@ -64,9 +65,6 @@ export default function Sidebar({
           type="button"
         >
           <div className="flex items-center space-x-2">
-            {node.path && (
-              <span className="text-xs font-mono text-[#d4af37]">{node.path}</span>
-            )}
             <span>{node[selectedLang] || node.term}</span>
           </div>
         </button>
