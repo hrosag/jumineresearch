@@ -6,8 +6,8 @@ type ModalProps = {
   onClose: () => void;
   title?: string;
   children: ReactNode;
-  contentClassName?: string; // compatibilidade com CrudModals
-  titleClassName?: string;   // compatibilidade com CrudModals
+  contentClassName?: string;
+  titleClassName?: string;
 };
 
 export default function Modal({
@@ -18,10 +18,8 @@ export default function Modal({
   contentClassName,
   titleClassName,
 }: ModalProps) {
-  // bloqueia scroll do fundo
   useEffect(() => {
-    if (isOpen) document.body.style.overflow = "hidden";
-    else document.body.style.overflow = "auto";
+    document.body.style.overflow = isOpen ? "hidden" : "auto";
     return () => {
       document.body.style.overflow = "auto";
     };
@@ -29,7 +27,6 @@ export default function Modal({
 
   if (!isOpen) return null;
 
-  // fecha ao clicar fora
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose();
   };
@@ -37,20 +34,16 @@ export default function Modal({
   return (
     <div
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn"
     >
       <div
-        className={`relative w-[90vw] max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-2xl border border-gray-200 animate-slideUp ${
-          contentClassName ?? ""
-        }`}
+        className={`relative w-[95vw] max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-gray-300 animate-slideUp ${contentClassName ?? ""}`}
       >
         {/* header */}
         <header
-          className={`sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-4 ${
-            titleClassName ?? ""
-          }`}
+          className={`flex items-center justify-between border-b px-6 py-3 bg-gradient-to-r from-[#f9f9f9] to-[#fff] ${titleClassName ?? ""}`}
         >
-          <h2 className="text-lg font-semibold text-gray-800">
+          <h2 className="text-lg font-semibold text-gray-800 tracking-tight">
             {title ?? "Modal"}
           </h2>
           <button
@@ -62,11 +55,12 @@ export default function Modal({
           </button>
         </header>
 
-        {/* conteúdo */}
-        <main className="p-6">{children}</main>
+        {/* conteúdo rolável */}
+        <main className="p-6 overflow-y-auto max-h-[80vh] bg-white">
+          {children}
+        </main>
       </div>
 
-      {/* animações Tailwind personalizadas */}
       <style jsx>{`
         @keyframes fadeIn {
           from {
@@ -79,7 +73,7 @@ export default function Modal({
         @keyframes slideUp {
           from {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(30px);
           }
           to {
             opacity: 1;
