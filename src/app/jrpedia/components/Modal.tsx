@@ -7,6 +7,8 @@ type ModalProps = {
   title?: string;
   children: ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
+  contentClassName?: string;   // <— reintroduzido
+  titleClassName?: string;     // <— reintroduzido
 };
 
 export default function Modal({
