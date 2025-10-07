@@ -241,47 +241,52 @@ export default function GlossaryForm({
     setLoading(false);
   }
 
+  const inputClassName =
+    "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200";
+  const textareaClassName = `${inputClassName} min-h-[120px] resize-y`;
+
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="space-y-4 w-full max-w-[700px] max-h-[90vh] overflow-y-auto text-white"
-    >
-      <div>
-        <label className="block text-sm font-bold text-gray-200">Termo base</label>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-gray-700">Termo base</label>
         <input
           name="term"
           value={form.term}
           onChange={handleChange}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
+          className={inputClassName}
           required
         />
       </div>
 
       {form.path && (
-        <div>
-          <span className="block text-xs uppercase tracking-wide text-gray-400">Caminho atual</span>
-          <div className="mt-1 rounded border border-[#2e3b4a] bg-[#13202c] px-3 py-2 text-sm">
-            {form.path}
-          </div>
+        <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+          <span className="font-medium uppercase tracking-wide text-xs text-gray-500">
+            Caminho atual
+          </span>
+          <span className="break-words text-gray-700">{form.path}</span>
         </div>
       )}
 
-      <div>
-        <label className="block text-sm font-semibold text-gray-200">parent_path</label>
-        <div className="mt-2 grid gap-3 md:grid-cols-2">
-          <div>
-            <span className="block text-xs uppercase tracking-wide text-gray-400">Path</span>
+      <div className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
+        <label className="text-sm font-semibold text-gray-700">parent_path</label>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Path
+            </span>
             <input
               type="text"
               name="parent_path"
               placeholder="e.g. 1.1 or 1.1.1"
               value={typeof form.parent_path === "string" ? form.parent_path : form.parent_path ?? ""}
               onChange={(event) => handleParentPathChange(event.target.value)}
-              className="mt-1 border-transparent bg-white p-2 w-full rounded text-black placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
+              className={inputClassName}
             />
           </div>
-          <div>
-            <span className="block text-xs uppercase tracking-wide text-gray-400">Term</span>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Term
+            </span>
             <input
               type="text"
               list="parent-term-options"
@@ -289,7 +294,7 @@ export default function GlossaryForm({
               placeholder="Search parent term"
               value={form.parent_name ?? ""}
               onChange={(event) => handleParentTermChange(event.target.value)}
-              className="mt-1 border-transparent bg-white p-2 w-full rounded text-black placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
+              className={inputClassName}
             />
             <datalist id="parent-term-options">
               {allTerms.map((term) => (
@@ -300,92 +305,95 @@ export default function GlossaryForm({
             </datalist>
           </div>
         </div>
-        <p className="text-xs text-gray-400 mt-2">
+        <p className="text-xs text-gray-500">
           Leave both fields empty to create a root-level term.
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <div>
-          <label className="block text-sm text-gray-200">PT</label>
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">PT</label>
           <input
             name="pt"
             value={form.pt ?? ""}
             onChange={handleChange}
-            className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
+            className={inputClassName}
           />
         </div>
-        <div>
-          <label className="block text-sm text-gray-200">EN</label>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">EN</label>
           <input
             name="en"
             value={form.en ?? ""}
             onChange={handleChange}
-            className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
+            className={inputClassName}
           />
         </div>
-        <div>
-          <label className="block text-sm text-gray-200">FR</label>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">FR</label>
           <input
             name="fr"
             value={form.fr ?? ""}
             onChange={handleChange}
-            className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
+            className={inputClassName}
           />
         </div>
       </div>
 
-      <div>
-        <label className="block text-sm text-gray-200">Definição PT</label>
-        <textarea
-          name="definition_pt"
-          value={form.definition_pt ?? ""}
-          onChange={handleChange}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
-        />
-      </div>
-      <div>
-        <label className="block text-sm text-gray-200">Definição EN</label>
-        <textarea
-          name="definition_en"
-          value={form.definition_en ?? ""}
-          onChange={handleChange}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
-        />
-      </div>
-      <div>
-        <label className="block text-sm text-gray-200">Definição FR</label>
-        <textarea
-          name="definition_fr"
-          value={form.definition_fr ?? ""}
-          onChange={handleChange}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm text-gray-200">Categoria</label>
-        <input
-          name="category"
-          value={form.category ?? ""}
-          onChange={handleChange}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
-        />
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Definição PT</label>
+          <textarea
+            name="definition_pt"
+            value={form.definition_pt ?? ""}
+            onChange={handleChange}
+            className={textareaClassName}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Definição EN</label>
+          <textarea
+            name="definition_en"
+            value={form.definition_en ?? ""}
+            onChange={handleChange}
+            className={textareaClassName}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Definição FR</label>
+          <textarea
+            name="definition_fr"
+            value={form.definition_fr ?? ""}
+            onChange={handleChange}
+            className={textareaClassName}
+          />
+        </div>
       </div>
 
-      <div>
-        <label className="block text-sm text-gray-200">Fonte</label>
-        <input
-          type="text"
-          name="fonte"
-          value={form.fonte}
-          onChange={handleChange}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
-        />
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Categoria</label>
+          <input
+            name="category"
+            value={form.category ?? ""}
+            onChange={handleChange}
+            className={inputClassName}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Fonte</label>
+          <input
+            type="text"
+            name="fonte"
+            value={form.fonte}
+            onChange={handleChange}
+            className={inputClassName}
+          />
+        </div>
       </div>
 
-      <div>
-        <label className="block text-sm text-gray-200">
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-gray-700">
           Tags (separadas por vírgula)
         </label>
         <input
@@ -401,22 +409,22 @@ export default function GlossaryForm({
               tags: nextTags.length > 0 ? nextTags : [],
             }));
           }}
-          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
+          className={inputClassName}
         />
       </div>
 
-      <div className="flex justify-end space-x-2 pt-2">
+      <div className="flex justify-end gap-3 pt-2">
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 rounded border border-[#d4af37] text-[#d4af37] hover:bg-[#2e3b4a]"
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
         >
           Cancelar
         </button>
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 rounded bg-[#d4af37] text-black font-bold hover:bg-[#f0c75e] disabled:opacity-70"
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {loading ? "Salvando..." : "Salvar"}
         </button>

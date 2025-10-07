@@ -19,9 +19,6 @@ export default function CrudModals({
   selectedTerm,
   fetchEntries,
 }: CrudModalsProps) {
-  const modalBaseClasses =
-    "max-w-[600px] border border-[#2e3b4a] bg-[#1e2a38] text-white";
-
   const handleCreate = async (formData: GlossaryRowInput) => {
     const { error } = await supabase.from("glossary").insert(formData);
     if (error) {
@@ -53,8 +50,6 @@ export default function CrudModals({
         isOpen={showNewModal}
         onClose={() => setShowNewModal(false)}
         title="➕ Novo Termo"
-        contentClassName={modalBaseClasses}
-        titleClassName="text-2xl font-semibold text-[#d4af37]"
       >
         <GlossaryForm
           initialParentPath={newParentPath}
@@ -67,8 +62,6 @@ export default function CrudModals({
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
         title="✏️ Editar Termo"
-        contentClassName={modalBaseClasses}
-        titleClassName="text-2xl font-semibold text-[#d4af37]"
       >
         {selectedTerm && (
           <GlossaryForm
