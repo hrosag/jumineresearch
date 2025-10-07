@@ -21,7 +21,9 @@ export type GlossaryRow = {
   parent_path?: string | null;
 };
 
-export type GlossaryRowInput = Omit<GlossaryRow, "id">;
+export type GlossaryRowInput = Omit<GlossaryRow, "id"> & {
+  parent_name?: string;
+};
 
 export type GlossaryNode = GlossaryRow & { children: GlossaryNode[] };
 
