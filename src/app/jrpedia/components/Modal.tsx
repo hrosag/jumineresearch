@@ -23,7 +23,7 @@ export default function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div
-        className={`relative w-full max-w-lg rounded-lg bg-white p-6 shadow-lg ${
+        className={`relative w-[80vw] max-w-[1000px] rounded-lg bg-white p-6 shadow-lg ${
           contentClassName ?? ""
         }`}
       >
