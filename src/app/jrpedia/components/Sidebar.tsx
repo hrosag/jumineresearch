@@ -59,7 +59,7 @@ export default function Sidebar({
             setSelectedTerm(node);
           }}
           className={`block w-full text-left px-2 py-1 rounded ${fontSize} ${
-            isSelected ? "bg-[#d4af37] text-black" : "hover:bg-[#2e3b4a]"
+            isSelected ? "bg-[#d4af37] text-black" : "hover:bg-gray-200"
           }`}
           type="button"
         >
@@ -88,7 +88,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
+    <aside className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-300 bg-white text-black shadow-sm">
       <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
@@ -101,7 +101,7 @@ export default function Sidebar({
         </button>
       </div>
       <div className="flex-1 overflow-hidden pb-3">
-        <div className="h-full border-r border-gray-600 bg-[#1c2833] pt-2">
+        <div className="h-full border-r border-gray-200 bg-white pt-2">
           <div className="h-full space-y-1 overflow-y-auto pr-1 text-sm scrollbar-hide">
             {tree.map((node) => (
               <TreeNode

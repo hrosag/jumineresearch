@@ -244,7 +244,7 @@ export default function GlossaryForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 w-full max-w-[700px] max-h-[90vh] overflow-y-auto text-white"
+      className="space-y-4 w-full max-w-[700px] max-h-[90vh] overflow-y-auto text-black"
     >
       <div>
         <label className="block text-sm font-bold text-gray-200">Termo base</label>
@@ -260,7 +260,7 @@ export default function GlossaryForm({
       {form.path && (
         <div>
           <span className="block text-xs uppercase tracking-wide text-gray-400">Caminho atual</span>
-          <div className="mt-1 rounded border border-[#2e3b4a] bg-[#13202c] px-3 py-2 text-sm">
+          <div className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-sm">
             {form.path}
           </div>
         </div>
