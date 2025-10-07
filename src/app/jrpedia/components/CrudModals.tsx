@@ -19,16 +19,24 @@ export default function CrudModals({
   selectedTerm,
   fetchEntries,
 }: CrudModalsProps) {
+  // Normaliza e remove campos não persistidos
+  const sanitizeData = (data: GlossaryRowInput): Record<string, any> => {
+    const clean = { ...data } as Record<string, any>;
+    delete clean.id;
+    delete clean.parent_name;
+    return clean;
+  };
+
   // CREATE
   const handleCreate = async (formData: GlossaryRowInput) => {
-    // remove campos não persistentes
-    const { id, parent_name, ...cleanData } = formData;
-
+    const cleanData = sanitizeData(formData);
     const { error } = await supabase.from("glossary").insert(cleanData);
+
     if (error) {
       console.error("Erro ao criar termo:", error.message);
       return;
     }
+
     setShowNewModal(false);
     fetchEntries();
   };
@@ -37,9 +45,7 @@ export default function CrudModals({
   const handleUpdate = async (formData: GlossaryRowInput) => {
     if (!selectedTerm) return;
 
-    // remove campos não persistentes
-    const { id, parent_name, ...cleanData } = formData;
-
+    const cleanData = sanitizeData(formData);
     const { error } = await supabase
       .from("glossary")
       .update(cleanData)
@@ -49,6 +55,7 @@ export default function CrudModals({
       console.error("Erro ao atualizar termo:", error.message);
       return;
     }
+
     setShowEditModal(false);
     fetchEntries();
   };
