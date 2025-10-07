@@ -1,6 +1,7 @@
 "use client";
+
 import { useEffect, useState } from "react";
-import { GlossaryRow, GlossaryNode, SidebarProps } from "../types";
+import { GlossaryNode, GlossaryRow, SidebarProps } from "../types";
 
 export default function Sidebar({
   tree,
@@ -19,49 +20,62 @@ export default function Sidebar({
     level?: number;
   }) {
     const [collapsed, setCollapsed] = useState(true);
-    const isSelected = activeTerm?.id === node.id;
+    const isSamePath = activeTerm?.path && node.path
+      ? activeTerm.path === node.path
+      : activeTerm?.id === node.id;
+    const isSelected = Boolean(isSamePath);
 
-    // 🔑 Mantém caminho expandido até o termo selecionado
     useEffect(() => {
       if (!activeTerm) return;
-      const expandPath = (n: GlossaryNode): boolean =>
-        n.id === activeTerm.id || n.children.some(expandPath);
+      const expandPath = (current: GlossaryNode): boolean => {
+        const matchesPath =
+          (current.path && current.path === activeTerm.path) ||
+          current.id === activeTerm.id;
+        if (matchesPath) return true;
+        return current.children.some(expandPath);
+      };
 
-      if (expandPath(node)) setCollapsed(false);
+      if (expandPath(node)) {
+        setCollapsed(false);
+      }
     }, [activeTerm, node]);
 
     const fontSize =
       level === 0
-        ? "text-lg font-semibold" // ~18px
+        ? "text-lg font-semibold"
         : level === 1
-        ? "text-base font-medium" // ~16px
+        ? "text-base font-medium"
         : level === 2
-        ? "text-sm" // ~14px
-        : "text-xs text-gray-300"; // ~12px
+        ? "text-sm"
+        : "text-xs text-gray-300";
 
     return (
       <div className="ml-1">
         <button
           onClick={() => {
             if (node.children.length > 0) {
-              setCollapsed(!collapsed);
-              setSelectedTerm(node);
-            } else {
-              setSelectedTerm(node);
+              setCollapsed((prev) => !prev);
             }
+            setSelectedTerm(node);
           }}
           className={`block w-full text-left px-2 py-1 rounded ${fontSize} ${
             isSelected ? "bg-[#d4af37] text-black" : "hover:bg-[#2e3b4a]"
           }`}
+          type="button"
         >
-          {node[selectedLang] || node.term}
+          <div className="flex items-center space-x-2">
+            {node.path && (
+              <span className="text-xs font-mono text-[#d4af37]">{node.path}</span>
+            )}
+            <span>{node[selectedLang] || node.term}</span>
+          </div>
         </button>
 
         {!collapsed && node.children.length > 0 && (
           <div className="ml-2 border-l border-gray-600 pl-1">
             {node.children.map((child) => (
               <TreeNode
-                key={child.id}
+                key={child.path ?? `node-${child.id}`}
                 node={child}
                 activeTerm={activeTerm}
                 level={level + 1}
@@ -74,9 +88,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside
-      className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm"
-    >
+    <aside className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
       <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
@@ -93,7 +105,7 @@ export default function Sidebar({
           <div className="h-full space-y-1 overflow-y-auto pr-1 text-sm scrollbar-hide">
             {tree.map((node) => (
               <TreeNode
-                key={node.id}
+                key={node.path ?? `node-${node.id}`}
                 node={node}
                 activeTerm={selectedTerm}
                 level={0}

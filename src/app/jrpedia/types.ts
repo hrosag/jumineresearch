@@ -16,7 +16,9 @@ export type GlossaryRow = {
   category: string | null;
   fonte: string;
   tags: string[] | null;
-  parent_id: number | null;
+  parent_id?: number | null;
+  path?: string | null;
+  parent_path?: string | null;
 };
 
 export type GlossaryRowInput = Omit<GlossaryRow, "id">;
@@ -49,7 +51,7 @@ export type CrudModalsProps = {
   fetchEntries: () => void;
   showNewModal: boolean;
   setShowNewModal: (v: boolean) => void;
-  newParentId: number | null;
+  newParentPath: string | null;
   showEditModal: boolean;
   setShowEditModal: (v: boolean) => void;
 };

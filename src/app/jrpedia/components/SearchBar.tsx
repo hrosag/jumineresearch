@@ -1,6 +1,7 @@
 // src/app/jrpedia/components/SearchBar.tsx
 "use client";
-import { useState } from "react";
+
+import { useMemo, useState } from "react";
 import { GlossaryRow } from "../types";
 
 type SearchBarProps = {
@@ -11,45 +12,64 @@ type SearchBarProps = {
 export default function SearchBar({ entries, onSelect }: SearchBarProps) {
   const [query, setQuery] = useState("");
 
-  const results = query
-    ? entries.filter((e) =>
-        [e.term, e.pt, e.en, e.fr, ...(e.tags || [])]
-          .join(" ")
-          .toLowerCase()
-          .includes(query.toLowerCase())
-      )
-    : [];
+  const results = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return [] as GlossaryRow[];
+
+    return entries.filter((entry) => {
+      const searchableTokens: string[] = [
+        entry.term,
+        entry.pt ?? "",
+        entry.en ?? "",
+        entry.fr ?? "",
+        entry.path ?? "",
+        ...(entry.tags ?? []),
+      ].filter((token) => token.length > 0);
+
+      return searchableTokens.some((token) =>
+        token.toLowerCase().includes(normalizedQuery),
+      );
+    });
+  }, [entries, query]);
 
   return (
     <div className="mb-4 relative">
       <input
         type="text"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Pesquisar termos..."
-        className="border rounded p-2 w-full"
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Pesquisar termos ou caminhos..."
+        className="w-full rounded border border-[#2e3b4a] bg-[#1c2833] p-2 text-white placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
       />
 
       {query && (
-        <div className="absolute bg-white border rounded w-full mt-1 max-h-60 overflow-y-auto shadow-lg z-10">
+        <div className="absolute left-0 right-0 z-10 mt-1 max-h-60 w-full overflow-y-auto rounded border border-[#2e3b4a] bg-[#1e2a38] shadow-lg">
           {results.length > 0 ? (
-            results.map((r) => (
+            results.map((result) => (
               <button
-                key={r.id}
+                key={result.path ?? `result-${result.id}`}
                 onClick={() => {
-                  onSelect(r);
+                  onSelect(result);
                   setQuery("");
                 }}
-                className="block w-full text-left px-3 py-2 hover:bg-gray-100"
+                type="button"
+                className="block w-full px-3 py-2 text-left text-white transition hover:bg-[#2e3b4a]"
               >
-                <span className="font-bold">{r.term}</span>
-                <span className="text-sm text-gray-500 ml-2">
-                  ({r.pt || r.en || r.fr})
+                <div className="flex items-baseline justify-between">
+                  <span className="font-semibold">{result.term}</span>
+                  {result.path && (
+                    <span className="ml-3 text-xs font-mono text-[#d4af37]">
+                      {result.path}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-300">
+                  {[result.pt, result.en, result.fr].filter(Boolean).join(" • ")}
                 </span>
               </button>
             ))
           ) : (
-            <div className="px-3 py-2 text-gray-500">Nenhum resultado</div>
+            <div className="px-3 py-2 text-sm text-gray-300">Nenhum resultado</div>
           )}
         </div>
       )}
