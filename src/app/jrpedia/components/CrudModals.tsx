@@ -21,10 +21,9 @@ export default function CrudModals({
 }: CrudModalsProps) {
   // CREATE
   const handleCreate = async (formData: GlossaryRowInput) => {
-    const cleanData = { ...formData } as Record<string, any>;
-    delete cleanData.id;
-    delete cleanData.parent_name;
-  
+    // remove campos não persistentes
+    const { id, parent_name, ...cleanData } = formData;
+
     const { error } = await supabase.from("glossary").insert(cleanData);
     if (error) {
       console.error("Erro ao criar termo:", error.message);
@@ -33,19 +32,19 @@ export default function CrudModals({
     setShowNewModal(false);
     fetchEntries();
   };
-  
+
   // UPDATE
   const handleUpdate = async (formData: GlossaryRowInput) => {
     if (!selectedTerm) return;
-    const cleanData = { ...formData } as Record<string, any>;
-    delete cleanData.id;
-    delete cleanData.parent_name;
-  
+
+    // remove campos não persistentes
+    const { id, parent_name, ...cleanData } = formData;
+
     const { error } = await supabase
       .from("glossary")
       .update(cleanData)
       .eq("id", selectedTerm.id);
-  
+
     if (error) {
       console.error("Erro ao atualizar termo:", error.message);
       return;
