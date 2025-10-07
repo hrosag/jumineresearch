@@ -6,18 +6,10 @@ type ModalProps = {
   onClose: () => void;
   title?: string;
   children: ReactNode;
-  contentClassName?: string;
-  titleClassName?: string;
 };
 
-export default function Modal({
-  isOpen,
-  onClose,
-  title,
-  children,
-  contentClassName,
-  titleClassName,
-}: ModalProps) {
+export default function Modal({ isOpen, onClose, title, children }: ModalProps) {
+  // trava scroll do fundo
   useEffect(() => {
     document.body.style.overflow = isOpen ? "hidden" : "auto";
     return () => {
@@ -27,66 +19,30 @@ export default function Modal({
 
   if (!isOpen) return null;
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
   return (
     <div
-      onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div
-        className={`relative w-[95vw] max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-gray-300 animate-slideUp ${contentClassName ?? ""}`}
-      >
-        {/* header */}
-        <header
-          className={`flex items-center justify-between border-b px-6 py-3 bg-gradient-to-r from-[#f9f9f9] to-[#fff] ${titleClassName ?? ""}`}
+      <div className="relative w-[90vw] max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-xl">
+        {/* botão fechar */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-gray-500 hover:text-black text-xl"
         >
-          <h2 className="text-lg font-semibold text-gray-800 tracking-tight">
-            {title ?? "Modal"}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-700 text-2xl font-bold"
-            aria-label="Fechar modal"
-          >
-            ×
-          </button>
-        </header>
+          ✖
+        </button>
 
-        {/* conteúdo rolável */}
-        <main className="p-6 overflow-y-auto max-h-[80vh] bg-white">
-          {children}
-        </main>
+        {/* título */}
+        {title && (
+          <div className="sticky top-0 bg-white border-b px-6 py-3">
+            <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
+          </div>
+        )}
+
+        {/* conteúdo */}
+        <div className="p-6 space-y-4">{children}</div>
       </div>
-
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.2s ease-out;
-        }
-        .animate-slideUp {
-          animation: slideUp 0.25s ease-out;
-        }
-      `}</style>
     </div>
   );
 }
