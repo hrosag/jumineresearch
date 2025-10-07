@@ -81,7 +81,7 @@ export default function GlossaryForm({
 
     async function fetchTerms() {
       const { data, error } = await supabase
-        .from<GlossaryTermSummary>("glossary")
+        .from("glossary")
         .select("id, term, path")
         .order("path");
 
