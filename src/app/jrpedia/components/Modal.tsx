@@ -6,9 +6,18 @@ type ModalProps = {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  contentClassName?: string; // compatibilidade com CrudModals
+  titleClassName?: string;   // compatibilidade com CrudModals
 };
 
-export default function Modal({ isOpen, onClose, title, children }: ModalProps) {
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  children,
+  contentClassName,
+  titleClassName,
+}: ModalProps) {
   // bloqueia scroll do fundo
   useEffect(() => {
     if (isOpen) document.body.style.overflow = "hidden";
@@ -30,9 +39,17 @@ export default function Modal({ isOpen, onClose, title, children }: ModalProps) 
       onClick={handleBackdropClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fadeIn"
     >
-      <div className="relative w-[90vw] max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-2xl border border-gray-200 animate-slideUp">
+      <div
+        className={`relative w-[90vw] max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-2xl border border-gray-200 animate-slideUp ${
+          contentClassName ?? ""
+        }`}
+      >
         {/* header */}
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-4">
+        <header
+          className={`sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-4 ${
+            titleClassName ?? ""
+          }`}
+        >
           <h2 className="text-lg font-semibold text-gray-800">
             {title ?? "Modal"}
           </h2>
