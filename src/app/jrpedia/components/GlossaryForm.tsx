@@ -252,7 +252,7 @@ export default function GlossaryForm({
           name="term"
           value={form.term}
           onChange={handleChange}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
           required
         />
       </div>
@@ -277,7 +277,7 @@ export default function GlossaryForm({
               placeholder="e.g. 1.1 or 1.1.1"
               value={typeof form.parent_path === "string" ? form.parent_path : form.parent_path ?? ""}
               onChange={(event) => handleParentPathChange(event.target.value)}
-              className="mt-1 border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
+              className="mt-1 border-transparent bg-white p-2 w-full rounded text-black placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
             />
           </div>
           <div>
@@ -289,7 +289,7 @@ export default function GlossaryForm({
               placeholder="Search parent term"
               value={form.parent_name ?? ""}
               onChange={(event) => handleParentTermChange(event.target.value)}
-              className="mt-1 border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
+              className="mt-1 border-transparent bg-white p-2 w-full rounded text-black placeholder-gray-400 focus:border-[#d4af37] focus:outline-none"
             />
             <datalist id="parent-term-options">
               {allTerms.map((term) => (
@@ -312,7 +312,7 @@ export default function GlossaryForm({
             name="pt"
             value={form.pt ?? ""}
             onChange={handleChange}
-            className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+            className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
           />
         </div>
         <div>
@@ -321,7 +321,7 @@ export default function GlossaryForm({
             name="en"
             value={form.en ?? ""}
             onChange={handleChange}
-            className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+            className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
           />
         </div>
         <div>
@@ -330,7 +330,7 @@ export default function GlossaryForm({
             name="fr"
             value={form.fr ?? ""}
             onChange={handleChange}
-            className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+            className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
           />
         </div>
       </div>
@@ -341,7 +341,7 @@ export default function GlossaryForm({
           name="definition_pt"
           value={form.definition_pt ?? ""}
           onChange={handleChange}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
         />
       </div>
       <div>
@@ -350,7 +350,7 @@ export default function GlossaryForm({
           name="definition_en"
           value={form.definition_en ?? ""}
           onChange={handleChange}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
         />
       </div>
       <div>
@@ -359,7 +359,7 @@ export default function GlossaryForm({
           name="definition_fr"
           value={form.definition_fr ?? ""}
           onChange={handleChange}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
         />
       </div>
 
@@ -369,7 +369,7 @@ export default function GlossaryForm({
           name="category"
           value={form.category ?? ""}
           onChange={handleChange}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
         />
       </div>
 
@@ -380,7 +380,7 @@ export default function GlossaryForm({
           name="fonte"
           value={form.fonte}
           onChange={handleChange}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
         />
       </div>
 
@@ -401,7 +401,7 @@ export default function GlossaryForm({
               tags: nextTags.length > 0 ? nextTags : [],
             }));
           }}
-          className="border border-[#2e3b4a] bg-[#1c2833] p-2 w-full rounded text-white focus:border-[#d4af37] focus:outline-none"
+          className="border-transparent bg-white p-2 w-full rounded text-black focus:border-[#d4af37] focus:outline-none"
         />
       </div>
 
