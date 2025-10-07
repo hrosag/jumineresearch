@@ -1,95 +1,137 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// importa os componentes
+import CrudModals from "./components/CrudModals";
 import Sidebar from "./components/Sidebar";
 import TermView from "./components/TermView";
-import CrudModals from "./components/CrudModals";
 import PasswordModal from "../dbadmin/components/PasswordModal";
 
-// importa os tipos
-import { GlossaryRow, GlossaryNode, Lang } from "./types";
+import { GlossaryNode, GlossaryRow, Lang } from "./types";
 
-// ---------------------- Supabase Client ----------------------
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-// ---------------------- Tree builder ----------------------
-function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
-  const map = new Map<number, GlossaryNode>();
-  rows.forEach((r) => map.set(r.id, { ...r, children: [] }));
+const pathSegmentPattern = /\./;
 
-  const roots: GlossaryNode[] = [];
-  map.forEach((node) => {
-    if (node.parent_id && map.has(node.parent_id)) {
-      map.get(node.parent_id)!.children.push(node);
+function parsePathSegments(path: string): (number | string)[] {
+  return path
+    .split(pathSegmentPattern)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .map((segment) => {
+      const numeric = Number(segment);
+      return Number.isNaN(numeric) ? segment : numeric;
+    });
+}
+
+function comparePaths(a?: string | null, b?: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+
+  const segmentsA = parsePathSegments(a);
+  const segmentsB = parsePathSegments(b);
+  const length = Math.max(segmentsA.length, segmentsB.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const segA = segmentsA[index];
+    const segB = segmentsB[index];
+
+    if (segA === undefined) return -1;
+    if (segB === undefined) return 1;
+
+    if (typeof segA === "number" && typeof segB === "number") {
+      if (segA !== segB) return segA - segB;
+      continue;
+    }
+
+    const stringA = String(segA).toLowerCase();
+    const stringB = String(segB).toLowerCase();
+    if (stringA !== stringB) return stringA.localeCompare(stringB);
+  }
+
+  return 0;
+}
+
+function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
+  const nodesByPath = new Map<string, GlossaryNode>();
+  const looseNodes: GlossaryNode[] = [];
+
+  rows.forEach((row) => {
+    const node: GlossaryNode = { ...row, children: [] };
+    if (row.path) {
+      nodesByPath.set(row.path, node);
+    } else {
+      looseNodes.push(node);
+    }
+  });
+
+  const roots: GlossaryNode[] = [...looseNodes];
+
+  nodesByPath.forEach((node) => {
+    const parentPath = node.parent_path ?? null;
+    if (parentPath && nodesByPath.has(parentPath)) {
+      nodesByPath.get(parentPath)!.children.push(node);
     } else {
       roots.push(node);
     }
   });
 
-  return roots;
+  const sortNodes = (items: GlossaryNode[]): GlossaryNode[] =>
+    items
+      .map((item) => ({
+        ...item,
+        children: sortNodes(item.children),
+      }))
+      .sort((a, b) => {
+        const byPath = comparePaths(a.path ?? null, b.path ?? null);
+        if (byPath !== 0) return byPath;
+        const labelA = (a.term || "").toLowerCase();
+        const labelB = (b.term || "").toLowerCase();
+        return labelA.localeCompare(labelB);
+      });
+
+  return sortNodes(roots);
 }
 
-// ---------------------- Sort helper ----------------------
-function sortTree(nodes: GlossaryNode[], lang: Lang): GlossaryNode[] {
-  return [...nodes]
-    .sort((a, b) => {
-      const labelA = (a[lang] || a.term || "").toLowerCase();
-      const labelB = (b[lang] || b.term || "").toLowerCase();
-      return labelA.localeCompare(labelB);
-    })
-    .map((n) => ({
-      ...n,
-      children: sortTree(n.children, lang),
-    }));
-}
-
-// ---------------------- JRpedia Page ----------------------
 export default function JRpediaPage() {
   const [entries, setEntries] = useState<GlossaryRow[]>([]);
   const [selectedLang, setSelectedLang] = useState<Lang>("pt");
   const [selectedTerm, setSelectedTerm] = useState<GlossaryRow | null>(null);
-
-  // pesquisa global
   const [searchTerm, setSearchTerm] = useState("");
-
-  // 🔑 Controle Admin
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [shouldOpenCreateAfterLogin, setShouldOpenCreateAfterLogin] = useState(false);
-
-  // estados dos modais
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [newTermParentId, setNewTermParentId] = useState<number | null>(null);
+  const [newTermParentPath, setNewTermParentPath] = useState<string | null>(null);
 
-  // Fetch de dados
   const fetchEntries = useCallback(async () => {
     const { data, error } = await supabase
       .from("glossary")
       .select("*")
-      .order("term");
+      .order("path");
 
     if (error) {
       console.error("Erro ao carregar termos:", error.message);
-    } else if (data) {
-      const normalized = data.map((row) => ({
-        ...row,
-        fonte:
-          typeof row.fonte === "string"
-            ? row.fonte
-            : row.fonte != null
-            ? String(row.fonte)
-            : "",
-      })) as GlossaryRow[];
-
-      setEntries(normalized);
+      return;
     }
+
+    const normalized = (data ?? []).map((row) => ({
+      ...row,
+      fonte:
+        typeof row.fonte === "string"
+          ? row.fonte
+          : row.fonte != null
+          ? String(row.fonte)
+          : "",
+    })) as GlossaryRow[];
+
+    setEntries(normalized);
   }, []);
 
   useEffect(() => {
@@ -99,14 +141,13 @@ export default function JRpediaPage() {
   const handleSetShowNewModal = (value: boolean) => {
     setShowNewModal(value);
     if (!value) {
-      setNewTermParentId(null);
+      setNewTermParentPath(null);
       setShouldOpenCreateAfterLogin(false);
     }
   };
 
   const handleAddTerm = () => {
-    const parentId = selectedTerm?.id ?? null;
-    setNewTermParentId(parentId);
+    setNewTermParentPath(selectedTerm?.path ?? null);
 
     if (!isAdmin) {
       setShouldOpenCreateAfterLogin(true);
@@ -123,18 +164,28 @@ export default function JRpediaPage() {
     handleSetShowNewModal(false);
   };
 
-  // aplica pesquisa (em qualquer campo de tradução ou termo base)
-  const filteredEntries = entries.filter((row) =>
-    [row.term, row.pt, row.en, row.fr]
-      .filter(Boolean)
-      .some((val) => val!.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredEntries = useMemo(
+    () =>
+      entries.filter((row) => {
+        if (!searchTerm) return true;
+        const normalizedQuery = searchTerm.toLowerCase();
+        const tokens: string[] = [
+          row.term,
+          row.pt ?? "",
+          row.en ?? "",
+          row.fr ?? "",
+          row.path ?? "",
+          ...(row.tags ?? []),
+        ].filter((token) => token.length > 0);
+        return tokens.some((token) => token.toLowerCase().includes(normalizedQuery));
+      }),
+    [entries, searchTerm],
   );
 
-  const tree = sortTree(buildTree(filteredEntries), selectedLang);
+  const tree = useMemo(() => buildTree(filteredEntries), [filteredEntries]);
 
   return (
     <div className="flex h-screen bg-[#fdf8f0]">
-      {/* Sidebar */}
       <Sidebar
         tree={tree}
         selectedTerm={selectedTerm}
@@ -143,24 +194,19 @@ export default function JRpediaPage() {
         onAddTerm={handleAddTerm}
       />
 
-      {/* Main panel */}
       <main className="flex-1 ml-2 rounded-md border border-gray-300 shadow-sm bg-white px-6 py-4 overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          {/* título */}
           <h1 className="text-2xl font-bold">JRpedia</h1>
 
-          {/* barra do meio com pesquisa + idiomas */}
           <div className="flex items-center space-x-3">
-            {/* campo pesquisa */}
             <input
               type="text"
               placeholder="Pesquisar termos..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(event) => setSearchTerm(event.target.value)}
               className="border rounded px-3 py-1 text-sm"
             />
 
-            {/* Idiomas */}
             <div className="flex space-x-2">
               {(["pt", "en", "fr"] as Lang[]).map((lang) => (
                 <button
@@ -171,6 +217,7 @@ export default function JRpediaPage() {
                       ? "bg-[#d4af37] text-black font-bold"
                       : "bg-gray-200 hover:bg-gray-300"
                   }`}
+                  type="button"
                 >
                   {lang.toUpperCase()}
                 </button>
@@ -185,7 +232,7 @@ export default function JRpediaPage() {
                   return;
                 }
 
-                setNewTermParentId(null);
+                setNewTermParentPath(null);
                 setShouldOpenCreateAfterLogin(false);
                 setShowPasswordModal(true);
               }}
@@ -201,11 +248,8 @@ export default function JRpediaPage() {
           </div>
         </div>
 
-        {/* Conteúdo */}
         {!selectedTerm ? (
-          <p className="text-gray-500">
-            Selecione um termo na barra lateral para visualizar.
-          </p>
+          <p className="text-gray-500">Selecione um termo na barra lateral para visualizar.</p>
         ) : (
           <TermView
             selectedTerm={selectedTerm}
@@ -220,12 +264,11 @@ export default function JRpediaPage() {
         )}
       </main>
 
-      {/* Modais CRUD (visíveis só para admin) */}
       {isAdmin && (
         <CrudModals
           showNewModal={showNewModal}
           setShowNewModal={handleSetShowNewModal}
-          newParentId={newTermParentId}
+          newParentPath={newTermParentPath}
           showEditModal={showEditModal}
           setShowEditModal={setShowEditModal}
           selectedTerm={selectedTerm}
@@ -246,7 +289,7 @@ export default function JRpediaPage() {
           onClose={() => {
             setShowPasswordModal(false);
             setShouldOpenCreateAfterLogin(false);
-            setNewTermParentId(null);
+            setNewTermParentPath(null);
           }}
         />
       )}

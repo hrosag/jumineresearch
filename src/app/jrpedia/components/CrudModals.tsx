@@ -1,57 +1,81 @@
 "use client";
-import Modal from "./Modal";
-import GlossaryForm from "./GlossaryForm";
+
 import { createClient } from "@supabase/supabase-js";
+import GlossaryForm from "./GlossaryForm";
+import Modal from "./Modal";
 import { CrudModalsProps, GlossaryRowInput } from "../types";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
 export default function CrudModals({
   showNewModal,
   setShowNewModal,
-  newParentId,
+  newParentPath,
   showEditModal,
   setShowEditModal,
   selectedTerm,
   fetchEntries,
 }: CrudModalsProps) {
+  const modalBaseClasses =
+    "max-w-[600px] border border-[#2e3b4a] bg-[#1e2a38] text-white";
+
+  const handleCreate = async (formData: GlossaryRowInput) => {
+    const { error } = await supabase.from("glossary").insert(formData);
+    if (error) {
+      console.error("Erro ao criar termo:", error.message);
+      return;
+    }
+    setShowNewModal(false);
+    fetchEntries();
+  };
+
+  const handleUpdate = async (formData: GlossaryRowInput) => {
+    if (!selectedTerm) return;
+    const { error } = await supabase
+      .from("glossary")
+      .update(formData)
+      .eq("id", selectedTerm.id);
+
+    if (error) {
+      console.error("Erro ao atualizar termo:", error.message);
+      return;
+    }
+    setShowEditModal(false);
+    fetchEntries();
+  };
+
   return (
     <>
-      {/* Novo */}
       <Modal
         isOpen={showNewModal}
         onClose={() => setShowNewModal(false)}
         title="➕ Novo Termo"
+        contentClassName={modalBaseClasses}
+        titleClassName="text-2xl font-semibold text-[#d4af37]"
       >
         <GlossaryForm
-          initialParentId={newParentId}
+          initialParentPath={newParentPath}
           onCancel={() => setShowNewModal(false)}
-          onSave={async (formData: GlossaryRowInput) => {
-            await supabase.from("glossary").insert(formData);
-            setShowNewModal(false);
-            fetchEntries();
-          }}
+          onSave={handleCreate}
         />
       </Modal>
 
-      {/* Editar */}
       <Modal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
         title="✏️ Editar Termo"
+        contentClassName={modalBaseClasses}
+        titleClassName="text-2xl font-semibold text-[#d4af37]"
       >
         {selectedTerm && (
           <GlossaryForm
             initialData={selectedTerm}
+            initialParentPath={selectedTerm.parent_path ?? null}
             onCancel={() => setShowEditModal(false)}
-            onSave={async (formData: GlossaryRowInput) => {
-              await supabase.from("glossary").update(formData).eq("id", selectedTerm.id);
-              setShowEditModal(false);
-              fetchEntries();
-            }}
+            onSave={handleUpdate}
           />
         )}
       </Modal>

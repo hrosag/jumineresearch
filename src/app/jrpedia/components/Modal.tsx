@@ -6,26 +6,45 @@ type ModalProps = {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  contentClassName?: string;
+  titleClassName?: string;
 };
 
-export default function Modal({ isOpen, onClose, title, children }: ModalProps) {
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  children,
+  contentClassName,
+  titleClassName,
+}: ModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6 relative">
-        {/* Botão Fechar */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div
+        className={`relative w-full max-w-lg rounded-lg bg-white p-6 shadow-lg ${
+          contentClassName ?? ""
+        }`}
+      >
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 text-gray-500 hover:text-black"
+          className="absolute right-3 top-3 text-gray-400 transition hover:text-gray-600"
+          aria-label="Fechar modal"
         >
           ✖
         </button>
 
-        {/* Título opcional */}
-        {title && <h2 className="text-xl font-bold mb-4">{title}</h2>}
+        {title && (
+          <h2
+            className={`mb-4 text-xl font-bold ${
+              titleClassName ?? "text-gray-900"
+            }`}
+          >
+            {title}
+          </h2>
+        )}
 
-        {/* Conteúdo injetado */}
         <div>{children}</div>
       </div>
     </div>
