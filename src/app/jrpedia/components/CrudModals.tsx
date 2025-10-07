@@ -19,8 +19,10 @@ export default function CrudModals({
   selectedTerm,
   fetchEntries,
 }: CrudModalsProps) {
+  // CREATE
   const handleCreate = async (formData: GlossaryRowInput) => {
-    const { error } = await supabase.from("glossary").insert(formData);
+    const { parent_name, ...cleanData } = formData; // remove campo inexistente
+    const { error } = await supabase.from("glossary").insert(cleanData);
     if (error) {
       console.error("Erro ao criar termo:", error.message);
       return;
@@ -29,11 +31,13 @@ export default function CrudModals({
     fetchEntries();
   };
 
+  // UPDATE
   const handleUpdate = async (formData: GlossaryRowInput) => {
     if (!selectedTerm) return;
+    const { parent_name, ...cleanData } = formData; // idem no update
     const { error } = await supabase
       .from("glossary")
-      .update(formData)
+      .update(cleanData)
       .eq("id", selectedTerm.id);
 
     if (error) {
@@ -49,7 +53,7 @@ export default function CrudModals({
       <Modal
         isOpen={showNewModal}
         onClose={() => setShowNewModal(false)}
-        title="➕ Novo Termo"
+        title="Novo Termo"
       >
         <GlossaryForm
           initialParentPath={newParentPath}
@@ -61,7 +65,7 @@ export default function CrudModals({
       <Modal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
-        title="✏️ Editar Termo"
+        title="Editar Termo"
       >
         {selectedTerm && (
           <GlossaryForm
