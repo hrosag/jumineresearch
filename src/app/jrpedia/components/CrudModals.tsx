@@ -20,8 +20,8 @@ export default function CrudModals({
   fetchEntries,
 }: CrudModalsProps) {
   // Normaliza e remove campos não persistidos
-  const sanitizeData = (data: GlossaryRowInput): Record<string, any> => {
-    const clean = { ...data } as Record<string, any>;
+  const sanitizeData = (data: GlossaryRowInput): Record<string, unknown> => {
+    const clean: Record<string, unknown> = { ...data };
     delete clean.id;
     delete clean.parent_name;
     return clean;
