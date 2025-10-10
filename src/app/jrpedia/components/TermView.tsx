@@ -45,14 +45,11 @@ function highlightWithTags(
 
     for (const { value, className } of patterns) {
       const dedupeKey = value.toLowerCase();
-      if (seenPatterns.has(dedupeKey)) {
-        continue;
-      }
+      if (seenPatterns.has(dedupeKey)) continue;
       seenPatterns.add(dedupeKey);
 
       try {
         const escapedPattern = escapeRegExp(value);
-        // "i" = case-insensitive, 1ª ocorrência apenas
         const regex = new RegExp(`(${escapedPattern})`, "i");
         safe = safe.replace(
           regex,
@@ -83,15 +80,8 @@ function highlightWithTags(
 
 function normalizeBodyText(raw: string): string {
   const [header, ...rest] = raw.split(/\n\s*\n/);
-
-  // Cabeçalho deve ser preservado exatamente como veio (mantém quebras originais)
   const fixedHeader = header || "";
-
-  // Corpo: cada parágrafo vira linha corrido, mantendo apenas parágrafos separados
-  const normalizedRest = rest
-    .map((par) => par.replace(/\n+/g, " "))
-    .join("\n\n");
-
+  const normalizedRest = rest.map((par) => par.replace(/\n+/g, " ")).join("\n\n");
   return [fixedHeader, normalizedRest].filter(Boolean).join("\n\n");
 }
 
@@ -106,21 +96,11 @@ function splitDualLanguage(text: string): SplitResult[] {
     const enBlock = text.slice(0, frIndex).trim();
     const frBlock = text.slice(frIndex).trim();
     const blocks: SplitResult[] = [];
-
-    if (enBlock) {
-      blocks.push({ lang: "en", text: normalizeBodyText(enBlock) });
-    }
-
-    if (frBlock) {
-      blocks.push({ lang: "fr", text: normalizeBodyText(frBlock) });
-    }
-
-    if (blocks.length > 0) {
-      return blocks;
-    }
+    if (enBlock) blocks.push({ lang: "en", text: normalizeBodyText(enBlock) });
+    if (frBlock) blocks.push({ lang: "fr", text: normalizeBodyText(frBlock) });
+    if (blocks.length > 0) return blocks;
   }
 
-  // Apenas bloco em inglês (ou sem delimitadores detectados)
   return [{ lang: "en", text: normalizeBodyText(text) }];
 }
 
@@ -181,7 +161,6 @@ export default function TermView({
     };
 
     loadExample();
-
     return () => {
       isMounted = false;
     };
@@ -194,17 +173,13 @@ export default function TermView({
   }, [selectedTerm?.id]);
 
   const handleCloseDeleteModal = () => {
-    if (isDeleting) {
-      return;
-    }
-
+    if (isDeleting) return;
     setShowDeleteConfirm(false);
     setDeleteError(null);
   };
 
   const handleConfirmDelete = async () => {
     if (!selectedTerm) return;
-
     setIsDeleting(true);
     setDeleteError(null);
 
@@ -225,108 +200,108 @@ export default function TermView({
   };
 
   if (!selectedTerm) {
-    return (
-      <p className="text-gray-500">Selecione um termo na barra lateral.</p>
-    );
+    return <p className="text-gray-500">Selecione um termo na barra lateral.</p>;
   }
 
   return (
     <>
       <div className="border rounded-lg bg-white shadow-sm p-6">
-      {/* Título no idioma ativo */}
-      <h2 className="text-xl font-bold mb-1">
-        {selectedTerm[selectedLang] || selectedTerm.term}
-      </h2>
+        {/* Título no idioma ativo */}
+        <h2 className="text-xl font-bold mb-1">
+          {selectedTerm[selectedLang] || selectedTerm.term}
+        </h2>
 
-      {/* Índice remissivo inteligente */}
-      <p className="text-sm text-gray-500 mb-4">
-        {selectedLang !== "pt" && selectedTerm.pt && `PT: ${selectedTerm.pt} · `}
-        {selectedLang !== "en" && selectedTerm.en && `EN: ${selectedTerm.en} · `}
-        {selectedLang !== "fr" && selectedTerm.fr && `FR: ${selectedTerm.fr}`}
-      </p>
+        {/* Índice remissivo */}
+        <p className="text-sm text-gray-500 mb-4">
+          {selectedLang !== "pt" && selectedTerm.pt && `PT: ${selectedTerm.pt} · `}
+          {selectedLang !== "en" && selectedTerm.en && `EN: ${selectedTerm.en} · `}
+          {selectedLang !== "fr" && selectedTerm.fr && `FR: ${selectedTerm.fr}`}
+        </p>
 
-      {/* Definição no idioma ativo */}
-      <p className="text-gray-900 mb-4">
-        {selectedLang === "pt"
-          ? selectedTerm.definition_pt
-          : selectedLang === "en"
-          ? selectedTerm.definition_en
-          : selectedTerm.definition_fr}
-      </p>
-
-      <div className="border-t pt-4 mt-4 space-y-3">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-            Fonte(s)
-          </h3>
-          <p className="text-gray-900">
-            {selectedTerm.fonte ? selectedTerm.fonte : "Sem fonte cadastrada."}
-          </p>
+        {/* Definição no idioma ativo */}
+        <div className="text-gray-900 mb-4 whitespace-pre-line">
+          {selectedLang === "pt"
+            ? selectedTerm.definition_pt
+            : selectedLang === "en"
+            ? selectedTerm.definition_en
+            : selectedTerm.definition_fr}
         </div>
 
-        {isLoadingExamples && (
-          <p className="text-sm text-gray-500">Carregando boletins...</p>
-        )}
-
-        {!isLoadingExamples && realExamples.length > 0 && (
-          <div className="space-y-2">
-            {realExamples.map((example) => {
-              const rawBlocks = splitDualLanguage(example.body_text || "");
-              const hasMultiple = rawBlocks.length > 1;
-              const blocks = rawBlocks.map((blk) => ({
-                langCode: blk.lang,
-                label:
-                  blk.lang === "fr"
-                    ? "Version française"
-                    : hasMultiple
-                    ? "English version"
-                    : null,
-                text: blk.text,
-              }));
-
-              return (
-                <div key={example.composite_key} className="space-y-2">
-                  {blocks.map((blk) => {
-                    const headerKey =
-                      blk.langCode === "fr"
-                        ? `${example.composite_key}_FR`
-                        : example.composite_key;
-                    const { header, body } = highlightWithTags(
-                      headerKey,
-                      blk.text,
-                      selectedTerm,
-                    );
-                    return (
-                      <details
-                        key={`${example.composite_key}-${blk.langCode}`}
-                        className="rounded-lg border bg-gray-50 p-4"
-                      >
-                        <summary
-                          className="cursor-pointer text-sm font-semibold text-gray-700"
-                          dangerouslySetInnerHTML={{
-                            __html: blk.label ? blk.label : header,
-                          }}
-                        />
-                        {body ? (
-                          <div
-                            className="mt-2 text-gray-900 whitespace-pre-line"
-                            dangerouslySetInnerHTML={{ __html: body }}
-                          />
-                        ) : (
-                          <div className="mt-2 text-gray-900 whitespace-pre-line">
-                            Sem conteúdo disponível.
-                          </div>
-                        )}
-                      </details>
-                    );
-                  })}
-                </div>
-              );
-            })}
+        {/* Fontes e exemplos */}
+        <div className="border-t pt-4 mt-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
+              Fonte(s)
+            </h3>
+            <p className="text-gray-900">
+              {selectedTerm.fonte ? selectedTerm.fonte : "Sem fonte cadastrada."}
+            </p>
           </div>
-        )}
-      </div>
 
+          {isLoadingExamples && (
+            <p className="text-sm text-gray-500">Carregando boletins...</p>
+          )}
+
+          {!isLoadingExamples && realExamples.length > 0 && (
+            <div className="space-y-2">
+              {realExamples.map((example) => {
+                const rawBlocks = splitDualLanguage(example.body_text || "");
+                const hasMultiple = rawBlocks.length > 1;
+                const blocks = rawBlocks.map((blk) => ({
+                  langCode: blk.lang,
+                  label:
+                    blk.lang === "fr"
+                      ? "Version française"
+                      : hasMultiple
+                      ? "English version"
+                      : null,
+                  text: blk.text,
+                }));
+
+                return (
+                  <div key={example.composite_key} className="space-y-2">
+                    {blocks.map((blk) => {
+                      const headerKey =
+                        blk.langCode === "fr"
+                          ? `${example.composite_key}_FR`
+                          : example.composite_key;
+                      const { header, body } = highlightWithTags(
+                        headerKey,
+                        blk.text,
+                        selectedTerm,
+                      );
+                      return (
+                        <details
+                          key={`${example.composite_key}-${blk.langCode}`}
+                          className="rounded-lg border bg-gray-50 p-4"
+                        >
+                          <summary
+                            className="cursor-pointer text-sm font-semibold text-gray-700"
+                            dangerouslySetInnerHTML={{
+                              __html: blk.label ? blk.label : header,
+                            }}
+                          />
+                          {body ? (
+                            <div
+                              className="mt-2 text-gray-900 whitespace-pre-line"
+                              dangerouslySetInnerHTML={{ __html: body }}
+                            />
+                          ) : (
+                            <div className="mt-2 text-gray-900 whitespace-pre-line">
+                              Sem conteúdo disponível.
+                            </div>
+                          )}
+                        </details>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Botões de admin */}
         {isAdmin && (
           <div className="mt-4 flex space-x-2">
             <button
@@ -350,6 +325,7 @@ export default function TermView({
         )}
       </div>
 
+      {/* Modal de confirmação de exclusão */}
       <Modal
         isOpen={showDeleteConfirm}
         onClose={handleCloseDeleteModal}
