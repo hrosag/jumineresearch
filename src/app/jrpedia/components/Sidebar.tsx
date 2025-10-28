@@ -13,8 +13,27 @@ export default function Sidebar({
   const [expanded, setExpanded] = useState<Record<string | number, boolean>>({});
 
   const isExpanded = (id: string | number) => !!expanded[id];
-  const toggleExpanded = (id: string | number) =>
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  const collapseBranch = (node: GlossaryNode, map: Record<string | number, boolean>) => {
+    delete map[node.id];
+    if (node.children && node.children.length > 0) {
+      node.children.forEach((child) => collapseBranch(child, map));
+    }
+  };
+
+  const toggleExpanded = (node: GlossaryNode) => {
+    setExpanded((prev) => {
+      const newMap = { ...prev };
+      const current = !!prev[node.id];
+      if (current) {
+        // se for colapsar, apaga também os descendentes
+        collapseBranch(node, newMap);
+      } else {
+        newMap[node.id] = true;
+      }
+      return newMap;
+    });
+  };
 
   function TreeNode({
     node,
@@ -44,9 +63,8 @@ export default function Sidebar({
     const handleClick = (e: React.MouseEvent) => {
       e.stopPropagation();
 
-      // se já está selecionado, o clique agora alterna a expansão
       if (isSelected && node.children.length > 0) {
-        toggleExpanded(node.id);
+        toggleExpanded(node); // colapsa/expande, recursivo no colapso
       } else {
         setSelectedTerm(node);
       }
