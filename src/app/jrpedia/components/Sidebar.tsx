@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { GlossaryNode, GlossaryRow, SidebarProps } from "../types";
 
 export default function Sidebar({
@@ -27,18 +27,6 @@ export default function Sidebar({
         : activeTerm?.id === node.id;
     const isSelected = Boolean(isSamePath);
 
-    // expande apenas o ramo ativo, sem recolher outros
-    useEffect(() => {
-      if (!activeTerm) return;
-      const isInBranch = (current: GlossaryNode): boolean =>
-        current.id === activeTerm.id ||
-        (current.children?.some(isInBranch) ?? false);
-
-      if (isInBranch(node) && collapsed) {
-        setCollapsed(false);
-      }
-    }, [activeTerm]);
-
     const fontSize =
       level === 0
         ? "text-lg font-semibold"
@@ -49,27 +37,17 @@ export default function Sidebar({
         : "text-xs text-gray-300";
 
     return (
-      <div className="ml-1 transition-all duration-150 ease-in-out">
+      <div className="ml-1">
         <button
           onClick={() => {
-            const isAncestor =
-              activeTerm &&
-              node.children.some(function check(child) {
-                return (
-                  child.id === activeTerm.id || child.children?.some(check)
-                );
-              });
-
-            // alterna visual imediatamente
-            if (isAncestor || activeTerm?.id === node.id) {
+            // alterna expansão manual
+            if (node.children.length > 0) {
               setCollapsed((prev) => !prev);
-            } else if (node.children.length > 0 && collapsed) {
-              setCollapsed(false);
             }
-
+            // define termo selecionado
             setSelectedTerm(node);
           }}
-          className={`block w-full text-left px-2 py-1 rounded ${fontSize} transition-all duration-150 ease-in-out ${
+          className={`block w-full text-left px-2 py-1 rounded ${fontSize} transition-colors duration-100 ease-in-out ${
             isSelected
               ? "bg-[#d4af37] text-black"
               : "hover:bg-[#2e3b4a] text-white"
@@ -81,13 +59,9 @@ export default function Sidebar({
           </div>
         </button>
 
-        <div
-          className={`ml-2 border-l border-gray-600 pl-1 overflow-hidden transition-all duration-150 ease-in-out ${
-            collapsed ? "max-h-0 opacity-0" : "max-h-[999px] opacity-100"
-          }`}
-        >
-          {node.children.length > 0 &&
-            node.children.map((child) => (
+        {!collapsed && node.children.length > 0 && (
+          <div className="ml-2 border-l border-gray-600 pl-1">
+            {node.children.map((child) => (
               <TreeNode
                 key={child.path ?? `node-${child.id}`}
                 node={child}
@@ -95,19 +69,20 @@ export default function Sidebar({
                 level={level + 1}
               />
             ))}
-        </div>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <aside className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm transition-all duration-150 ease-in-out">
+    <aside className="ml-2 flex w-64 min-w-[220px] max-w-[400px] resize-x flex-col overflow-hidden rounded-md border border-gray-700 bg-[#1e2a38] text-white shadow-sm">
       <div className="flex items-center justify-between px-3 pt-4 pb-2">
         <h3 className="text-lg font-bold text-[#d4af37]">JRpedia</h3>
         <button
           type="button"
           onClick={onAddTerm}
-          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] font-bold text-black hover:bg-[#f0c75e] transition-all duration-150 ease-in-out"
+          className="flex h-7 w-7 items-center justify-center rounded bg-[#d4af37] font-bold text-black hover:bg-[#f0c75e] transition-colors duration-100 ease-in-out"
           aria-label="Adicionar novo termo"
         >
           +
