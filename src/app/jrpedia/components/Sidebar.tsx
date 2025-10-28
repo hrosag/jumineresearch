@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GlossaryNode, GlossaryRow, SidebarProps } from "../types";
+import { GlossaryNode, GlossaryRow, SidebarProps } from "../../jrpedia/types";
 
 export default function Sidebar({
   tree,
@@ -19,7 +19,8 @@ export default function Sidebar({
     activeTerm: GlossaryRow | null;
     level?: number;
   }) {
-    const [collapsed, setCollapsed] = useState(true);
+    // começa expandido se houver filhos
+    const [collapsed, setCollapsed] = useState(node.children.length > 0 ? false : true);
 
     const isSamePath =
       activeTerm?.path && node.path
@@ -36,17 +37,19 @@ export default function Sidebar({
         ? "text-sm"
         : "text-xs text-gray-300";
 
+    const handleClick = () => {
+      // alterna se tiver filhos
+      if (node.children.length > 0) {
+        setCollapsed((prev) => !prev);
+      }
+      // define termo selecionado
+      setSelectedTerm(node);
+    };
+
     return (
       <div className="ml-1">
         <button
-          onClick={() => {
-            // alterna expansão manual
-            if (node.children.length > 0) {
-              setCollapsed((prev) => !prev);
-            }
-            // define termo selecionado
-            setSelectedTerm(node);
-          }}
+          onClick={handleClick}
           className={`block w-full text-left px-2 py-1 rounded ${fontSize} transition-colors duration-100 ease-in-out ${
             isSelected
               ? "bg-[#d4af37] text-black"
@@ -59,6 +62,7 @@ export default function Sidebar({
           </div>
         </button>
 
+        {/* filhos sempre renderizados quando não colapsado */}
         {!collapsed && node.children.length > 0 && (
           <div className="ml-2 border-l border-gray-600 pl-1">
             {node.children.map((child) => (
