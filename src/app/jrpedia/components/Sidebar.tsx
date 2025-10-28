@@ -10,7 +10,6 @@ export default function Sidebar({
   selectedLang,
   onAddTerm,
 }: SidebarProps) {
-  // mapa global de expansão por id → persiste entre re-renders
   const [expanded, setExpanded] = useState<Record<string | number, boolean>>({});
 
   const isExpanded = (id: string | number) => !!expanded[id];
@@ -27,7 +26,6 @@ export default function Sidebar({
     level?: number;
   }) {
     const expandedHere = isExpanded(node.id);
-
     const isSamePath =
       activeTerm?.path && node.path
         ? activeTerm.path === node.path
@@ -45,10 +43,13 @@ export default function Sidebar({
 
     const handleClick = (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (node.children.length > 0) {
-        toggleExpanded(node.id); // abre/fecha no primeiro clique
+
+      // se já está selecionado, o clique agora alterna a expansão
+      if (isSelected && node.children.length > 0) {
+        toggleExpanded(node.id);
+      } else {
+        setSelectedTerm(node);
       }
-      if (!isSelected) setSelectedTerm(node);
     };
 
     return (
