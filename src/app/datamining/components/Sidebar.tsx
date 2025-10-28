@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GlossaryNode, GlossaryRow, SidebarProps } from "../types";
+import { GlossaryNode, GlossaryRow, SidebarProps } from "../../jrpedia/types";
 
 export default function Sidebar({
   tree,
@@ -62,7 +62,7 @@ export default function Sidebar({
           </div>
         </button>
 
-        {/* renderiza filhos sempre que não colapsado */}
+        {/* filhos sempre renderizados quando não colapsado */}
         {!collapsed && node.children.length > 0 && (
           <div className="ml-2 border-l border-gray-600 pl-1">
             {node.children.map((child) => (
