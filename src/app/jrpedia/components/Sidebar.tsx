@@ -19,8 +19,8 @@ export default function Sidebar({
     activeTerm: GlossaryRow | null;
     level?: number;
   }) {
-    // começa expandido se houver filhos
-    const [collapsed, setCollapsed] = useState(node.children.length > 0 ? false : true);
+    // começa fechado por padrão
+    const [collapsed, setCollapsed] = useState(true);
 
     const isSamePath =
       activeTerm?.path && node.path
@@ -37,13 +37,18 @@ export default function Sidebar({
         ? "text-sm"
         : "text-xs text-gray-300";
 
-    const handleClick = () => {
-      // alterna se tiver filhos
+    const handleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      // alterna expansão apenas se tiver filhos
       if (node.children.length > 0) {
         setCollapsed((prev) => !prev);
       }
-      // define termo selecionado
-      setSelectedTerm(node);
+
+      // define o termo selecionado
+      if (!isSelected) {
+        setSelectedTerm(node);
+      }
     };
 
     return (
@@ -62,7 +67,7 @@ export default function Sidebar({
           </div>
         </button>
 
-        {/* filhos sempre renderizados quando não colapsado */}
+        {/* renderiza filhos apenas quando expandido */}
         {!collapsed && node.children.length > 0 && (
           <div className="ml-2 border-l border-gray-600 pl-1">
             {node.children.map((child) => (
