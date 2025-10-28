@@ -10,6 +10,13 @@ export default function Sidebar({
   selectedLang,
   onAddTerm,
 }: SidebarProps) {
+  // mapa global de expansão por id → persiste entre re-renders
+  const [expanded, setExpanded] = useState<Record<string | number, boolean>>({});
+
+  const isExpanded = (id: string | number) => !!expanded[id];
+  const toggleExpanded = (id: string | number) =>
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+
   function TreeNode({
     node,
     activeTerm,
@@ -19,8 +26,7 @@ export default function Sidebar({
     activeTerm: GlossaryRow | null;
     level?: number;
   }) {
-    // começa fechado por padrão
-    const [collapsed, setCollapsed] = useState(true);
+    const expandedHere = isExpanded(node.id);
 
     const isSamePath =
       activeTerm?.path && node.path
@@ -39,16 +45,10 @@ export default function Sidebar({
 
     const handleClick = (e: React.MouseEvent) => {
       e.stopPropagation();
-
-      // alterna expansão apenas se tiver filhos
       if (node.children.length > 0) {
-        setCollapsed((prev) => !prev);
+        toggleExpanded(node.id); // abre/fecha no primeiro clique
       }
-
-      // define o termo selecionado
-      if (!isSelected) {
-        setSelectedTerm(node);
-      }
+      if (!isSelected) setSelectedTerm(node);
     };
 
     return (
@@ -67,8 +67,7 @@ export default function Sidebar({
           </div>
         </button>
 
-        {/* renderiza filhos apenas quando expandido */}
-        {!collapsed && node.children.length > 0 && (
+        {expandedHere && node.children.length > 0 && (
           <div className="ml-2 border-l border-gray-600 pl-1">
             {node.children.map((child) => (
               <TreeNode
