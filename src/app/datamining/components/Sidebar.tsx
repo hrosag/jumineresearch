@@ -1,6 +1,7 @@
 "use client";
 
 import { reportTree, type ReportNode } from "../dataTree";
+import { Pickaxe } from "lucide-react"; // ⬅ novo import
 
 type SidebarProps = {
   selectedReport: string | null;
@@ -53,7 +54,10 @@ function TreeNode({ node, selectedReport, setSelectedReport }: NodeProps) {
 export default function Sidebar({ selectedReport, setSelectedReport }: SidebarProps) {
   return (
     <div className="flex h-full flex-col">
-      <h2 className="mb-4 px-3 text-lg font-bold">Data Mining</h2>
+      <h2 className="mb-4 px-3 text-lg font-bold flex items-center gap-2">
+        <Pickaxe size={18} /> {/* ⬅ ícone */}
+        Data Mining
+      </h2>
       <div className="flex-1 overflow-y-auto px-2">
         <ul className="space-y-1">
           {reportTree.map((node) => (
