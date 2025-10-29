@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"; // 👈 pega rota atual
 import {
   LayoutDashboard,
   Database,
-  BarChart3,
+  Pickaxe,
   AlertTriangle,
   BookOpenText,
   FlaskConical,
@@ -64,7 +64,7 @@ export default function Sidebar() {
         {[
           { href: "/", icon: LayoutDashboard, label: "Home" },
           { href: "/database", icon: Database, label: "Database" },
-          { href: "/datamining", icon: BarChart3, label: "Data Mining" },
+          { href: "/datamining", icon: Pickaxe, label: "Data Mining" },
           { href: "/warnings", icon: AlertTriangle, label: "Database Warning" },
           { href: "/jrpedia", icon: BookOpenText, label: "JRpedia" },
         ].map(({ href, icon: Icon, label }) => {
