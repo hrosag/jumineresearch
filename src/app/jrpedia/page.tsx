@@ -81,22 +81,24 @@ function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
     }
   });
 
-  const sortNodes = (items: GlossaryNode[]): GlossaryNode[] =>
+  const sortNodes = (items: GlossaryNode[], level = 0): GlossaryNode[] =>
     items
       .map((item) => ({
         ...item,
-        children: sortNodes(item.children),
+        children: sortNodes(item.children, level + 1),
       }))
       .sort((a, b) => {
-        const byPath = comparePaths(a.path ?? null, b.path ?? null);
-        if (byPath !== 0) return byPath;
+        // níveis 0 e 1 (TSXV, Regulatory Framework, Bulletin) → segue path
+        if (level < 2) {
+          const byPath = comparePaths(a.path ?? null, b.path ?? null);
+          if (byPath !== 0) return byPath;
+        }
+  
+        // níveis 2+ → alfabético por termo
         const labelA = (a.term || "").toLowerCase();
         const labelB = (b.term || "").toLowerCase();
         return labelA.localeCompare(labelB);
       });
-
-  return sortNodes(roots);
-}
 
 export default function JRpediaPage() {
   const [entries, setEntries] = useState<GlossaryRow[]>([]);
