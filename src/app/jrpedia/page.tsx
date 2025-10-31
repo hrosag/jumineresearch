@@ -100,6 +100,9 @@ function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
         return labelA.localeCompare(labelB);
       });
 
+    return sortNodes(roots);
+  }
+
 export default function JRpediaPage() {
   const [entries, setEntries] = useState<GlossaryRow[]>([]);
   const [selectedLang, setSelectedLang] = useState<Lang>("pt");
