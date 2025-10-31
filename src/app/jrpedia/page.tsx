@@ -57,17 +57,15 @@ function comparePaths(a?: string | null, b?: string | null): number {
   return 0;
 }
 
-function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
+// buildTree com ordenação mista
+function buildTree(rows: GlossaryRow[], lang: Lang): GlossaryNode[] {
   const nodesByPath = new Map<string, GlossaryNode>();
   const looseNodes: GlossaryNode[] = [];
 
   rows.forEach((row) => {
     const node: GlossaryNode = { ...row, children: [] };
-    if (row.path) {
-      nodesByPath.set(row.path, node);
-    } else {
-      looseNodes.push(node);
-    }
+    if (row.path) nodesByPath.set(row.path, node);
+    else looseNodes.push(node);
   });
 
   const roots: GlossaryNode[] = [...looseNodes];
@@ -81,27 +79,28 @@ function buildTree(rows: GlossaryRow[]): GlossaryNode[] {
     }
   });
 
-  const sortNodes = (items: GlossaryNode[], level = 0): GlossaryNode[] =>
-    items
+  function sortNodes(items: GlossaryNode[], level = 0): GlossaryNode[] {
+    return items
       .map((item) => ({
         ...item,
         children: sortNodes(item.children, level + 1),
       }))
       .sort((a, b) => {
-        // níveis 0 e 1 (TSXV, Regulatory Framework, Bulletin) → segue path
+        // níveis 0 e 1 → path
         if (level < 2) {
           const byPath = comparePaths(a.path ?? null, b.path ?? null);
           if (byPath !== 0) return byPath;
         }
-  
-        // níveis 2+ → alfabético por termo
-        const labelA = (a.term || "").toLowerCase();
-        const labelB = (b.term || "").toLowerCase();
+
+        // níveis 2+ → idioma selecionado
+        const labelA = (a[lang] || a.term || "").toLowerCase();
+        const labelB = (b[lang] || b.term || "").toLowerCase();
         return labelA.localeCompare(labelB);
       });
-
-    return sortNodes(roots);
   }
+
+  return sortNodes(roots, 0);
+}
 
 export default function JRpediaPage() {
   const [entries, setEntries] = useState<GlossaryRow[]>([]);
@@ -187,7 +186,7 @@ export default function JRpediaPage() {
     [entries, searchTerm],
   );
 
-  const tree = useMemo(() => buildTree(filteredEntries), [filteredEntries]);
+  const tree = useMemo(() => buildTree(filteredEntries, selectedLang), [filteredEntries, selectedLang]);
 
   return (
     <div className="flex h-screen bg-[#fdf8f0]">
