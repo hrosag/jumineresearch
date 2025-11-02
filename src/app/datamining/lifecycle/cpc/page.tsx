@@ -187,6 +187,32 @@ export default function Page() {
     [filteredSorted],
   );
 
+  // Tooltip no padrão do Notices raiz
+  function CustomTooltip({ active, payload }: any) {
+    if (!active || !payload || !payload.length) return null;
+    const p = payload[0].payload as ScatterDatum;
+    const date =
+      Number.isFinite(p.dateNum) && p.dateNum
+        ? new Date(p.dateNum).toISOString().slice(0, 10)
+        : "";
+    return (
+      <div className="bg-white rounded border shadow p-2 text-sm">
+        <div>
+          <b>Date</b>: {date || "—"}
+        </div>
+        <div>
+          <b>Ticker</b>: {p.ticker || "—"}
+        </div>
+        <div>
+          <b>Company</b>: {p.company || "—"}
+        </div>
+        <div>
+          <b>Canonical</b>: {p.canonical_type || "—"}
+        </div>
+      </div>
+    );
+  }
+
   const handleReset = () => {
     setSelCompanies([]);
     setSelTickers([]);
@@ -384,19 +410,7 @@ export default function Page() {
               width={90}
               tick={{ fontSize: 12 }}
             />
-            <Tooltip
-              formatter={(value: number | string, name: string) => {
-                if (name === "dateNum") {
-                  const ts = typeof value === "number" ? value : Number(value);
-                  if (Number.isFinite(ts)) {
-                    return [new Date(ts).toISOString().slice(0, 10), "Date"];
-                  }
-                  return ["", "Date"];
-                }
-                return [String(value ?? ""), name];
-              }}
-              labelFormatter={() => ""}
-            />
+            <Tooltip content={<CustomTooltip />} />
             <Scatter data={chartData} />
           </ScatterChart>
         </ResponsiveContainer>
