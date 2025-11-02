@@ -10,7 +10,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
   CartesianGrid,
 } from "recharts";
 
@@ -33,6 +32,7 @@ type Row = {
 
 type ScatterDatum = {
   company: string;
+  ticker: string;
   dateNum: number;
   canonical_type: string;
 };
@@ -40,18 +40,6 @@ type ScatterDatum = {
 type Opt = { value: string; label: string };
 
 const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
-const COLORS = [
-  "#8884d8",
-  "#82ca9d",
-  "#ffc658",
-  "#ff8042",
-  "#0088FE",
-  "#00C49F",
-  "#FFBB28",
-  "#FF7F50",
-  "#A28BD4",
-  "#66B0FF",
-];
 
 export default function Page() {
   const [loading, setLoading] = useState(true);
@@ -69,13 +57,9 @@ export default function Page() {
 
   const [companyOpts, setCompanyOpts] = useState<Opt[]>([]);
   const [tickerOpts, setTickerOpts] = useState<Opt[]>([]);
-  const [typeOpts, setTypeOpts] = useState<Opt[]>([]);
-  const [canonicalOpts, setCanonicalOpts] = useState<Opt[]>([]);
 
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
-  const [selTypes, setSelTypes] = useState<Opt[]>([]);
-  const [selCanonicals, setSelCanonicals] = useState<Opt[]>([]);
 
   const [selectedBody, setSelectedBody] = useState<string | null>(null);
 
@@ -96,7 +80,7 @@ export default function Page() {
     }
 
     // Mapa empresa|ticker -> first_cpc_date
-    const anchors = new Map<string, string>();
+    const anchors = new Map<string, string>(); // key: company|ticker -> first CPC date
     const companies = new Set<string>();
     for (const r of cohort || []) {
       const key = `${r.company ?? ""}|${r.ticker ?? ""}`;
@@ -108,7 +92,7 @@ export default function Page() {
 
     const compArr = Array.from(companies).sort();
 
-    // 2) Timeline para a coorte a partir da menor âncora
+    // 2) Timeline para a coorte. Baixa desde a menor âncora global e filtra por âncora por empresa.
     const globalAnchor = [...anchors.values()].sort()[0] || null;
 
     const { data: timeline, error: e2 } = await supabase
@@ -128,19 +112,27 @@ export default function Page() {
     }
 
     const r = (timeline || []) as Row[];
-    setRows(r);
+
+    // Filtrar por âncora por empresa|ticker para evitar eventos pré-CPC
+    const filteredByAnchor = r.filter((row) => {
+      const key = `${row.company ?? ""}|${row.ticker ?? ""}`;
+      const anchor = anchors.get(key);
+      if (!anchor) return false; // só coorte CPC
+      if (!row.bulletin_date) return false;
+      return row.bulletin_date >= anchor;
+    });
+
+    setRows(filteredByAnchor);
 
     // opções de filtros
     const uniq = <T extends string | null>(arr: T[]) =>
       Array.from(new Set(arr.filter(Boolean) as string[])).sort();
 
-    setCompanyOpts(uniq(r.map((x) => x.company)).map((v) => ({ value: v, label: v })));
-    setTickerOpts(uniq(r.map((x) => x.ticker)).map((v) => ({ value: v, label: v })));
-    setTypeOpts(uniq(r.map((x) => x.bulletin_type)).map((v) => ({ value: v, label: v })));
-    setCanonicalOpts(uniq(r.map((x) => x.canonical_type)).map((v) => ({ value: v, label: v })));
+    setCompanyOpts(uniq(filteredByAnchor.map((x) => x.company)).map((v) => ({ value: v, label: v })));
+    setTickerOpts(uniq(filteredByAnchor.map((x) => x.ticker)).map((v) => ({ value: v, label: v })));
 
     // datas globais
-    const ds = r.map((x) => x.bulletin_date).filter(Boolean) as string[];
+    const ds = filteredByAnchor.map((x) => x.bulletin_date).filter(Boolean) as string[];
     if (ds.length) {
       const min = ds.reduce((a, b) => (a < b ? a : b));
       const max = ds.reduce((a, b) => (a > b ? a : b));
@@ -165,8 +157,6 @@ export default function Page() {
   const filtered = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
-    const bset = new Set(selTypes.map((o) => o.value));
-    const caset = new Set(selCanonicals.map((o) => o.value));
 
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -174,11 +164,9 @@ export default function Page() {
       if (endDate && r.bulletin_date > endDate) return false;
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!r.ticker || !tset.has(r.ticker))) return false;
-      if (bset.size && (!r.bulletin_type || !bset.has(r.bulletin_type))) return false;
-      if (caset.size && (!r.canonical_type || !caset.has(r.canonical_type))) return false;
       return true;
     });
-  }, [rows, startDate, endDate, selCompanies, selTickers, selTypes, selCanonicals]);
+  }, [rows, startDate, endDate, selCompanies, selTickers]);
 
   const filteredSorted = useMemo(
     () =>
@@ -192,35 +180,16 @@ export default function Page() {
     () =>
       filteredSorted.map((r) => ({
         company: r.company ?? "",
+        ticker: r.ticker ?? "",
         dateNum: r.bulletin_date ? Date.parse(r.bulletin_date) : 0,
         canonical_type: r.canonical_type ?? "",
       })),
     [filteredSorted],
   );
 
-  const canonicalSeries = useMemo(() => {
-    const groups = new Map<string, ScatterDatum[]>();
-    for (const datum of chartData) {
-      const key = datum.canonical_type;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(datum);
-    }
-    return Array.from(groups.entries());
-  }, [chartData]);
-
-  const canonicalColors = useMemo(() => {
-    const map = new Map<string, string>();
-    canonicalSeries.forEach(([canonical], index) => {
-      map.set(canonical, COLORS[index % COLORS.length]);
-    });
-    return map;
-  }, [canonicalSeries]);
-
   const handleReset = () => {
     setSelCompanies([]);
     setSelTickers([]);
-    setSelTypes([]);
-    setSelCanonicals([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
   };
@@ -232,22 +201,18 @@ export default function Page() {
       alert("Nenhum boletim no filtro atual.");
       return;
     }
-
     const grouped = new Map<string, Row[]>();
     for (const row of filteredSorted) {
       if (!row.company) continue;
       if (!grouped.has(row.company)) grouped.set(row.company, []);
       grouped.get(row.company)!.push(row);
     }
-
     if (!grouped.size) {
       alert("Nenhuma empresa válida para exportar.");
       return;
     }
-
     const { default: JSZip } = await import("jszip");
     const zip = new JSZip();
-
     for (const [company, rowsForCompany] of grouped) {
       const sorted = [...rowsForCompany].sort((a, b) =>
         (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? ""),
@@ -262,7 +227,6 @@ export default function Page() {
       const lastDate = sorted[sorted.length - 1].bulletin_date ?? "unknown";
       zip.file(`${safe}__cpc_notices_until_${lastDate}.txt`, story);
     }
-
     const blob = await zip.generateAsync({ type: "blob" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -277,19 +241,16 @@ export default function Page() {
       alert("Nenhum boletim no filtro atual.");
       return;
     }
-
     const grouped = new Map<string, Row[]>();
     for (const row of filteredSorted) {
       if (!row.company) continue;
       if (!grouped.has(row.company)) grouped.set(row.company, []);
       grouped.get(row.company)!.push(row);
     }
-
     if (!grouped.size) {
       alert("Nenhuma empresa válida para exportar.");
       return;
     }
-
     const sections: string[] = [];
     for (const [company, rowsForCompany] of grouped) {
       const sorted = [...rowsForCompany].sort((a, b) =>
@@ -311,12 +272,10 @@ export default function Page() {
         ].join("\n"),
       );
     }
-
     const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
     const safeEnd = endDate ? endDate.replaceAll("-", "") : "fim";
     const filename = `cpc_notices_${safeStart}_${safeEnd}.txt`;
     const blob = new Blob([sections.join("\n")], { type: "text/plain;charset=utf-8" });
-
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -405,28 +364,6 @@ export default function Page() {
             classNamePrefix="cpc-select"
           />
         </div>
-
-        <div>
-          <label className="block text-sm mb-1">Bulletin Type</label>
-          <Select
-            isMulti
-            options={typeOpts}
-            value={selTypes}
-            onChange={(v: MultiValue<Opt>) => setSelTypes(v as Opt[])}
-            classNamePrefix="cpc-select"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm mb-1">Canonical Type</label>
-          <Select
-            isMulti
-            options={canonicalOpts}
-            value={selCanonicals}
-            onChange={(v: MultiValue<Opt>) => setSelCanonicals(v as Opt[])}
-            classNamePrefix="cpc-select"
-          />
-        </div>
       </div>
 
       <div className="w-full h-80 border rounded p-2">
@@ -440,14 +377,19 @@ export default function Page() {
               tickFormatter={(v) => new Date(v).toISOString().slice(0, 10)}
               name="Date"
             />
-            <YAxis type="category" dataKey="company" name="Company" />
+            <YAxis
+              type="category"
+              dataKey="ticker"
+              name="Ticker"
+              width={90}
+              tick={{ fontSize: 12 }}
+            />
             <Tooltip
               formatter={(value: number | string, name: string) => {
                 if (name === "dateNum") {
-                  const timestamp =
-                    typeof value === "number" ? value : Number(value);
-                  if (Number.isFinite(timestamp)) {
-                    return [new Date(timestamp).toISOString().slice(0, 10), "Date"];
+                  const ts = typeof value === "number" ? value : Number(value);
+                  if (Number.isFinite(ts)) {
+                    return [new Date(ts).toISOString().slice(0, 10), "Date"];
                   }
                   return ["", "Date"];
                 }
@@ -455,15 +397,7 @@ export default function Page() {
               }}
               labelFormatter={() => ""}
             />
-            <Legend />
-            {canonicalSeries.map(([ct, data], index) => (
-              <Scatter
-                key={ct || `unknown-${index}`}
-                name={ct || "—"}
-                data={data}
-                fill={canonicalColors.get(ct) ?? COLORS[index % COLORS.length]}
-              />
-            ))}
+            <Scatter data={chartData} />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
@@ -477,8 +411,6 @@ export default function Page() {
                 <th className="p-2">Date</th>
                 <th className="p-2">Company</th>
                 <th className="p-2">Ticker</th>
-                <th className="p-2">Bulletin Type</th>
-                <th className="p-2">Canonical Type</th>
                 <th className="p-2">Composite_Key</th>
                 <th className="p-2">Ação</th>
               </tr>
@@ -489,8 +421,6 @@ export default function Page() {
                   <td className="p-2">{row.bulletin_date}</td>
                   <td className="p-2">{row.company}</td>
                   <td className="p-2">{row.ticker}</td>
-                  <td className="p-2">{row.bulletin_type}</td>
-                  <td className="p-2">{row.canonical_type}</td>
                   <td className="p-2">{row.composite_key}</td>
                   <td className="p-2">
                     <button
