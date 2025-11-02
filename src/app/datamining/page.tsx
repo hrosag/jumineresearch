@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar";
 import NoticesPage from "./bulletins/notices/page";
 import CanonicalMapPage from "./bulletins/canonical-map/page";
 import NewListingsPage from "./lifecycle/new-listings/page";
+import CPCPage from "./lifecycle/cpc/page";
 
 export default function DataMiningPage() {
   const [selectedReport, setSelectedReport] = useState<string>("notices");
@@ -20,6 +21,7 @@ export default function DataMiningPage() {
         {selectedReport === "notices" && <NoticesPage />}
         {selectedReport === "canonical-map" && <CanonicalMapPage />}
         {selectedReport === "new-listings" && <NewListingsPage />}
+        {selectedReport === "cpc" && <CPCPage />}
       </div>
     </div>
   );
