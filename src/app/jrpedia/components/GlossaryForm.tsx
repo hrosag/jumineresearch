@@ -72,13 +72,18 @@ export default function GlossaryForm({
   const [loading, setLoading] = useState(false);
   const [allTerms, setAllTerms] = useState<GlossaryTermSummary[]>([]);
 
+  // controle de texto bruto das tags
+  const [tagsText, setTagsText] = useState((form.tags ?? []).join(", "));
+  useEffect(() => {
+    setTagsText((form.tags ?? []).join(", "));
+  }, [form.tags]);
+
   useEffect(() => {
     setForm(resolvedInitial);
   }, [resolvedInitial]);
 
   useEffect(() => {
     let isMounted = true;
-
     async function fetchTerms() {
       const { data, error } = await supabase
         .from("glossary")
@@ -89,26 +94,17 @@ export default function GlossaryForm({
         console.error("Failed to load glossary terms", error.message);
         return;
       }
-
-      if (!isMounted || !data) {
-        return;
-      }
-
+      if (!isMounted || !data) return;
       setAllTerms(data);
     }
-
     void fetchTerms();
-
     return () => {
       isMounted = false;
     };
   }, []);
 
   useEffect(() => {
-    if (allTerms.length === 0) {
-      return;
-    }
-
+    if (allTerms.length === 0) return;
     setForm((previous) => {
       const currentParentPath =
         typeof previous.parent_path === "string" && previous.parent_path.length > 0
@@ -117,12 +113,9 @@ export default function GlossaryForm({
       const currentParentName = previous.parent_name ?? "";
       let nextParentName = currentParentName;
       let nextParentPath = currentParentPath;
-
       if (currentParentPath) {
         const match = allTerms.find((term) => term.path === currentParentPath.trim());
-        if (match && match.term !== currentParentName) {
-          nextParentName = match.term;
-        }
+        if (match && match.term !== currentParentName) nextParentName = match.term;
       } else if (currentParentName.length > 0) {
         const match = allTerms.find(
           (term) => term.term.toLowerCase() === currentParentName.toLowerCase(),
@@ -131,11 +124,9 @@ export default function GlossaryForm({
           nextParentPath = match.path ?? null;
         }
       }
-
       if (nextParentName === currentParentName && nextParentPath === currentParentPath) {
         return previous;
       }
-
       return {
         ...previous,
         parent_name: nextParentName,
@@ -168,14 +159,11 @@ export default function GlossaryForm({
         : value.length > 0
         ? value
         : null;
-
       if (
         previous.parent_path === nextParentPath &&
         (previous.parent_name ?? "") === nextParentName
-      ) {
+      )
         return previous;
-      }
-
       return {
         ...previous,
         parent_path: nextParentPath,
@@ -201,14 +189,11 @@ export default function GlossaryForm({
         : previous.parent_path ?? null;
 
       const nextParentName = match ? match.term : value;
-
       if (
         (previous.parent_name ?? "") === nextParentName &&
         previous.parent_path === nextParentPath
-      ) {
+      )
         return previous;
-      }
-
       return {
         ...previous,
         parent_name: nextParentName,
@@ -278,7 +263,11 @@ export default function GlossaryForm({
               type="text"
               name="parent_path"
               placeholder="e.g. 1.1 or 1.1.1"
-              value={typeof form.parent_path === "string" ? form.parent_path : form.parent_path ?? ""}
+              value={
+                typeof form.parent_path === "string"
+                  ? form.parent_path
+                  : form.parent_path ?? ""
+              }
               onChange={(event) => handleParentPathChange(event.target.value)}
               className={inputClassName}
             />
@@ -398,19 +387,20 @@ export default function GlossaryForm({
         </label>
         <input
           name="tags"
-          value={(form.tags ?? []).join(", ")}
-          onChange={(event) => {
-            const nextTags = event.target.value
+          value={tagsText}
+          onChange={(e) => setTagsText(e.target.value)}
+          onBlur={() => {
+            const nextTags = tagsText
               .split(",")
               .map((tag) => tag.trim())
               .filter((tag) => tag.length > 0);
-            setForm((prev) => ({
-              ...prev,
-              tags: nextTags.length > 0 ? nextTags : [],
-            }));
+            setForm((prev) => ({ ...prev, tags: nextTags }));
           }}
           className={inputClassName}
         />
+        <p className="text-xs text-gray-500">
+          Digite as tags separadas por vírgulas e clique fora do campo para salvar.
+        </p>
       </div>
 
       <div className="flex justify-end gap-3 pt-2">
