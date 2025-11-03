@@ -188,6 +188,18 @@ export default function Page() {
     [filteredSorted],
   );
 
+  // Domínio do eixo X alinhado ao filtro de datas
+  const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
+    const toDateNum = (date: string | null | undefined) =>
+      date ? Date.parse(date) : Number.NaN;
+    const min = toDateNum(startDate);
+    const max = toDateNum(endDate);
+    return [
+      (Number.isFinite(min) ? min : "auto") as number | "auto",
+      (Number.isFinite(max) ? max : "auto") as number | "auto",
+    ];
+  }, [startDate, endDate]);
+
   const handleReset = () => {
     setSelCompanies([]);
     setSelTickers([]);
@@ -374,7 +386,8 @@ export default function Page() {
             <XAxis
               dataKey="dateNum"
               type="number"
-              domain={["auto", "auto"]}
+              domain={xDomain}
+              allowDataOverflow
               tickFormatter={(v) => new Date(v).toISOString().slice(0, 10)}
               name="Date"
             />
