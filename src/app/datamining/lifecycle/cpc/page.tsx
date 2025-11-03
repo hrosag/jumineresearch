@@ -36,7 +36,27 @@ type ScatterDatum = {
   ticker: string;
   dateNum: number;
   canonical_type: string;
+  dateISO: string; // original YYYY-MM-DD
 };
+
+// Parse seguro de 'YYYY-MM-DD' para timestamp UTC
+function toDateNum(iso: string | null | undefined): number {
+  if (!iso) return Number.NaN;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return Number.NaN;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  // usar meio-dia UTC para evitar rollback por fuso local
+  return Date.UTC(y, mo, d, 12, 0, 0);
+}
+
+// Formatador UTC consistente com Notices
+function fmtUTC(ts: number): string {
+  if (!Number.isFinite(ts)) return "—";
+  const d = new Date(ts);
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+}
 
 type Opt = { value: string; label: string };
 
@@ -182,16 +202,15 @@ export default function Page() {
       filteredSorted.map((r) => ({
         company: r.company ?? "",
         ticker: r.ticker ?? "",
-        dateNum: r.bulletin_date ? Date.parse(r.bulletin_date) : 0,
+        dateNum: toDateNum(r.bulletin_date),
         canonical_type: r.canonical_type ?? "",
+        dateISO: r.bulletin_date ?? "",
       })),
     [filteredSorted],
   );
 
   // Domínio do eixo X alinhado ao filtro de datas
   const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
-    const toDateNum = (date: string | null | undefined) =>
-      date ? Date.parse(date) : Number.NaN;
     const min = toDateNum(startDate);
     const max = toDateNum(endDate);
     return [
@@ -199,6 +218,15 @@ export default function Page() {
       (Number.isFinite(max) ? max : "auto") as number | "auto",
     ];
   }, [startDate, endDate]);
+
+  // Domínio fixo do Y com os tickers presentes no filtro
+  const yDomain = useMemo<string[]>(() => {
+    const s = new Set<string>();
+    for (const d of chartData) {
+      if (d.ticker) s.add(d.ticker);
+    }
+    return Array.from(s).sort();
+  }, [chartData]);
 
   const handleReset = () => {
     setSelCompanies([]);
@@ -388,7 +416,7 @@ export default function Page() {
               type="number"
               domain={xDomain}
               allowDataOverflow
-              tickFormatter={(v) => new Date(v).toISOString().slice(0, 10)}
+              tickFormatter={(v) => fmtUTC(Number(v))}
               name="Date"
             />
             <YAxis
@@ -397,34 +425,31 @@ export default function Page() {
               name="Ticker"
               width={90}
               tick={{ fontSize: 12 }}
+              domain={yDomain}
+              allowDuplicatedCategory={false}
             />
             <Tooltip
               content={({ active, payload }) => {
-                if (active && payload && payload.length > 0) {
-                  const d = payload[0]?.payload as ScatterDatum | undefined;
-                  if (!d) return null;
-                  const date =
-                    Number.isFinite(d.dateNum) && d.dateNum
-                      ? new Date(d.dateNum).toLocaleDateString("pt-BR")
-                      : "—";
-                  return (
-                    <div className="bg-white p-2 border rounded shadow text-sm">
-                      <div>
-                        <strong>Data:</strong> {date}
-                      </div>
-                      <div>
-                        <strong>Empresa:</strong> {d.company || "—"}
-                      </div>
-                      <div>
-                        <strong>Ticker:</strong> {d.ticker || "—"}
-                      </div>
-                      <div>
-                        <strong>Canonical:</strong> {d.canonical_type || "—"}
-                      </div>
+                if (!active || !payload || payload.length === 0) return null;
+                const d = payload[0]?.payload as ScatterDatum | undefined;
+                if (!d) return null;
+                const date = d.dateISO || fmtUTC(d.dateNum);
+                return (
+                  <div className="bg-white p-2 border rounded shadow text-sm">
+                    <div>
+                      <strong>Data:</strong> {date}
                     </div>
-                  );
-                }
-                return null;
+                    <div>
+                      <strong>Empresa:</strong> {d.company || "—"}
+                    </div>
+                    <div>
+                      <strong>Ticker:</strong> {d.ticker || "—"}
+                    </div>
+                    <div>
+                      <strong>Canonical:</strong> {d.canonical_type || "—"}
+                    </div>
+                  </div>
+                );
               }}
             />
             <Scatter data={chartData} />
