@@ -13,6 +13,7 @@ import {
   CartesianGrid,
 } from "recharts";
 
+// tooltip inline no mesmo modelo do Notices (sem tipos extras)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -385,17 +386,33 @@ export default function Page() {
               tick={{ fontSize: 12 }}
             />
             <Tooltip
-              formatter={(value: number | string, name: string) => {
-                if (name === "dateNum") {
-                  const ts = typeof value === "number" ? value : Number(value);
-                  if (Number.isFinite(ts)) {
-                    return [new Date(ts).toISOString().slice(0, 10), "Date"];
-                  }
-                  return ["", "Date"];
+              content={({ active, payload }) => {
+                if (active && payload && payload.length > 0) {
+                  const d = payload[0]?.payload as ScatterDatum | undefined;
+                  if (!d) return null;
+                  const date =
+                    Number.isFinite(d.dateNum) && d.dateNum
+                      ? new Date(d.dateNum).toLocaleDateString("pt-BR")
+                      : "—";
+                  return (
+                    <div className="bg-white p-2 border rounded shadow text-sm">
+                      <div>
+                        <strong>Data:</strong> {date}
+                      </div>
+                      <div>
+                        <strong>Empresa:</strong> {d.company || "—"}
+                      </div>
+                      <div>
+                        <strong>Ticker:</strong> {d.ticker || "—"}
+                      </div>
+                      <div>
+                        <strong>Canonical:</strong> {d.canonical_type || "—"}
+                      </div>
+                    </div>
+                  );
                 }
-                return [String(value ?? ""), name];
+                return null;
               }}
-              labelFormatter={() => ""}
             />
             <Scatter data={chartData} />
           </ScatterChart>
