@@ -228,6 +228,18 @@ export default function Page() {
     return Array.from(s).sort();
   }, [chartData]);
 
+  // Controle manual de altura: +10 "linhas" por passo
+  const [yExtra, setYExtra] = useState<number>(0); // 0,1,2,... => +0,+10,+20...
+  const baseRowsCount = useMemo(() => yDomain.length, [yDomain]);
+
+  const chartHeight = useMemo(() => {
+    const base = 260; // altura mínima
+    const perRow = 26; // px por linha
+    const maxH = 1200; // teto seguro
+    const rowsEff = baseRowsCount + yExtra * 10;
+    return Math.min(maxH, Math.max(base, 60 + rowsEff * perRow));
+  }, [baseRowsCount, yExtra]);
+
   const handleReset = () => {
     setSelCompanies([]);
     setSelTickers([]);
@@ -351,7 +363,7 @@ export default function Page() {
         {loading ? "Carregando…" : `${filteredSorted.length} boletins no filtro`}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <div className="flex gap-4">
           <div>
             <label className="block text-sm">Start</label>
@@ -405,9 +417,33 @@ export default function Page() {
             classNamePrefix="cpc-select"
           />
         </div>
+
+        {/* Controle manual de altura do gráfico */}
+        <div className="flex items-end gap-2">
+          <div className="text-sm">
+            <div className="mb-1">Altura (+10)</div>
+            <div className="flex items-center gap-2">
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYExtra((v) => Math.max(0, v - 1))}
+                title="-10 linhas"
+              >
+                −10
+              </button>
+              <span className="inline-block w-12 text-center">{yExtra * 10}</span>
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYExtra((v) => v + 1)}
+                title="+10 linhas"
+              >
+                +10
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="w-full h-80 border rounded p-2">
+      <div className="w-full border rounded p-2" style={{ height: chartHeight }}>
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart>
             <CartesianGrid />
