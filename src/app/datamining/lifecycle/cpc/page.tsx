@@ -12,6 +12,11 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import type { TooltipProps } from "recharts";
+import type {
+  ValueType,
+  NameType,
+} from "recharts/types/component/DefaultTooltipContent";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -186,6 +191,36 @@ export default function Page() {
       })),
     [filteredSorted],
   );
+
+  const CustomTooltip = ({
+    active,
+    payload,
+  }: TooltipProps<ValueType, NameType>) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const item = payload[0];
+    const point = item && item.payload ? (item.payload as ScatterDatum) : undefined;
+    if (!point) return null;
+    const date =
+      Number.isFinite(point.dateNum) && point.dateNum
+        ? new Date(point.dateNum).toISOString().slice(0, 10)
+        : "";
+    return (
+      <div className="bg-white rounded border shadow p-2 text-sm">
+        <div>
+          <b>Date</b>: {date || "—"}
+        </div>
+        <div>
+          <b>Ticker</b>: {point.ticker || "—"}
+        </div>
+        <div>
+          <b>Company</b>: {point.company || "—"}
+        </div>
+        <div>
+          <b>Canonical</b>: {point.canonical_type || "—"}
+        </div>
+      </div>
+    );
+  };
 
   const handleReset = () => {
     setSelCompanies([]);
@@ -384,19 +419,7 @@ export default function Page() {
               width={90}
               tick={{ fontSize: 12 }}
             />
-            <Tooltip
-              formatter={(value: number | string, name: string) => {
-                if (name === "dateNum") {
-                  const ts = typeof value === "number" ? value : Number(value);
-                  if (Number.isFinite(ts)) {
-                    return [new Date(ts).toISOString().slice(0, 10), "Date"];
-                  }
-                  return ["", "Date"];
-                }
-                return [String(value ?? ""), name];
-              }}
-              labelFormatter={() => ""}
-            />
+            <Tooltip labelFormatter={() => ""} content={<CustomTooltip />} />
             <Scatter data={chartData} />
           </ScatterChart>
         </ResponsiveContainer>
