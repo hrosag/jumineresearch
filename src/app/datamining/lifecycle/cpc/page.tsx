@@ -213,32 +213,56 @@ export default function Page() {
   const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
     const min = toDateNum(startDate);
     const max = toDateNum(endDate);
-    return [
-      (Number.isFinite(min) ? min : "auto") as number | "auto",
-      (Number.isFinite(max) ? max : "auto") as number | "auto",
-    ];
+    const PAD = 10 * 24 * 60 * 60 * 1000; // +10 dias
+    const left = Number.isFinite(min) ? Math.max(0, Number(min) - PAD) : "auto";
+    const right = Number.isFinite(max) ? Number(max) + PAD : "auto";
+    return [left as number | "auto", right as number | "auto"];
   }, [startDate, endDate]);
 
-  // Domínio fixo do Y com os tickers presentes no filtro
-  const yDomain = useMemo<string[]>(() => {
-    const s = new Set<string>();
-    for (const d of chartData) {
-      if (d.ticker) s.add(d.ticker);
+  // Ordenação dos tickers pela 1ª data de boletim no período
+  const tickerOrder = useMemo<string[]>(() => {
+    const first = new Map<string, number>();
+    for (const r of filteredSorted) {
+      const t = r.ticker ?? "";
+      if (!t) continue;
+      const ts = toDateNum(r.bulletin_date);
+      const prev = first.get(t);
+      if (Number.isFinite(ts) && (prev === undefined || (ts as number) < prev!)) {
+        first.set(t, ts as number);
+      }
     }
-    return Array.from(s).sort();
-  }, [chartData]);
+    return Array.from(first.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([t]) => t);
+  }, [filteredSorted]);
 
-  // Controle manual de altura: +10 "linhas" por passo
-  const [yExtra, setYExtra] = useState<number>(0); // 0,1,2,... => +0,+10,+20...
-  const baseRowsCount = useMemo(() => yDomain.length, [yDomain]);
+  // Quantidade visível no Y, em passos de 10. Começa com 10.
+  const [yLimit, setYLimit] = useState<number>(10);
+  useEffect(() => {
+    if (tickerOrder.length && yLimit > tickerOrder.length) {
+      setYLimit(tickerOrder.length);
+    }
+  }, [tickerOrder.length, yLimit]);
+
+  const visibleTickers = useMemo(
+    () =>
+      tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))),
+    [tickerOrder, yLimit],
+  );
+
+  // Domínio Y e dataset do gráfico restritos aos tickers visíveis
+  const yDomain = visibleTickers;
+  const chartDataVis = useMemo(
+    () => chartData.filter((d) => d.ticker && yDomain.includes(d.ticker)),
+    [chartData, yDomain],
+  );
 
   const chartHeight = useMemo(() => {
     const base = 260; // altura mínima
-    const perRow = 26; // px por linha
-    const maxH = 1200; // teto seguro
-    const rowsEff = baseRowsCount + yExtra * 10;
-    return Math.min(maxH, Math.max(base, 60 + rowsEff * perRow));
-  }, [baseRowsCount, yExtra]);
+    const perRow = 26; // px por ticker
+    const maxH = 1200; // teto
+    return Math.min(maxH, Math.max(base, 60 + visibleTickers.length * perRow));
+  }, [visibleTickers]);
 
   const handleReset = () => {
     setSelCompanies([]);
@@ -418,22 +442,28 @@ export default function Page() {
           />
         </div>
 
-        {/* Controle manual de altura do gráfico */}
-        <div className="flex items-end gap-2">
+        {/* Controle manual: linhas visíveis no Y */}
+        <div className="flex items-end justify-end">
           <div className="text-sm">
-            <div className="mb-1">Altura (+10)</div>
+            <div className="mb-1">Altura (linhas)</div>
             <div className="flex items-center gap-2">
               <button
                 className="border rounded px-2 py-1"
-                onClick={() => setYExtra((v) => Math.max(0, v - 1))}
+                onClick={() => setYLimit((v) => Math.max(10, v - 10))}
                 title="-10 linhas"
               >
                 −10
               </button>
-              <span className="inline-block w-12 text-center">{yExtra * 10}</span>
+              <span className="w-16 text-center">
+                {visibleTickers.length}/{tickerOrder.length || 0}
+              </span>
               <button
                 className="border rounded px-2 py-1"
-                onClick={() => setYExtra((v) => v + 1)}
+                onClick={() =>
+                  setYLimit((v) =>
+                    Math.min(tickerOrder.length || v + 10, v + 10),
+                  )
+                }
                 title="+10 linhas"
               >
                 +10
@@ -488,7 +518,7 @@ export default function Page() {
                 );
               }}
             />
-            <Scatter data={chartData} />
+            <Scatter data={chartDataVis} />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
