@@ -387,39 +387,68 @@ export default function Page() {
         {loading ? "Carregando…" : `${filteredSorted.length} boletins no filtro`}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <div className="flex gap-4">
-          <div>
-            <label className="block text-sm">Start</label>
-            <input
-              type="date"
-              className="border rounded px-2 py-1"
-              value={startDate}
-              min={globalMinDate || undefined}
-              max={endDate || undefined}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-sm">End</label>
-            <input
-              type="date"
-              className="border rounded px-2 py-1"
-              value={endDate}
-              min={startDate || undefined}
-              max={globalMaxDate || undefined}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          </div>
-          <button
-            className="border rounded px-3 py-1 self-end"
-            onClick={handleReset}
-            title="Reset"
-          >
-            🔄
-          </button>
+      {/* Linha superior: datas e controles */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-sm">Start</label>
+          <input
+            type="date"
+            className="border rounded px-2 py-1"
+            value={startDate}
+            min={globalMinDate || undefined}
+            max={endDate || undefined}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
         </div>
+        <div>
+          <label className="block text-sm">End</label>
+          <input
+            type="date"
+            className="border rounded px-2 py-1"
+            value={endDate}
+            min={startDate || undefined}
+            max={globalMaxDate || undefined}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2 items-end flex-wrap">
+          <button
+            className="border rounded px-3 py-1"
+            onClick={handleReset}
+            title="Limpar filtros"
+          >
+            🔄 Limpar
+          </button>
+          <button
+            className="border rounded px-2 py-1"
+            onClick={() => setYLimit((v) => Math.max(10, v - 10))}
+            title="-10 linhas"
+          >
+            −10
+          </button>
+          <button
+            className="border rounded px-2 py-1"
+            onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
+            title="+10 linhas"
+          >
+            +10
+          </button>
+          <button
+            className="border rounded px-2 py-1"
+            onClick={() => setYLimit(tickerOrder.length || 10)}
+            disabled={!tickerOrder.length || visibleTickers.length === (tickerOrder.length || 0)}
+            title="Mostrar todas"
+          >
+            Todos
+          </button>
+          <span className="text-sm pl-2">
+            {visibleTickers.length}/{tickerOrder.length || 0}
+          </span>
+        </div>
+      </div>
 
+      {/* Linha inferior: filtros de company/ticker */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
           <label className="block text-sm mb-1">Company</label>
           <Select
@@ -440,36 +469,6 @@ export default function Page() {
             onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
             classNamePrefix="cpc-select"
           />
-        </div>
-
-        {/* Controle manual: linhas visíveis no Y */}
-        <div className="flex items-end justify-end">
-          <div className="text-sm">
-            <div className="mb-1">Altura (linhas)</div>
-            <div className="flex items-center gap-2">
-              <button
-                className="border rounded px-2 py-1"
-                onClick={() => setYLimit((v) => Math.max(10, v - 10))}
-                title="-10 linhas"
-              >
-                −10
-              </button>
-              <span className="w-16 text-center">
-                {visibleTickers.length}/{tickerOrder.length || 0}
-              </span>
-              <button
-                className="border rounded px-2 py-1"
-                onClick={() =>
-                  setYLimit((v) =>
-                    Math.min(tickerOrder.length || v + 10, v + 10),
-                  )
-                }
-                title="+10 linhas"
-              >
-                +10
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 
