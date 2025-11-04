@@ -362,21 +362,22 @@ export default function Page() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-wrap items-center gap-4">
-        <h1 className="text-2xl font-bold">CPC — Notices</h1>
-        <div className="ml-auto flex flex-wrap gap-2">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-screen-xl mx-auto">
+      {/* Header + ações com wrap */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold mr-auto">CPC — Notices</h1>
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={handleExportZip}
             disabled={loading || !hasFiltered}
-            className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-600 disabled:opacity-60"
+            className="px-3 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-600 disabled:opacity-60"
           >
             📄 Exportar ZIP
           </button>
           <button
             onClick={handleExportTxt}
             disabled={loading || !hasFiltered}
-            className="px-4 py-2 bg-green-500 text-black rounded hover:bg-green-600 disabled:opacity-60"
+            className="px-3 py-2 bg-green-500 text-black rounded hover:bg-green-600 disabled:opacity-60"
           >
             📜 Exportar TXT consolidado
           </button>
@@ -387,13 +388,14 @@ export default function Page() {
         {loading ? "Carregando…" : `${filteredSorted.length} boletins no filtro`}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <div className="flex gap-4">
+      {/* Filtros em grid responsivo */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
+        <div className="flex gap-3">
           <div>
             <label className="block text-sm">Start</label>
             <input
               type="date"
-              className="border rounded px-2 py-1"
+              className="border rounded px-2 py-1 w-full"
               value={startDate}
               min={globalMinDate || undefined}
               max={endDate || undefined}
@@ -404,7 +406,7 @@ export default function Page() {
             <label className="block text-sm">End</label>
             <input
               type="date"
-              className="border rounded px-2 py-1"
+              className="border rounded px-2 py-1 w-full"
               value={endDate}
               min={startDate || undefined}
               max={globalMaxDate || undefined}
@@ -420,7 +422,7 @@ export default function Page() {
           </button>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <label className="block text-sm mb-1">Company</label>
           <Select
             isMulti
@@ -428,10 +430,12 @@ export default function Page() {
             value={selCompanies}
             onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])}
             classNamePrefix="cpc-select"
+            className="w-full"
+            styles={{ container: (base) => ({ ...base, width: "100%" }) }}
           />
         </div>
 
-        <div>
+        <div className="min-w-0">
           <label className="block text-sm mb-1">Ticker</label>
           <Select
             isMulti
@@ -439,11 +443,13 @@ export default function Page() {
             value={selTickers}
             onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
             classNamePrefix="cpc-select"
+            className="w-full"
+            styles={{ container: (base) => ({ ...base, width: "100%" }) }}
           />
         </div>
 
         {/* Controle manual: linhas visíveis no Y */}
-        <div className="flex items-end justify-end">
+        <div className="flex items-end justify-start lg:justify-end">
           <div className="text-sm">
             <div className="mb-1">Altura (linhas)</div>
             <div className="flex items-center gap-2">
@@ -454,7 +460,7 @@ export default function Page() {
               >
                 −10
               </button>
-              <span className="w-16 text-center">
+              <span className="min-w-[4rem] text-center">
                 {visibleTickers.length}/{tickerOrder.length || 0}
               </span>
               <button
