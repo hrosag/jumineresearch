@@ -560,22 +560,42 @@ export default function Page() {
               </tr>
             </thead>
             <tbody>
-              {filteredSorted.map((row) => (
-                <tr key={row.id} className="border-b">
-                  <td className="p-2">{row.bulletin_date}</td>
-                  <td className="p-2">{row.company}</td>
-                  <td className="p-2">{row.ticker}</td>
-                  <td className="p-2">{row.composite_key}</td>
-                  <td className="p-2">
-                    <button
-                      className="underline"
-                      onClick={() => setSelectedBody(row.body_text || "")}
-                    >
-                      Ver boletim
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredSorted.map((row) => {
+                const fileName = row.composite_key?.replace(".txt", "") ?? "";
+                const fileLink = row.composite_key
+                  ? `/data/bulletins/${fileName}.txt`
+                  : "#";
+
+                return (
+                  <tr key={row.id} className="border-b">
+                    <td className="p-2">{row.bulletin_date}</td>
+                    <td className="p-2">{row.company}</td>
+                    <td className="p-2">{row.ticker}</td>
+                    <td className="p-2">
+                      {row.composite_key ? (
+                        <a
+                          href={fileLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {row.composite_key}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="p-2">
+                      <button
+                        className="underline"
+                        onClick={() => setSelectedBody(row.body_text || "")}
+                      >
+                        Ver boletim
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
