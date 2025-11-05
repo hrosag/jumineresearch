@@ -64,6 +64,7 @@ const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
 
 export default function Page() {
   const [loading, setLoading] = useState(true);
+  const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
 
   // dataset completo da timeline CPC
   const [rows, setRows] = useState<Row[]>([]);
@@ -284,6 +285,14 @@ export default function Page() {
   };
 
   const hasFiltered = filteredSorted.length > 0;
+
+  const openBulletinModal = (row: Row) => {
+    setSelectedBulletin(row);
+  };
+
+  const closeBulletinModal = () => {
+    setSelectedBulletin(null);
+  };
 
   const handleExportZip = async () => {
     if (!hasFiltered) {
@@ -561,23 +570,19 @@ export default function Page() {
             <tbody>
               {filteredSorted.map((row) => {
                 const compositeKey = row.composite_key ?? "—";
-                const link = row.composite_key
-                  ? `/data/bulletins/${row.composite_key}`
-                  : undefined;
                 return (
                   <tr key={row.id} className="border-b hover:bg-gray-50">
                     <td className="p-2">{row.company}</td>
                     <td className="p-2">{row.ticker}</td>
                     <td className="p-2">
-                      {link ? (
-                        <a
-                          href={link}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                      {row.composite_key ? (
+                        <button
+                          type="button"
+                          onClick={() => openBulletinModal(row)} // usa o mesmo handler do New Issuers
                           className="text-blue-600 hover:underline"
                         >
                           {compositeKey}
-                        </a>
+                        </button>
                       ) : (
                         compositeKey
                       )}
@@ -590,6 +595,37 @@ export default function Page() {
             </tbody>
           </table>
         </div>
+        {selectedBulletin && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
+            <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+              <button
+                type="button"
+                className="absolute top-3 right-3 text-sm text-gray-600 hover:text-gray-800"
+                onClick={closeBulletinModal}
+              >
+                Fechar
+              </button>
+              <div className="flex flex-col gap-2 pr-12">
+                <h3 className="text-lg font-semibold">Boletim Completo</h3>
+                <div className="text-sm text-gray-600">
+                  <div>
+                    <strong>Empresa:</strong> {selectedBulletin.company ?? "—"}
+                  </div>
+                  <div>
+                    <strong>Ticker:</strong> {selectedBulletin.ticker ?? "—"}
+                  </div>
+                  <div>
+                    <strong>Composite Key:</strong> {selectedBulletin.composite_key ?? "—"}
+                  </div>
+                  <div>
+                    <strong>Data:</strong> {selectedBulletin.bulletin_date ?? "—"}
+                  </div>
+                </div>
+                <pre className="whitespace-pre-wrap text-sm">{selectedBulletin.body_text ?? "Sem conteúdo disponível."}</pre>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
