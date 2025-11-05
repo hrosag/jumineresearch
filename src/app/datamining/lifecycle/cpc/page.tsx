@@ -58,6 +58,14 @@ function fmtUTC(ts: number): string {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
+function fmtDayMonth(ts: number): string {
+  if (!Number.isFinite(ts)) return "—";
+  const d = new Date(ts);
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}`;
+}
+
 type Opt = { value: string; label: string };
 
 const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
@@ -222,15 +230,17 @@ export default function Page() {
     [filteredSorted],
   );
 
-  // Domínio do eixo X alinhado ao filtro de datas
+  // Domínio do eixo X com margem extra de 5 dias para cada lado
   const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
-    const min = toDateNum(startDate);
-    const max = toDateNum(endDate);
-    const PAD = 10 * 24 * 60 * 60 * 1000; // +10 dias
-    const left = Number.isFinite(min) ? Math.max(0, Number(min) - PAD) : "auto";
-    const right = Number.isFinite(max) ? Number(max) + PAD : "auto";
-    return [left as number | "auto", right as number | "auto"];
-  }, [startDate, endDate]);
+    const times = filteredSorted
+      .map((r) => toDateNum(r.bulletin_date))
+      .filter((v): v is number => Number.isFinite(v));
+    if (!times.length) return ["auto", "auto"];
+    const PAD = 5 * 24 * 60 * 60 * 1000; // ±5 dias
+    const min = Math.min(...times);
+    const max = Math.max(...times);
+    return [min - PAD, max + PAD];
+  }, [filteredSorted]);
 
   // Ordenação dos tickers pela 1ª data de boletim no período
   const tickerOrder = useMemo<string[]>(() => {
@@ -509,9 +519,9 @@ export default function Page() {
               dataKey="dateNum"
               type="number"
               domain={xDomain}
-              allowDataOverflow
-              tickFormatter={(v) => fmtUTC(Number(v))}
-              name="Date"
+              tickFormatter={(v) => fmtDayMonth(Number(v))}
+              name="Data"
+              tick={{ fontSize: 11 }}
             />
             <YAxis
               type="category"
@@ -521,7 +531,7 @@ export default function Page() {
               domain={visibleTickers}
               interval={0} // força exibir todos os rótulos
               tickLine={false} // remove linhas verticais de cada label
-              width={110} // espaço extra pra não cortar texto
+              width={65} // reduz espaço à esquerda
               tick={{ fontSize: 12 }}
               allowDuplicatedCategory={false}
             />
