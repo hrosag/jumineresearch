@@ -92,6 +92,7 @@ export default function Page() {
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
   const [onlyMulti, setOnlyMulti] = useState(false);
+  const [filtered, setFiltered] = useState<Row[]>([]);
 
   async function load() {
     setLoading(true);
@@ -184,7 +185,7 @@ export default function Page() {
     load();
   }, []);
 
-  const filtered = useMemo(() => {
+  useEffect(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
 
@@ -195,7 +196,7 @@ export default function Page() {
       tickerGroups.get(row.ticker)!.add(row.canonical_type);
     }
 
-    return rows.filter((r) => {
+    const nextFiltered = rows.filter((r) => {
       if (!r.bulletin_date) return false;
       if (startDate && r.bulletin_date < startDate) return false;
       if (endDate && r.bulletin_date > endDate) return false;
@@ -208,6 +209,8 @@ export default function Page() {
         return false;
       return true;
     });
+
+    setFiltered(nextFiltered);
   }, [rows, startDate, endDate, selCompanies, selTickers, onlyMulti]);
 
   const filteredSorted = useMemo(
@@ -292,6 +295,8 @@ export default function Page() {
     setSelTickers([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
+    // restaura o dataset completo ao limpar filtros
+    setFiltered(rows);
   };
 
   const hasFiltered = filteredSorted.length > 0;
