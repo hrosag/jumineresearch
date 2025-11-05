@@ -82,7 +82,6 @@ export default function Page() {
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
-  const [selectedBody, setSelectedBody] = useState<string | null>(null);
   const [onlyMulti, setOnlyMulti] = useState(false);
 
   async function load() {
@@ -550,53 +549,48 @@ export default function Page() {
         <h2 className="text-xl font-semibold">Resultados</h2>
         <div className="border rounded overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left border-b">
-                <th className="p-2">Date</th>
-                <th className="p-2">Company</th>
+            <thead className="bg-gray-100 border-b">
+              <tr className="text-left">
+                <th className="p-2">Empresa</th>
                 <th className="p-2">Ticker</th>
-                <th className="p-2">Composite_Key</th>
-                <th className="p-2">Ação</th>
+                <th className="p-2">Composite Key</th>
+                <th className="p-2">Data</th>
+                <th className="p-2">Tipo de Boletim</th>
               </tr>
             </thead>
             <tbody>
-              {filteredSorted.map((row) => (
-                <tr key={row.id} className="border-b">
-                  <td className="p-2">{row.bulletin_date}</td>
-                  <td className="p-2">{row.company}</td>
-                  <td className="p-2">{row.ticker}</td>
-                  <td className="p-2">{row.composite_key}</td>
-                  <td className="p-2">
-                    <button
-                      className="underline"
-                      onClick={() => setSelectedBody(row.body_text || "")}
-                    >
-                      Ver boletim
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredSorted.map((row) => {
+                const compositeKey = row.composite_key ?? "—";
+                const link = row.composite_key
+                  ? `/data/bulletins/${row.composite_key}`
+                  : undefined;
+                return (
+                  <tr key={row.id} className="border-b hover:bg-gray-50">
+                    <td className="p-2">{row.company}</td>
+                    <td className="p-2">{row.ticker}</td>
+                    <td className="p-2">
+                      {link ? (
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {compositeKey}
+                        </a>
+                      ) : (
+                        compositeKey
+                      )}
+                    </td>
+                    <td className="p-2">{row.bulletin_date}</td>
+                    <td className="p-2">{row.canonical_type ?? "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
-
-      {selectedBody !== null && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
-          <div className="bg-white p-4 rounded shadow-lg max-w-3xl w-full max-h-[80vh] overflow-auto relative">
-            <button
-              className="absolute right-2 top-2 border rounded px-2 py-1"
-              onClick={() => setSelectedBody(null)}
-            >
-              Fechar
-            </button>
-            <div className="flex justify-between items-center mb-4 pr-12">
-              <h3 className="text-lg font-semibold">Boletim Completo</h3>
-            </div>
-            <pre className="whitespace-pre-wrap text-sm">{selectedBody}</pre>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
