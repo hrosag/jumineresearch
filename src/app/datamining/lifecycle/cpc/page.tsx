@@ -550,22 +550,37 @@ export default function Page() {
         <h2 className="text-xl font-semibold">Resultados</h2>
         <div className="border rounded overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left border-b">
-                <th className="p-2">Date</th>
-                <th className="p-2">Company</th>
+            <thead className="bg-gray-100 border-b">
+              <tr className="text-left">
+                <th className="p-2">Empresa</th>
                 <th className="p-2">Ticker</th>
-                <th className="p-2">Composite_Key</th>
+                <th className="p-2">Composite Key</th>
+                <th className="p-2">Data</th>
+                <th className="p-2">Tipo de Boletim</th>
                 <th className="p-2">Ação</th>
               </tr>
             </thead>
             <tbody>
               {filteredSorted.map((row) => (
-                <tr key={row.id} className="border-b">
-                  <td className="p-2">{row.bulletin_date}</td>
+                <tr key={row.id} className="border-b hover:bg-gray-50">
                   <td className="p-2">{row.company}</td>
                   <td className="p-2">{row.ticker}</td>
-                  <td className="p-2">{row.composite_key}</td>
+                  <td className="p-2">
+                    {row.composite_key ? (
+                      <a
+                        href={row.source_file ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {row.composite_key}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="p-2">{row.bulletin_date}</td>
+                  <td className="p-2">{row.canonical_type ?? "—"}</td>
                   <td className="p-2">
                     <button
                       className="underline"
