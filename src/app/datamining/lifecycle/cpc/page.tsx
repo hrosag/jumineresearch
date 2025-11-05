@@ -83,6 +83,7 @@ export default function Page() {
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
   const [selectedBody, setSelectedBody] = useState<string | null>(null);
+  const [onlyMulti, setOnlyMulti] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -179,15 +180,27 @@ export default function Page() {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
 
+    const tickerGroups = new Map<string, Set<string>>();
+    for (const row of rows) {
+      if (!row.ticker || !row.canonical_type) continue;
+      if (!tickerGroups.has(row.ticker)) tickerGroups.set(row.ticker, new Set());
+      tickerGroups.get(row.ticker)!.add(row.canonical_type);
+    }
+
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
       if (startDate && r.bulletin_date < startDate) return false;
       if (endDate && r.bulletin_date > endDate) return false;
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!r.ticker || !tset.has(r.ticker))) return false;
+      if (
+        onlyMulti &&
+        (!r.ticker || (tickerGroups.get(r.ticker)?.size ?? 0) < 2)
+      )
+        return false;
       return true;
     });
-  }, [rows, startDate, endDate, selCompanies, selTickers]);
+  }, [rows, startDate, endDate, selCompanies, selTickers, onlyMulti]);
 
   const filteredSorted = useMemo(
     () =>
@@ -444,6 +457,14 @@ export default function Page() {
           <span className="text-sm pl-2">
             {visibleTickers.length}/{tickerOrder.length || 0}
           </span>
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={onlyMulti}
+              onChange={(e) => setOnlyMulti(e.target.checked)}
+            />
+            Somente múltiplos boletins
+          </label>
         </div>
       </div>
 
