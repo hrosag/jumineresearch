@@ -488,9 +488,12 @@ export default function Page() {
               type="category"
               dataKey="ticker"
               name="Ticker"
-              width={90}
+              ticks={visibleTickers}
+              domain={visibleTickers}
+              interval={0} // força exibir todos os rótulos
+              tickLine={false} // remove linhas verticais de cada label
+              width={110} // espaço extra pra não cortar texto
               tick={{ fontSize: 12 }}
-              domain={yDomain}
               allowDuplicatedCategory={false}
             />
             <Tooltip
