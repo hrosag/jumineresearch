@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
 import {
@@ -280,6 +280,8 @@ export default function Page() {
     [chartData, yDomain],
   );
 
+  const [chartKey, setChartKey] = useState(0);
+
   const chartHeight = useMemo(() => {
     const base = 260; // altura mínima
     const perRow = 26; // px por ticker
@@ -288,11 +290,38 @@ export default function Page() {
   }, [visibleTickers]);
 
   const handleReset = () => {
+    const hadCompanyOrTickerFilters = selCompanies.length > 0 || selTickers.length > 0;
+    const startChanged = startDate !== globalMinDate;
+    const endChanged = endDate !== globalMaxDate;
+    const hadOtherFilters = startChanged || endChanged || onlyMulti;
+
     setSelCompanies([]);
     setSelTickers([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
+    setOnlyMulti(false);
+
+    if (!hadCompanyOrTickerFilters && hadOtherFilters) {
+      setChartKey((prevKey) => prevKey + 1);
+    }
   };
+
+  const prevFilterCounts = useRef({ companies: 0, tickers: 0 });
+
+  useEffect(() => {
+    const prev = prevFilterCounts.current;
+    if (
+      selCompanies.length === 0 &&
+      selTickers.length === 0 &&
+      (prev.companies > 0 || prev.tickers > 0)
+    ) {
+      setChartKey((prevKey) => prevKey + 1);
+    }
+    prevFilterCounts.current = {
+      companies: selCompanies.length,
+      tickers: selTickers.length,
+    };
+  }, [selCompanies.length, selTickers.length]);
 
   const hasFiltered = filteredSorted.length > 0;
 
@@ -513,7 +542,7 @@ export default function Page() {
 
       <div className="w-full border rounded p-2" style={{ height: chartHeight }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart>
+          <ScatterChart key={chartKey}>
             <CartesianGrid />
             <XAxis
               dataKey="dateNum"
