@@ -292,6 +292,7 @@ export default function Page() {
     setSelTickers([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
+    setOnlyMulti(false);
   };
 
   const hasFiltered = filteredSorted.length > 0;
@@ -512,7 +513,11 @@ export default function Page() {
       </div>
 
       <div className="w-full border rounded p-2" style={{ height: chartHeight }}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer
+          key={filteredSorted.length}
+          width="100%"
+          height="100%"
+        >
           <ScatterChart>
             <CartesianGrid />
             <XAxis
