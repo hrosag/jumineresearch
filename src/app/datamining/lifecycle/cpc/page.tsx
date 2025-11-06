@@ -84,10 +84,14 @@ export default function Page() {
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
   const [onlyMulti, setOnlyMulti] = useState(false);
 
-  // Tabela: filtro e sort no header
-  const [tableQuery, setTableQuery] = useState<string>("");
+  // sort + filtros por coluna no header
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [fCompany, setFCompany] = useState("");
+  const [fTicker, setFTicker] = useState("");
+  const [fKey, setFKey] = useState("");
+  const [fDate, setFDate] = useState(""); // aceita prefixo YYYY, YYYY-MM, YYYY-MM-DD
+  const [fType, setFType] = useState("");
 
   async function load() {
     setLoading(true);
@@ -163,15 +167,11 @@ export default function Page() {
     setLoading(false);
   }
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   // valida intervalo
   useEffect(() => {
-    if (startDate && endDate && startDate > endDate) {
-      setEndDate(startDate);
-    }
+    if (startDate && endDate && startDate > endDate) setEndDate(startDate);
   }, [startDate, endDate]);
 
   // janela atual
@@ -227,51 +227,7 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers, onlyMulti, tickerCount]);
 
-  // filtro textual da tabela
-  const filteredByQuery = useMemo(() => {
-    const q = tableQuery.trim().toLowerCase();
-    if (!q) return filtered;
-    return filtered.filter((r) => {
-      const hay = [
-        r.company ?? "",
-        r.ticker ?? "",
-        r.bulletin_type ?? "",
-        r.canonical_type ?? "",
-        r.composite_key ?? "",
-        r.body_text ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [filtered, tableQuery]);
-
-  // sort genérico
-  const tableRows = useMemo(() => {
-    const getVal = (r: Row, k: SortKey) => {
-      if (k === "bulletin_date") return toDateNum(r.bulletin_date);
-      const v =
-        k === "company"
-          ? r.company
-          : k === "ticker"
-          ? r.ticker
-          : k === "canonical_type"
-          ? r.canonical_type
-          : r.composite_key;
-      return (v ?? "").toString().toLowerCase();
-    };
-    const arr = [...filteredByQuery];
-    arr.sort((a, b) => {
-      const va = getVal(a, sortKey);
-      const vb = getVal(b, sortKey);
-      if (va < vb) return sortDir === "asc" ? -1 : 1;
-      if (va > vb) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
-    return arr;
-  }, [filteredByQuery, sortKey, sortDir]);
-
-  // dataset ordenado por data para gráfico
+  // dataset ordenado por data para o gráfico
   const filteredSorted = useMemo(
     () => [...filtered].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date)),
     [filtered],
@@ -352,9 +308,13 @@ export default function Page() {
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
     setOnlyMulti(false);
-    setTableQuery("");
     setSortKey("bulletin_date");
     setSortDir("asc");
+    setFCompany("");
+    setFTicker("");
+    setFKey("");
+    setFDate("");
+    setFType("");
   };
 
   const hasFiltered = filteredSorted.length > 0;
@@ -362,10 +322,64 @@ export default function Page() {
   const openBulletinModal = (row: Row) => setSelectedBulletin(row);
   const closeBulletinModal = () => setSelectedBulletin(null);
 
-  // Exportar SELEÇÃO: usa exatamente o que está na tabela (tableRows)
+  // tabela: filtros por coluna + sort
+  function toggleSort(k: SortKey) {
+    setSortKey((prevK) => {
+      if (prevK !== k) {
+        setSortDir("asc");
+        return k;
+      }
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return k;
+    });
+  }
+  const sortIndicator = (k: SortKey) =>
+    sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null;
+
+  const tableRows = useMemo(() => {
+    const cf = fCompany.trim().toLowerCase();
+    const tf = fTicker.trim().toLowerCase();
+    const kf = fKey.trim().toLowerCase();
+    const df = fDate.trim();
+    const yf = fType.trim().toLowerCase();
+
+    const arr = filtered.filter((r) => {
+      const c = (r.company ?? "").toLowerCase();
+      const t = (r.ticker ?? "").toLowerCase();
+      const k = (r.composite_key ?? "").toLowerCase();
+      const d = r.bulletin_date ?? "";
+      const y = (r.canonical_type ?? r.bulletin_type ?? "").toLowerCase();
+
+      if (cf && !c.includes(cf)) return false;
+      if (tf && !t.includes(tf)) return false;
+      if (kf && !k.includes(kf)) return false;
+      if (df && !d.startsWith(df)) return false; // aceita "2008" ou "2008-03"
+      if (yf && !y.includes(yf)) return false;
+      return true;
+    });
+
+    const getVal = (r: Row, k: SortKey) =>
+      k === "bulletin_date" ? toDateNum(r.bulletin_date)
+      : k === "company" ? (r.company ?? "").toLowerCase()
+      : k === "ticker" ? (r.ticker ?? "").toLowerCase()
+      : k === "canonical_type" ? (r.canonical_type ?? "").toLowerCase()
+      : (r.composite_key ?? "").toLowerCase();
+
+    arr.sort((a, b) => {
+      const va = getVal(a, sortKey);
+      const vb = getVal(b, sortKey);
+      if (va < vb) return sortDir === "asc" ? -1 : 1;
+      if (va > vb) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return arr;
+  }, [filtered, fCompany, fTicker, fKey, fDate, fType, sortKey, sortDir]);
+
+  // EXPORTS
   const handleExportSelectionTxt = async () => {
     if (!tableRows.length) {
-      alert("Nada a exportar. Ajuste o filtro/seleção.");
+      alert("Nada a exportar. Ajuste os filtros/seleção.");
       return;
     }
     const sorted = [...tableRows].sort(
@@ -386,7 +400,6 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   };
 
-  // Exportar PERÍODO: ignora seletores e filtro textual, exporta tudo na janela pós-âncora
   const handleExportWindowTxt = async () => {
     const base = [...rowsInWindow].sort(
       (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
@@ -410,23 +423,6 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   };
 
-  // interação do sort nos headers
-  function toggleSort(k: SortKey) {
-    setSortKey((prevK) => {
-      if (prevK !== k) {
-        setSortDir("asc");
-        return k;
-      }
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-      return k;
-    });
-  }
-
-  function sortIndicator(k: SortKey) {
-    if (sortKey !== k) return null;
-    return <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span>;
-    }
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-wrap items-center gap-4">
@@ -444,7 +440,7 @@ export default function Page() {
             onClick={handleExportWindowTxt}
             disabled={loading || !rowsInWindow.length}
             className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-            title="Exporta todo o período, ignorando seleção/filtro textual"
+            title="Exporta todo o período, ignorando seleção/filtros da tabela"
           >
             🗂️ Exportar período
           </button>
@@ -601,31 +597,60 @@ export default function Page() {
         <div className="border rounded overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b">
-              <tr className="text-left">
-                <th className="p-2 cursor-pointer select-none" onClick={() => toggleSort("company")}>
-                  Empresa {sortIndicator("company")}
-                </th>
-                <th className="p-2 cursor-pointer select-none" onClick={() => toggleSort("ticker")}>
-                  Ticker {sortIndicator("ticker")}
-                </th>
-                <th className="p-2 cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>
-                  Composite Key {sortIndicator("composite_key")}
-                </th>
-                <th className="p-2 cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>
-                  Data {sortIndicator("bulletin_date")}
-                </th>
-                <th className="p-2 cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>
-                  Tipo de Boletim {sortIndicator("canonical_type")}
-                </th>
-              </tr>
-              <tr>
-                <th colSpan={5} className="p-2">
+              <tr className="text-left align-top">
+                <th className="p-2">
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>
+                    Empresa {sortIndicator("company")}
+                  </button>
                   <input
-                    type="text"
-                    className="border rounded px-2 py-1 w-full"
-                    placeholder="Filtro na tabela: empresa, ticker, tipo, key, corpo…"
-                    value={tableQuery}
-                    onChange={(e) => setTableQuery(e.target.value)}
+                    className="mt-1 w-full border rounded px-2 py-1 text-sm"
+                    placeholder="Filtrar"
+                    value={fCompany}
+                    onChange={(e) => setFCompany(e.target.value)}
+                  />
+                </th>
+                <th className="p-2">
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>
+                    Ticker {sortIndicator("ticker")}
+                  </button>
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-1 text-sm"
+                    placeholder="Filtrar"
+                    value={fTicker}
+                    onChange={(e) => setFTicker(e.target.value)}
+                  />
+                </th>
+                <th className="p-2">
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>
+                    Composite Key {sortIndicator("composite_key")}
+                  </button>
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-1 text-sm"
+                    placeholder="Filtrar"
+                    value={fKey}
+                    onChange={(e) => setFKey(e.target.value)}
+                  />
+                </th>
+                <th className="p-2">
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>
+                    Data {sortIndicator("bulletin_date")}
+                  </button>
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-1 text-sm"
+                    placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD"
+                    value={fDate}
+                    onChange={(e) => setFDate(e.target.value)}
+                  />
+                </th>
+                <th className="p-2">
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>
+                    Tipo de Boletim {sortIndicator("canonical_type")}
+                  </button>
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-1 text-sm"
+                    placeholder="Filtrar"
+                    value={fType}
+                    onChange={(e) => setFType(e.target.value)}
                   />
                 </th>
               </tr>
