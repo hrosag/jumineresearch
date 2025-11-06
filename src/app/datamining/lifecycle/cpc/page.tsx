@@ -36,6 +36,7 @@ type ScatterDatum = {
   dateNum: number;
   canonical_type: string;
   dateISO: string;
+  composite_key?: string;
 };
 
 function toDateNum(iso: string | null | undefined): number {
@@ -45,7 +46,7 @@ function toDateNum(iso: string | null | undefined): number {
   const y = Number(m[1]);
   const mo = Number(m[2]) - 1;
   const d = Number(m[3]);
-  return Date.UTC(y, mo, d, 12, 0, 0);
+  return Date.UTC(y, mo, d, 12, 0, 0); // meio-dia UTC
 }
 
 function fmtUTC(ts: number): string {
@@ -63,33 +64,34 @@ function fmtDayMonth(ts: number): string {
 }
 
 type Opt = { value: string; label: string };
-
 const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
 
 export default function Page() {
   const [loading, setLoading] = useState(true);
   const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
 
-  // dataset completo da timeline CPC (pós-âncora por empresa|ticker)
+  // dataset completo pós-âncora
   const [rows, setRows] = useState<Row[]>([]);
 
   // âncoras globais
   const [globalMinDate, setGlobalMinDate] = useState<string>("");
   const [globalMaxDate, setGlobalMaxDate] = useState<string>("");
 
-  // filtros de data
+  // filtros
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
 
-  // filtros de seleção
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
-
   const [onlyMulti, setOnlyMulti] = useState(false);
+
+  // filtro textual da tabela
+  const [tableQuery, setTableQuery] = useState<string>("");
 
   async function load() {
     setLoading(true);
 
+    // coorte CPC
     const { data: cohort, error: e1 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select("company, ticker, bulletin_date, canonical_type")
@@ -102,7 +104,7 @@ export default function Page() {
       return;
     }
 
-    // âncora por company|ticker = primeira data CPC
+    // âncora por company|ticker
     const anchors = new Map<string, string>();
     const companies = new Set<string>();
     for (const r of cohort || []) {
@@ -116,6 +118,7 @@ export default function Page() {
     const compArr = Array.from(companies).sort();
     const globalAnchor = [...anchors.values()].sort()[0] || null;
 
+    // timeline
     const { data: timeline, error: e2 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select(
@@ -134,7 +137,7 @@ export default function Page() {
 
     const r = (timeline || []) as Row[];
 
-    // manter apenas eventos a partir da âncora de cada company|ticker
+    // pós-âncora por company|ticker
     const filteredByAnchor = r.filter((row) => {
       const key = `${row.company ?? ""}|${row.ticker ?? ""}`;
       const anchor = anchors.get(key);
@@ -168,7 +171,14 @@ export default function Page() {
     load();
   }, []);
 
-  // linhas dentro da janela atual
+  // validação simples do intervalo
+  useEffect(() => {
+    if (startDate && endDate && startDate > endDate) {
+      setEndDate(startDate);
+    }
+  }, [startDate, endDate]);
+
+  // linhas na janela atual
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -178,7 +188,7 @@ export default function Page() {
     });
   }, [rows, startDate, endDate]);
 
-  // opções de filtros derivadas da janela
+  // opções derivadas da janela
   const companyOpts = useMemo<Opt[]>(() => {
     const s = new Set<string>();
     for (const r of rowsInWindow) if (r.company) s.add(r.company);
@@ -191,7 +201,7 @@ export default function Page() {
     return Array.from(s).sort().map((v) => ({ value: v, label: v }));
   }, [rowsInWindow]);
 
-  // poda automática de seleções inválidas quando opções mudam
+  // poda de seleções inválidas
   useEffect(() => {
     const validCompanies = new Set(companyOpts.map((o) => o.value));
     const validTickers = new Set(tickerOpts.map((o) => o.value));
@@ -199,32 +209,36 @@ export default function Page() {
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
-  // filtragem principal
+  // mapa de contagem por ticker (para onlyMulti)
+  const tickerCount = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rowsInWindow) {
+      if (!r.ticker) continue;
+      m.set(r.ticker, (m.get(r.ticker) ?? 0) + 1);
+    }
+    return m;
+  }, [rowsInWindow]);
+
+  // filtro principal
   const filtered = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
 
-    // grupos por ticker dentro da janela para flag onlyMulti
-    const tickerGroups = new Map<string, Set<string>>();
-    for (const row of rowsInWindow) {
-      if (!row.ticker || !row.canonical_type) continue;
-      if (!tickerGroups.has(row.ticker)) tickerGroups.set(row.ticker, new Set());
-      tickerGroups.get(row.ticker)!.add(row.canonical_type);
-    }
-
     return rowsInWindow.filter((r) => {
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!r.ticker || !tset.has(r.ticker))) return false;
-      if (onlyMulti && (!r.ticker || (tickerGroups.get(r.ticker)?.size ?? 0) < 2)) return false;
+      if (onlyMulti && (!r.ticker || (tickerCount.get(r.ticker) ?? 0) < 2)) return false;
       return true;
     });
-  }, [rowsInWindow, selCompanies, selTickers, onlyMulti]);
+  }, [rowsInWindow, selCompanies, selTickers, onlyMulti, tickerCount]);
 
+  // ordenação por timestamp robusto
   const filteredSorted = useMemo(
-    () => [...filtered].sort((a, b) => (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? "")),
+    () => [...filtered].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date)),
     [filtered],
   );
 
+  // dados do gráfico
   const chartData: ScatterDatum[] = useMemo(
     () =>
       filteredSorted.map((r) => ({
@@ -233,11 +247,12 @@ export default function Page() {
         dateNum: toDateNum(r.bulletin_date),
         canonical_type: r.canonical_type ?? "",
         dateISO: r.bulletin_date ?? "",
+        composite_key: r.composite_key ?? undefined,
       })),
     [filteredSorted],
   );
 
-  // domínio X com ±5 dias
+  // domínio X ±5 dias
   const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
     const times = filteredSorted
       .map((r) => toDateNum(r.bulletin_date))
@@ -249,7 +264,7 @@ export default function Page() {
     return [min - PAD, max + PAD];
   }, [filteredSorted]);
 
-  // ordem do Y: se houver seleção de tickers, respeite-a; caso contrário, pela 1ª aparição no período
+  // ordem no Y: prioriza seleção de tickers
   const tickerOrder = useMemo<string[]>(() => {
     if (selTickers.length) return selTickers.map((o) => o.value);
     const first = new Map<string, number>();
@@ -267,15 +282,13 @@ export default function Page() {
       .map(([t]) => t);
   }, [filteredSorted, selTickers]);
 
-  // quantidade visível no Y
+  // visibilidade no Y
   const [yLimit, setYLimit] = useState<number>(10);
 
-  // nunca mostre menos que o número de tickers selecionados
   useEffect(() => {
     setYLimit((v) => Math.max(v, selTickers.length || 10));
   }, [selTickers.length]);
 
-  // ajuste ao encolher a lista
   useEffect(() => {
     if (tickerOrder.length && yLimit > tickerOrder.length) {
       setYLimit(tickerOrder.length);
@@ -306,6 +319,8 @@ export default function Page() {
     setSelTickers([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
+    setOnlyMulti(false);
+    setTableQuery("");
   };
 
   const hasFiltered = filteredSorted.length > 0;
@@ -313,43 +328,7 @@ export default function Page() {
   const openBulletinModal = (row: Row) => setSelectedBulletin(row);
   const closeBulletinModal = () => setSelectedBulletin(null);
 
-  const handleExportZip = async () => {
-    if (!hasFiltered) {
-      alert("Nenhum boletim no filtro atual.");
-      return;
-    }
-    const grouped = new Map<string, Row[]>();
-    for (const row of filteredSorted) {
-      if (!row.company) continue;
-      if (!grouped.has(row.company)) grouped.set(row.company, []);
-      grouped.get(row.company)!.push(row);
-    }
-    if (!grouped.size) {
-      alert("Nenhuma empresa válida para exportar.");
-      return;
-    }
-    const { default: JSZip } = await import("jszip");
-    const zip = new JSZip();
-    for (const [company, rowsForCompany] of grouped) {
-      const sorted = [...rowsForCompany].sort((a, b) =>
-        (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? ""),
-      );
-      const story = sorted
-        .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
-        .join("\n--------------------------------\n");
-      const safe = company.replace(/[^a-z0-9]/gi, "_");
-      const lastDate = sorted[sorted.length - 1].bulletin_date ?? "unknown";
-      zip.file(`${safe}__cpc_notices_until_${lastDate}.txt`, story);
-    }
-    const blob = await zip.generateAsync({ type: "blob" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "cpc_notices.zip";
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
-
+  // EXPORT: TXT único, sem canonical
   const handleExportTxt = async () => {
     if (!hasFiltered) {
       alert("Nenhum boletim no filtro atual.");
@@ -367,9 +346,7 @@ export default function Page() {
     }
     const sections: string[] = [];
     for (const [company, rowsForCompany] of grouped) {
-      const sorted = [...rowsForCompany].sort((a, b) =>
-        (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? ""),
-      );
+      const sorted = [...rowsForCompany].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
       const story = sorted
         .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
         .join("\n--------------------------------\n");
@@ -387,18 +364,30 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   };
 
+  // tabela: filtro textual local
+  const tableRows = useMemo(() => {
+    const q = tableQuery.trim().toLowerCase();
+    if (!q) return filteredSorted;
+    return filteredSorted.filter((r) => {
+      const hay = [
+        r.company ?? "",
+        r.ticker ?? "",
+        r.bulletin_type ?? "",
+        r.canonical_type ?? "",
+        r.composite_key ?? "",
+        r.body_text ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [filteredSorted, tableQuery]);
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-wrap items-center gap-4">
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
         <div className="ml-auto flex flex-wrap gap-2">
-          <button
-            onClick={handleExportZip}
-            disabled={loading || !hasFiltered}
-            className="px-4 py-2 bg-yellow-500 text-black rounded hover:bg-yellow-600 disabled:opacity-60"
-          >
-            📄 Exportar ZIP
-          </button>
           <button
             onClick={handleExportTxt}
             disabled={loading || !hasFiltered}
@@ -445,6 +434,7 @@ export default function Page() {
             className="border rounded px-2 py-1"
             onClick={() => setYLimit((v) => Math.max(10, v - 10))}
             title="-10 linhas"
+            disabled={yLimit <= 10}
           >
             −10
           </button>
@@ -452,6 +442,7 @@ export default function Page() {
             className="border rounded px-2 py-1"
             onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
             title="+10 linhas"
+            disabled={!tickerOrder.length || yLimit >= tickerOrder.length}
           >
             +10
           </button>
@@ -472,7 +463,7 @@ export default function Page() {
               checked={onlyMulti}
               onChange={(e) => setOnlyMulti(e.target.checked)}
             />
-            Somente múltiplos boletins
+            Somente tickers com ≥2 boletins
           </label>
         </div>
       </div>
@@ -534,18 +525,11 @@ export default function Page() {
                 const date = d.dateISO || fmtUTC(d.dateNum);
                 return (
                   <div className="bg-white p-2 border rounded shadow text-sm">
-                    <div>
-                      <strong>Data:</strong> {date}
-                    </div>
-                    <div>
-                      <strong>Empresa:</strong> {d.company || "—"}
-                    </div>
-                    <div>
-                      <strong>Ticker:</strong> {d.ticker || "—"}
-                    </div>
-                    <div>
-                      <strong>Canonical:</strong> {d.canonical_type || "—"}
-                    </div>
+                    <div><strong>Data:</strong> {date}</div>
+                    <div><strong>Empresa:</strong> {d.company || "—"}</div>
+                    <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
+                    <div><strong>Canonical:</strong> {d.canonical_type || "—"}</div>
+                    <div><strong>Key:</strong> {d.composite_key || "—"}</div>
                   </div>
                 );
               }}
@@ -553,10 +537,26 @@ export default function Page() {
             <Scatter data={chartDataVis} />
           </ScatterChart>
         </ResponsiveContainer>
+        {selTickers.length > 0 && chartDataVis.length === 0 && (
+          <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
+        )}
       </div>
 
       <div className="space-y-2">
-        <h2 className="text-xl font-semibold">Resultados</h2>
+        <div className="flex items-end gap-3">
+          <h2 className="text-xl font-semibold">Resultados</h2>
+          <div className="ml-auto">
+            <label className="text-sm mr-2">Filtro na tabela</label>
+            <input
+              type="text"
+              className="border rounded px-2 py-1 text-sm w-64"
+              placeholder="Buscar em empresa, ticker, tipo, key, corpo…"
+              value={tableQuery}
+              onChange={(e) => setTableQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
         <div className="border rounded overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b">
@@ -569,7 +569,7 @@ export default function Page() {
               </tr>
             </thead>
             <tbody>
-              {filteredSorted.map((row) => {
+              {tableRows.map((row) => {
                 const compositeKey = row.composite_key ?? "—";
                 return (
                   <tr key={row.id} className="border-b hover:bg-gray-50">
@@ -581,6 +581,7 @@ export default function Page() {
                           type="button"
                           onClick={() => openBulletinModal(row)}
                           className="text-blue-600 hover:underline"
+                          title="Abrir boletim completo"
                         >
                           {compositeKey}
                         </button>
@@ -593,35 +594,40 @@ export default function Page() {
                   </tr>
                 );
               })}
+              {tableRows.length === 0 && (
+                <tr>
+                  <td className="p-2 text-gray-600" colSpan={5}>
+                    Nenhum registro encontrado para o filtro da tabela.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
 
         {selectedBulletin && (
           <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
-            <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+            <div
+              className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="bulletin-title"
+            >
               <button
                 type="button"
                 className="absolute top-3 right-3 text-sm text-gray-600 hover:text-gray-800"
                 onClick={closeBulletinModal}
+                aria-label="Fechar"
               >
                 Fechar
               </button>
               <div className="flex flex-col gap-2 pr-12">
-                <h3 className="text-lg font-semibold">Boletim Completo</h3>
+                <h3 id="bulletin-title" className="text-lg font-semibold">Boletim Completo</h3>
                 <div className="text-sm text-gray-600">
-                  <div>
-                    <strong>Empresa:</strong> {selectedBulletin.company ?? "—"}
-                  </div>
-                  <div>
-                    <strong>Ticker:</strong> {selectedBulletin.ticker ?? "—"}
-                  </div>
-                  <div>
-                    <strong>Composite Key:</strong> {selectedBulletin.composite_key ?? "—"}
-                  </div>
-                  <div>
-                    <strong>Data:</strong> {selectedBulletin.bulletin_date ?? "—"}
-                  </div>
+                  <div><strong>Empresa:</strong> {selectedBulletin.company ?? "—"}</div>
+                  <div><strong>Ticker:</strong> {selectedBulletin.ticker ?? "—"}</div>
+                  <div><strong>Composite Key:</strong> {selectedBulletin.composite_key ?? "—"}</div>
+                  <div><strong>Data:</strong> {selectedBulletin.bulletin_date ?? "—"}</div>
                 </div>
                 <pre className="whitespace-pre-wrap text-sm">
                   {selectedBulletin.body_text ?? "Sem conteúdo disponível."}
