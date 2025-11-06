@@ -292,6 +292,9 @@ export default function Page() {
     setSelTickers([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
+    setOnlyMulti(false);
+    // força reavaliação do filtro para restaurar dataset completo
+    setRows((prev) => [...prev]);
   };
 
   const hasFiltered = filteredSorted.length > 0;
