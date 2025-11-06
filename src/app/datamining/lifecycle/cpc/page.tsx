@@ -13,7 +13,6 @@ import {
   CartesianGrid,
 } from "recharts";
 
-// tooltip inline no mesmo modelo do Notices (sem tipos extras)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -36,10 +35,9 @@ type ScatterDatum = {
   ticker: string;
   dateNum: number;
   canonical_type: string;
-  dateISO: string; // original YYYY-MM-DD
+  dateISO: string;
 };
 
-// Parse seguro de 'YYYY-MM-DD' para timestamp UTC
 function toDateNum(iso: string | null | undefined): number {
   if (!iso) return Number.NaN;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
@@ -47,15 +45,13 @@ function toDateNum(iso: string | null | undefined): number {
   const y = Number(m[1]);
   const mo = Number(m[2]) - 1;
   const d = Number(m[3]);
-  // usar meio-dia UTC para evitar rollback por fuso local
   return Date.UTC(y, mo, d, 12, 0, 0);
 }
 
-// Formatador UTC consistente com Notices
 function fmtUTC(ts: number): string {
   if (!Number.isFinite(ts)) return "—";
   const d = new Date(ts);
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  return d.toISOString().slice(0, 10);
 }
 
 function fmtDayMonth(ts: number): string {
@@ -74,20 +70,18 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
 
-  // dataset completo da timeline CPC
+  // dataset completo da timeline CPC (pós-âncora por empresa|ticker)
   const [rows, setRows] = useState<Row[]>([]);
 
-  // âncoras globais de data
+  // âncoras globais
   const [globalMinDate, setGlobalMinDate] = useState<string>("");
   const [globalMaxDate, setGlobalMaxDate] = useState<string>("");
 
-  // filtros
+  // filtros de data
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
 
-  const [companyOpts, setCompanyOpts] = useState<Opt[]>([]);
-  const [tickerOpts, setTickerOpts] = useState<Opt[]>([]);
-
+  // filtros de seleção
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
@@ -96,7 +90,6 @@ export default function Page() {
   async function load() {
     setLoading(true);
 
-    // 1) Coorte CPC
     const { data: cohort, error: e1 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select("company, ticker, bulletin_date, canonical_type")
@@ -109,8 +102,8 @@ export default function Page() {
       return;
     }
 
-    // Mapa empresa|ticker -> first_cpc_date
-    const anchors = new Map<string, string>(); // key: company|ticker -> first CPC date
+    // âncora por company|ticker = primeira data CPC
+    const anchors = new Map<string, string>();
     const companies = new Set<string>();
     for (const r of cohort || []) {
       const key = `${r.company ?? ""}|${r.ticker ?? ""}`;
@@ -121,8 +114,6 @@ export default function Page() {
     }
 
     const compArr = Array.from(companies).sort();
-
-    // 2) Timeline para a coorte. Baixa desde a menor âncora global e filtra por âncora por empresa.
     const globalAnchor = [...anchors.values()].sort()[0] || null;
 
     const { data: timeline, error: e2 } = await supabase
@@ -143,23 +134,16 @@ export default function Page() {
 
     const r = (timeline || []) as Row[];
 
-    // Filtrar por âncora por empresa|ticker para evitar eventos pré-CPC
+    // manter apenas eventos a partir da âncora de cada company|ticker
     const filteredByAnchor = r.filter((row) => {
       const key = `${row.company ?? ""}|${row.ticker ?? ""}`;
       const anchor = anchors.get(key);
-      if (!anchor) return false; // só coorte CPC
+      if (!anchor) return false;
       if (!row.bulletin_date) return false;
       return row.bulletin_date >= anchor;
     });
 
     setRows(filteredByAnchor);
-
-    // opções de filtros
-    const uniq = <T extends string | null>(arr: T[]) =>
-      Array.from(new Set(arr.filter(Boolean) as string[])).sort();
-
-    setCompanyOpts(uniq(filteredByAnchor.map((x) => x.company)).map((v) => ({ value: v, label: v })));
-    setTickerOpts(uniq(filteredByAnchor.map((x) => x.ticker)).map((v) => ({ value: v, label: v })));
 
     // datas globais
     const ds = filteredByAnchor.map((x) => x.bulletin_date).filter(Boolean) as string[];
@@ -184,37 +168,60 @@ export default function Page() {
     load();
   }, []);
 
+  // linhas dentro da janela atual
+  const rowsInWindow = useMemo(() => {
+    return rows.filter((r) => {
+      if (!r.bulletin_date) return false;
+      if (startDate && r.bulletin_date < startDate) return false;
+      if (endDate && r.bulletin_date > endDate) return false;
+      return true;
+    });
+  }, [rows, startDate, endDate]);
+
+  // opções de filtros derivadas da janela
+  const companyOpts = useMemo<Opt[]>(() => {
+    const s = new Set<string>();
+    for (const r of rowsInWindow) if (r.company) s.add(r.company);
+    return Array.from(s).sort().map((v) => ({ value: v, label: v }));
+  }, [rowsInWindow]);
+
+  const tickerOpts = useMemo<Opt[]>(() => {
+    const s = new Set<string>();
+    for (const r of rowsInWindow) if (r.ticker) s.add(r.ticker);
+    return Array.from(s).sort().map((v) => ({ value: v, label: v }));
+  }, [rowsInWindow]);
+
+  // poda automática de seleções inválidas quando opções mudam
+  useEffect(() => {
+    const validCompanies = new Set(companyOpts.map((o) => o.value));
+    const validTickers = new Set(tickerOpts.map((o) => o.value));
+    setSelCompanies((prev) => prev.filter((o) => validCompanies.has(o.value)));
+    setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
+  }, [companyOpts, tickerOpts]);
+
+  // filtragem principal
   const filtered = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
 
+    // grupos por ticker dentro da janela para flag onlyMulti
     const tickerGroups = new Map<string, Set<string>>();
-    for (const row of rows) {
+    for (const row of rowsInWindow) {
       if (!row.ticker || !row.canonical_type) continue;
       if (!tickerGroups.has(row.ticker)) tickerGroups.set(row.ticker, new Set());
       tickerGroups.get(row.ticker)!.add(row.canonical_type);
     }
 
-    return rows.filter((r) => {
-      if (!r.bulletin_date) return false;
-      if (startDate && r.bulletin_date < startDate) return false;
-      if (endDate && r.bulletin_date > endDate) return false;
+    return rowsInWindow.filter((r) => {
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!r.ticker || !tset.has(r.ticker))) return false;
-      if (
-        onlyMulti &&
-        (!r.ticker || (tickerGroups.get(r.ticker)?.size ?? 0) < 2)
-      )
-        return false;
+      if (onlyMulti && (!r.ticker || (tickerGroups.get(r.ticker)?.size ?? 0) < 2)) return false;
       return true;
     });
-  }, [rows, startDate, endDate, selCompanies, selTickers, onlyMulti]);
+  }, [rowsInWindow, selCompanies, selTickers, onlyMulti]);
 
   const filteredSorted = useMemo(
-    () =>
-      [...filtered].sort((a, b) =>
-        (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? ""),
-      ),
+    () => [...filtered].sort((a, b) => (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? "")),
     [filtered],
   );
 
@@ -230,20 +237,21 @@ export default function Page() {
     [filteredSorted],
   );
 
-  // Domínio do eixo X com margem extra de 5 dias para cada lado
+  // domínio X com ±5 dias
   const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
     const times = filteredSorted
       .map((r) => toDateNum(r.bulletin_date))
       .filter((v): v is number => Number.isFinite(v));
     if (!times.length) return ["auto", "auto"];
-    const PAD = 5 * 24 * 60 * 60 * 1000; // ±5 dias
+    const PAD = 5 * 24 * 60 * 60 * 1000;
     const min = Math.min(...times);
     const max = Math.max(...times);
     return [min - PAD, max + PAD];
   }, [filteredSorted]);
 
-  // Ordenação dos tickers pela 1ª data de boletim no período
+  // ordem do Y: se houver seleção de tickers, respeite-a; caso contrário, pela 1ª aparição no período
   const tickerOrder = useMemo<string[]>(() => {
+    if (selTickers.length) return selTickers.map((o) => o.value);
     const first = new Map<string, number>();
     for (const r of filteredSorted) {
       const t = r.ticker ?? "";
@@ -257,10 +265,17 @@ export default function Page() {
     return Array.from(first.entries())
       .sort((a, b) => a[1] - b[1])
       .map(([t]) => t);
-  }, [filteredSorted]);
+  }, [filteredSorted, selTickers]);
 
-  // Quantidade visível no Y, em passos de 10. Começa com 10.
+  // quantidade visível no Y
   const [yLimit, setYLimit] = useState<number>(10);
+
+  // nunca mostre menos que o número de tickers selecionados
+  useEffect(() => {
+    setYLimit((v) => Math.max(v, selTickers.length || 10));
+  }, [selTickers.length]);
+
+  // ajuste ao encolher a lista
   useEffect(() => {
     if (tickerOrder.length && yLimit > tickerOrder.length) {
       setYLimit(tickerOrder.length);
@@ -268,22 +283,21 @@ export default function Page() {
   }, [tickerOrder.length, yLimit]);
 
   const visibleTickers = useMemo(
-    () =>
-      tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))),
+    () => tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))),
     [tickerOrder, yLimit],
   );
 
-  // Domínio Y e dataset do gráfico restritos aos tickers visíveis
   const yDomain = visibleTickers;
+
   const chartDataVis = useMemo(
     () => chartData.filter((d) => d.ticker && yDomain.includes(d.ticker)),
     [chartData, yDomain],
   );
 
   const chartHeight = useMemo(() => {
-    const base = 260; // altura mínima
-    const perRow = 26; // px por ticker
-    const maxH = 1200; // teto
+    const base = 260;
+    const perRow = 26;
+    const maxH = 1200;
     return Math.min(maxH, Math.max(base, 60 + visibleTickers.length * perRow));
   }, [visibleTickers]);
 
@@ -296,13 +310,8 @@ export default function Page() {
 
   const hasFiltered = filteredSorted.length > 0;
 
-  const openBulletinModal = (row: Row) => {
-    setSelectedBulletin(row);
-  };
-
-  const closeBulletinModal = () => {
-    setSelectedBulletin(null);
-  };
+  const openBulletinModal = (row: Row) => setSelectedBulletin(row);
+  const closeBulletinModal = () => setSelectedBulletin(null);
 
   const handleExportZip = async () => {
     if (!hasFiltered) {
@@ -326,10 +335,7 @@ export default function Page() {
         (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? ""),
       );
       const story = sorted
-        .map(
-          (r) =>
-            `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`,
-        )
+        .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
         .join("\n--------------------------------\n");
       const safe = company.replace(/[^a-z0-9]/gi, "_");
       const lastDate = sorted[sorted.length - 1].bulletin_date ?? "unknown";
@@ -365,20 +371,9 @@ export default function Page() {
         (a.bulletin_date ?? "").localeCompare(b.bulletin_date ?? ""),
       );
       const story = sorted
-        .map(
-          (r) =>
-            `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`,
-        )
+        .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
         .join("\n--------------------------------\n");
-      sections.push(
-        [
-          "=============================",
-          company,
-          "=============================",
-          story,
-          "",
-        ].join("\n"),
-      );
+      sections.push(["=============================", company, "=============================", story, ""].join("\n"));
     }
     const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
     const safeEnd = endDate ? endDate.replaceAll("-", "") : "fim";
@@ -443,11 +438,7 @@ export default function Page() {
           />
         </div>
         <div className="flex gap-2 items-end flex-wrap">
-          <button
-            className="border rounded px-3 py-1"
-            onClick={handleReset}
-            title="Limpar filtros"
-          >
+          <button className="border rounded px-3 py-1" onClick={handleReset} title="Limpar filtros">
             🔄 Limpar
           </button>
           <button
@@ -529,9 +520,9 @@ export default function Page() {
               name="Ticker"
               ticks={visibleTickers}
               domain={visibleTickers}
-              interval={0} // força exibir todos os rótulos
-              tickLine={false} // remove linhas verticais de cada label
-              width={65} // reduz espaço à esquerda
+              interval={0}
+              tickLine={false}
+              width={65}
               tick={{ fontSize: 12 }}
               allowDuplicatedCategory={false}
             />
@@ -588,7 +579,7 @@ export default function Page() {
                       {row.composite_key ? (
                         <button
                           type="button"
-                          onClick={() => openBulletinModal(row)} // usa o mesmo handler do New Issuers
+                          onClick={() => openBulletinModal(row)}
                           className="text-blue-600 hover:underline"
                         >
                           {compositeKey}
@@ -605,6 +596,7 @@ export default function Page() {
             </tbody>
           </table>
         </div>
+
         {selectedBulletin && (
           <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
             <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
@@ -631,7 +623,9 @@ export default function Page() {
                     <strong>Data:</strong> {selectedBulletin.bulletin_date ?? "—"}
                   </div>
                 </div>
-                <pre className="whitespace-pre-wrap text-sm">{selectedBulletin.body_text ?? "Sem conteúdo disponível."}</pre>
+                <pre className="whitespace-pre-wrap text-sm">
+                  {selectedBulletin.body_text ?? "Sem conteúdo disponível."}
+                </pre>
               </div>
             </div>
           </div>
