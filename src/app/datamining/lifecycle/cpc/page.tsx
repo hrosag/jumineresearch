@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
 import {
@@ -84,7 +84,7 @@ export default function Page() {
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
   const [onlyMulti, setOnlyMulti] = useState(false);
 
-  // sort + filtros por coluna no header
+  // sort + filtros por coluna
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
@@ -93,6 +93,31 @@ export default function Page() {
   const [fDate, setFDate] = useState(""); // aceita prefixo YYYY, YYYY-MM, YYYY-MM-DD
   const [fType, setFType] = useState("");
 
+  // filtros “deferidos” para debounce natural
+  const dfCompany = useDeferredValue(fCompany);
+  const dfTicker = useDeferredValue(fTicker);
+  const dfKey = useDeferredValue(fKey);
+  const dfDate = useDeferredValue(fDate);
+  const dfType = useDeferredValue(fType);
+
+  // paginação da tabela
+  const PAGE = 50;
+  const [tableLimit, setTableLimit] = useState(PAGE);
+
+  // restaura filtros da URL
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const s = q.get("s"); const e = q.get("e");
+    const t = q.get("t"); const c = q.get("c");
+    const m = q.get("m");
+    if (s) setStartDate(s);
+    if (e) setEndDate(e);
+    if (m === "1") setOnlyMulti(true);
+    if (t) setSelTickers(t.split(",").map(v => ({ value: v, label: v })));
+    if (c) setSelCompanies(c.split(",").map(v => ({ value: v, label: v })));
+  }, []);
+
+  // baixa dados
   async function load() {
     setLoading(true);
 
@@ -124,7 +149,8 @@ export default function Page() {
     const { data: timeline, error: e2 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select(
-        "id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key, body_text",
+        // body_text removido. Buscar sob demanda.
+        "id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key",
       )
       .in("company", compArr.length ? compArr : ["__none__"])
       .gte("bulletin_date", globalAnchor ?? "1900-01-01")
@@ -155,8 +181,8 @@ export default function Page() {
       const max = ds.reduce((a, b) => (a > b ? a : b));
       setGlobalMinDate(min);
       setGlobalMaxDate(max);
-      setStartDate(min);
-      setEndDate(max);
+      setStartDate((prev) => prev || min);
+      setEndDate((prev) => prev || max);
     } else {
       setGlobalMinDate("");
       setGlobalMaxDate("");
@@ -173,6 +199,17 @@ export default function Page() {
   useEffect(() => {
     if (startDate && endDate && startDate > endDate) setEndDate(startDate);
   }, [startDate, endDate]);
+
+  // sincroniza filtros na URL
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (startDate) p.set("s", startDate);
+    if (endDate) p.set("e", endDate);
+    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(","));
+    if (selCompanies.length) p.set("c", selCompanies.map(o => o.value).join(","));
+    if (onlyMulti) p.set("m", "1");
+    history.replaceState(null, "", `?${p.toString()}`);
+  }, [startDate, endDate, selTickers, selCompanies, onlyMulti]);
 
   // janela atual
   const rowsInWindow = useMemo(() => {
@@ -315,11 +352,24 @@ export default function Page() {
     setFKey("");
     setFDate("");
     setFType("");
+    setTableLimit(PAGE);
   };
 
   const hasFiltered = filteredSorted.length > 0;
 
-  const openBulletinModal = (row: Row) => setSelectedBulletin(row);
+  // abrir modal com body_text sob demanda
+  const openBulletinModal = async (row: Row) => {
+    setSelectedBulletin(row);
+    if (!row.composite_key || row.body_text) return;
+    const { data, error } = await supabase
+      .from("vw_bulletins_with_canonical")
+      .select("body_text")
+      .eq("composite_key", row.composite_key)
+      .single();
+    if (!error && data) {
+      setSelectedBulletin((prev) => (prev ? { ...prev, body_text: data.body_text } : prev));
+    }
+  };
   const closeBulletinModal = () => setSelectedBulletin(null);
 
   // tabela: filtros por coluna + sort
@@ -337,11 +387,11 @@ export default function Page() {
     sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null;
 
   const tableRows = useMemo(() => {
-    const cf = fCompany.trim().toLowerCase();
-    const tf = fTicker.trim().toLowerCase();
-    const kf = fKey.trim().toLowerCase();
-    const df = fDate.trim();
-    const yf = fType.trim().toLowerCase();
+    const cf = dfCompany.trim().toLowerCase();
+    const tf = dfTicker.trim().toLowerCase();
+    const kf = dfKey.trim().toLowerCase();
+    const df = dfDate.trim();
+    const yf = dfType.trim().toLowerCase();
 
     const arr = filtered.filter((r) => {
       const c = (r.company ?? "").toLowerCase();
@@ -374,9 +424,20 @@ export default function Page() {
     });
 
     return arr;
-  }, [filtered, fCompany, fTicker, fKey, fDate, fType, sortKey, sortDir]);
+  }, [filtered, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
+
+  // paginação client-side
+  const tableRowsPage = useMemo(
+    () => tableRows.slice(0, tableLimit),
+    [tableRows, tableLimit]
+  );
+  useEffect(() => {
+    // se filtros mudarem, volta para primeira "página"
+    setTableLimit(PAGE);
+  }, [filtered.length, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
 
   // EXPORTS
+  // Exporta a seleção COMPLETA (todas as linhas filtradas), não só a página visível
   const handleExportSelectionTxt = async () => {
     if (!tableRows.length) {
       alert("Nada a exportar. Ajuste os filtros/seleção.");
@@ -432,7 +493,7 @@ export default function Page() {
             onClick={handleExportSelectionTxt}
             disabled={loading || !tableRows.length}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-            title="Exporta exatamente o que aparece na tabela"
+            title="Exporta exatamente o que aparece na tabela (todas as linhas filtradas)"
           >
             📜 Exportar seleção
           </button>
@@ -440,7 +501,7 @@ export default function Page() {
             onClick={handleExportWindowTxt}
             disabled={loading || !rowsInWindow.length}
             className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-            title="Exporta todo o período, ignorando seleção/filtros da tabela"
+            title="Exporta todo o período, ignorando filtros da tabela"
           >
             🗂️ Exportar período
           </button>
@@ -562,9 +623,10 @@ export default function Page() {
               domain={visibleTickers}
               interval={0}
               tickLine={false}
-              width={65}
+              width={90}
               tick={{ fontSize: 12 }}
               allowDuplicatedCategory={false}
+              tickFormatter={(t) => `${t} (${tickerCount.get(String(t)) ?? 0})`}
             />
             <Tooltip
               content={({ active, payload }) => {
@@ -590,6 +652,11 @@ export default function Page() {
           <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
         )}
       </div>
+      {!loading && filtered.length === 0 && (
+        <div className="text-sm text-gray-600 mt-2">
+          Sem resultados. Ajuste datas, empresa/ticker ou “Somente ≥2”.
+        </div>
+      )}
 
       {/* Tabela */}
       <div className="space-y-2">
@@ -598,7 +665,7 @@ export default function Page() {
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b">
               <tr className="text-left align-top">
-                <th className="p-2">
+                <th className="p-2" aria-sort={sortKey==="company" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>
                     Empresa {sortIndicator("company")}
                   </button>
@@ -609,7 +676,7 @@ export default function Page() {
                     onChange={(e) => setFCompany(e.target.value)}
                   />
                 </th>
-                <th className="p-2">
+                <th className="p-2" aria-sort={sortKey==="ticker" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>
                     Ticker {sortIndicator("ticker")}
                   </button>
@@ -620,7 +687,7 @@ export default function Page() {
                     onChange={(e) => setFTicker(e.target.value)}
                   />
                 </th>
-                <th className="p-2">
+                <th className="p-2" aria-sort={sortKey==="composite_key" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>
                     Composite Key {sortIndicator("composite_key")}
                   </button>
@@ -631,7 +698,7 @@ export default function Page() {
                     onChange={(e) => setFKey(e.target.value)}
                   />
                 </th>
-                <th className="p-2">
+                <th className="p-2" aria-sort={sortKey==="bulletin_date" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>
                     Data {sortIndicator("bulletin_date")}
                   </button>
@@ -642,7 +709,7 @@ export default function Page() {
                     onChange={(e) => setFDate(e.target.value)}
                   />
                 </th>
-                <th className="p-2">
+                <th className="p-2" aria-sort={sortKey==="canonical_type" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>
                     Tipo de Boletim {sortIndicator("canonical_type")}
                   </button>
@@ -656,7 +723,7 @@ export default function Page() {
               </tr>
             </thead>
             <tbody>
-              {tableRows.map((row) => {
+              {tableRowsPage.map((row) => {
                 const compositeKey = row.composite_key ?? "—";
                 return (
                   <tr key={row.id} className="border-b hover:bg-gray-50">
@@ -681,7 +748,7 @@ export default function Page() {
                   </tr>
                 );
               })}
-              {tableRows.length === 0 && (
+              {tableRowsPage.length === 0 && (
                 <tr>
                   <td className="p-2 text-gray-600" colSpan={5}>
                     Nenhum registro encontrado.
@@ -690,6 +757,31 @@ export default function Page() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Paginação simples */}
+        <div className="flex items-center justify-between text-sm">
+          <div>
+            Mostrando {Math.min(tableLimit, tableRows.length)} de {tableRows.length}
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="border rounded px-3 py-1 disabled:opacity-60"
+              onClick={() => setTableLimit((v) => Math.max(PAGE, v - PAGE))}
+              disabled={tableLimit <= PAGE}
+              title="-50 linhas"
+            >
+              Mostrar menos
+            </button>
+            <button
+              className="border rounded px-3 py-1 disabled:opacity-60"
+              onClick={() => setTableLimit((v) => Math.min(tableRows.length, v + PAGE))}
+              disabled={tableLimit >= tableRows.length}
+              title="+50 linhas"
+            >
+              Mostrar mais
+            </button>
+          </div>
         </div>
 
         {selectedBulletin && (
