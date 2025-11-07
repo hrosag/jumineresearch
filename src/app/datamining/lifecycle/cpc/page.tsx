@@ -363,7 +363,6 @@ export default function Page() {
     setTableLimit(PAGE);
   };
 
-  // modal
   const openBulletinModal = async (row: Row) => {
     setSelectedBulletin(row);
     if (!row.composite_key || row.body_text) return;
@@ -378,7 +377,6 @@ export default function Page() {
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
 
-  // clique no ponto → filtra tabela (Shift isola por key)
   function onPointClick(
     payload: ScatterDatum,
     _index: number,
@@ -394,7 +392,6 @@ export default function Page() {
       setFCompany(payload.company || "");
       setFKey("");
     }
-    // rolar e destacar
     setTimeout(() => {
       tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       if (firstRowRef.current) {
@@ -580,7 +577,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* KPIs logo abaixo do título */}
+      {/* KPIs */}
       <div className="flex flex-wrap gap-3 text-sm">
         <div className="border rounded px-2 py-1">Empresas: <strong>{kpis.companies}</strong></div>
         <div className="border rounded px-2 py-1">Tickers: <strong>{kpis.tickers}</strong></div>
@@ -746,10 +743,7 @@ export default function Page() {
             />
             <Scatter
               data={chartDataVis}
-              // assinatura com rest parameter evita "any" e aceita evento quando presente
-              onClick={(p, idx, ...rest) =>
-                onPointClick(p as ScatterDatum, idx as number, ...rest)
-              }
+              onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)}
             />
           </ScatterChart>
         </ResponsiveContainer>
@@ -763,12 +757,12 @@ export default function Page() {
         </div>
       )}
 
-      {/* Tabela */}
+      {/* Tabela com header sticky */}
       <div className="space-y-2" ref={tableRef}>
         <h2 className="text-xl font-semibold">Resultados</h2>
-        <div className="border rounded overflow-x-auto">
+        <div className="border rounded overflow-auto max-h-[70vh]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-100 border-b">
+            <thead className="bg-gray-100 border-b sticky top-0 z-10 bg-white">
               <tr className="text-left align-top">
                 <th className="p-2" aria-sort={sortKey==="company" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>
