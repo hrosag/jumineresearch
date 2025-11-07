@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useDeferredValue } from "react";
+import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
 import {
@@ -41,7 +41,7 @@ type ScatterDatum = {
 
 function toDateNum(iso: string | null | undefined): number {
   if (!iso) return Number.NaN;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso || "").trim());
   if (!m) return Number.NaN;
   const y = Number(m[1]);
   const mo = Number(m[2]) - 1;
@@ -84,27 +84,29 @@ export default function Page() {
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
   const [onlyMulti, setOnlyMulti] = useState(false);
 
-  // sort + filtros por coluna
+  const [onlyFirst, setOnlyFirst] = useState(false);
+  const [onlyLast, setOnlyLast] = useState(false);
+
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
   const [fTicker, setFTicker] = useState("");
   const [fKey, setFKey] = useState("");
-  const [fDate, setFDate] = useState(""); // aceita prefixo YYYY, YYYY-MM, YYYY-MM-DD
+  const [fDate, setFDate] = useState("");
   const [fType, setFType] = useState("");
 
-  // filtros “deferidos” para debounce natural
   const dfCompany = useDeferredValue(fCompany);
   const dfTicker = useDeferredValue(fTicker);
   const dfKey = useDeferredValue(fKey);
   const dfDate = useDeferredValue(fDate);
   const dfType = useDeferredValue(fType);
 
-  // paginação da tabela
   const PAGE = 50;
   const [tableLimit, setTableLimit] = useState(PAGE);
 
-  // restaura filtros da URL
+  const tableRef = useRef<HTMLDivElement | null>(null);
+  const firstRowRef = useRef<HTMLTableRowElement | null>(null);
+
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const s = q.get("s"); const e = q.get("e");
@@ -117,7 +119,6 @@ export default function Page() {
     if (c) setSelCompanies(c.split(",").map(v => ({ value: v, label: v })));
   }, []);
 
-  // baixa dados
   async function load() {
     setLoading(true);
 
@@ -148,10 +149,7 @@ export default function Page() {
 
     const { data: timeline, error: e2 } = await supabase
       .from("vw_bulletins_with_canonical")
-      .select(
-        // body_text removido. Buscar sob demanda.
-        "id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key",
-      )
+      .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
       .in("company", compArr.length ? compArr : ["__none__"])
       .gte("bulletin_date", globalAnchor ?? "1900-01-01")
       .order("bulletin_date", { ascending: true });
@@ -195,12 +193,10 @@ export default function Page() {
 
   useEffect(() => { load(); }, []);
 
-  // valida intervalo
   useEffect(() => {
     if (startDate && endDate && startDate > endDate) setEndDate(startDate);
   }, [startDate, endDate]);
 
-  // sincroniza filtros na URL
   useEffect(() => {
     const p = new URLSearchParams();
     if (startDate) p.set("s", startDate);
@@ -211,7 +207,6 @@ export default function Page() {
     history.replaceState(null, "", `?${p.toString()}`);
   }, [startDate, endDate, selTickers, selCompanies, onlyMulti]);
 
-  // janela atual
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -221,7 +216,6 @@ export default function Page() {
     });
   }, [rows, startDate, endDate]);
 
-  // opções de selects
   const companyOpts = useMemo<Opt[]>(() => {
     const s = new Set<string>();
     for (const r of rowsInWindow) if (r.company) s.add(r.company);
@@ -234,7 +228,6 @@ export default function Page() {
     return Array.from(s).sort().map((v) => ({ value: v, label: v }));
   }, [rowsInWindow]);
 
-  // poda seleções inválidas
   useEffect(() => {
     const validCompanies = new Set(companyOpts.map((o) => o.value));
     const validTickers = new Set(tickerOpts.map((o) => o.value));
@@ -242,7 +235,6 @@ export default function Page() {
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
-  // contagem por ticker
   const tickerCount = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rowsInWindow) {
@@ -252,8 +244,7 @@ export default function Page() {
     return m;
   }, [rowsInWindow]);
 
-  // filtro principal
-  const filtered = useMemo(() => {
+  const filteredBase = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
     return rowsInWindow.filter((r) => {
@@ -264,13 +255,28 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers, onlyMulti, tickerCount]);
 
-  // dataset ordenado por data para o gráfico
+  const filtered = useMemo(() => {
+    if (!onlyFirst && !onlyLast) return filteredBase;
+    const byTicker = new Map<string, Row[]>();
+    for (const r of filteredBase) {
+      if (!r.ticker) continue;
+      if (!byTicker.has(r.ticker)) byTicker.set(r.ticker, []);
+      byTicker.get(r.ticker)!.push(r);
+    }
+    const out: Row[] = [];
+    for (const arr of byTicker.values()) {
+      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      if (onlyFirst) out.push(arr[0]);
+      if (onlyLast) out.push(arr[arr.length - 1]);
+    }
+    return out;
+  }, [filteredBase, onlyFirst, onlyLast]);
+
   const filteredSorted = useMemo(
     () => [...filtered].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date)),
     [filtered],
   );
 
-  // gráfico
   const chartData: ScatterDatum[] = useMemo(
     () =>
       filteredSorted.map((r) => ({
@@ -345,6 +351,8 @@ export default function Page() {
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
     setOnlyMulti(false);
+    setOnlyFirst(false);
+    setOnlyLast(false);
     setSortKey("bulletin_date");
     setSortDir("asc");
     setFCompany("");
@@ -355,9 +363,7 @@ export default function Page() {
     setTableLimit(PAGE);
   };
 
-  const hasFiltered = filteredSorted.length > 0;
-
-  // abrir modal com body_text sob demanda
+  // modal
   const openBulletinModal = async (row: Row) => {
     setSelectedBulletin(row);
     if (!row.composite_key || row.body_text) return;
@@ -372,7 +378,32 @@ export default function Page() {
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
 
-  // tabela: filtros por coluna + sort
+  // clique no ponto → filtra tabela (Shift isola por key)
+  function onPointClick(
+    payload: ScatterDatum,
+    _index: number,
+    ...rest: unknown[]
+  ): void {
+    const evt = (rest[0] as { shiftKey?: boolean } | undefined);
+    const isShift = !!(evt && evt.shiftKey);
+
+    if (isShift && payload.composite_key) {
+      setFKey(payload.composite_key);
+      setFCompany("");
+    } else {
+      setFCompany(payload.company || "");
+      setFKey("");
+    }
+    // rolar e destacar
+    setTimeout(() => {
+      tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (firstRowRef.current) {
+        firstRowRef.current.classList.add("bg-yellow-50");
+        setTimeout(() => firstRowRef.current?.classList.remove("bg-yellow-50"), 1800);
+      }
+    }, 0);
+  }
+
   function toggleSort(k: SortKey) {
     setSortKey((prevK) => {
       if (prevK !== k) {
@@ -390,7 +421,7 @@ export default function Page() {
     const cf = dfCompany.trim().toLowerCase();
     const tf = dfTicker.trim().toLowerCase();
     const kf = dfKey.trim().toLowerCase();
-    const df = dfDate.trim();
+    const dfv = dfDate.trim();
     const yf = dfType.trim().toLowerCase();
 
     const arr = filtered.filter((r) => {
@@ -403,7 +434,7 @@ export default function Page() {
       if (cf && !c.includes(cf)) return false;
       if (tf && !t.includes(tf)) return false;
       if (kf && !k.includes(kf)) return false;
-      if (df && !d.startsWith(df)) return false; // aceita "2008" ou "2008-03"
+      if (dfv && !d.startsWith(dfv)) return false;
       if (yf && !y.includes(yf)) return false;
       return true;
     });
@@ -426,24 +457,63 @@ export default function Page() {
     return arr;
   }, [filtered, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
 
-  // paginação client-side
-  const tableRowsPage = useMemo(
-    () => tableRows.slice(0, tableLimit),
-    [tableRows, tableLimit]
-  );
-  useEffect(() => {
-    // se filtros mudarem, volta para primeira "página"
-    setTableLimit(PAGE);
-  }, [filtered.length, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
+  const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
+  useEffect(() => { setTableLimit(PAGE); }, [filtered.length, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
 
-  // EXPORTS
-  // Exporta a seleção COMPLETA (todas as linhas filtradas), não só a página visível
+  const kpis = useMemo(() => {
+    const total = tableRows.length;
+    const companies = new Set(tableRows.map(r => r.company).filter(Boolean) as string[]).size;
+    const tickers = new Set(tableRows.map(r => r.ticker).filter(Boolean) as string[]).size;
+    const perTicker = new Map<string, number>();
+    for (const r of tableRows) {
+      if (!r.ticker) continue;
+      perTicker.set(r.ticker, (perTicker.get(r.ticker) ?? 0) + 1);
+    }
+    const counts = Array.from(perTicker.values()).sort((a,b)=>a-b);
+    const med = counts.length ? (counts.length % 2 ? counts[(counts.length-1)/2] : (counts[counts.length/2-1]+counts[counts.length/2])/2) : 0;
+    const pctMulti = counts.length ? Math.round(100 * (counts.filter(n => n>=2).length / counts.length)) : 0;
+    return { total, companies, tickers, med, pctMulti };
+  }, [tableRows]);
+
+  async function ensureBodies(rowsArg: Row[]): Promise<Row[]> {
+    const missing = Array.from(
+      new Set(
+        rowsArg
+          .filter(r => !r.body_text && r.composite_key)
+          .map(r => r.composite_key as string)
+      )
+    );
+    if (missing.length === 0) return rowsArg;
+
+    const { data, error } = await supabase
+      .from("vw_bulletins_with_canonical")
+      .select("composite_key, body_text")
+      .in("composite_key", missing);
+
+    if (error) {
+      console.error("Falha ao buscar body_text:", error.message);
+      return rowsArg;
+    }
+
+    const map = new Map<string, string>();
+    for (const r of data || []) {
+      if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
+    }
+
+    return rowsArg.map(r =>
+      r.body_text || !r.composite_key
+        ? r
+        : { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" }
+    );
+  }
+
   const handleExportSelectionTxt = async () => {
     if (!tableRows.length) {
       alert("Nada a exportar. Ajuste os filtros/seleção.");
       return;
     }
-    const sorted = [...tableRows].sort(
+    const withBodies = await ensureBodies(tableRows);
+    const sorted = [...withBodies].sort(
       (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
     );
     const story = sorted
@@ -469,7 +539,8 @@ export default function Page() {
       alert("Nenhum boletim no período.");
       return;
     }
-    const story = base
+    const withBodies = await ensureBodies(base);
+    const story = withBodies
       .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
       .join("\n--------------------------------\n");
     const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
@@ -485,8 +556,9 @@ export default function Page() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-wrap items-center gap-4">
+    <div className="p-6 space-y-4">
+      {/* Título + botões */}
+      <div className="flex items-center gap-4">
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
         <div className="ml-auto flex flex-wrap gap-2">
           <button
@@ -508,11 +580,20 @@ export default function Page() {
         </div>
       </div>
 
+      {/* KPIs logo abaixo do título */}
+      <div className="flex flex-wrap gap-3 text-sm">
+        <div className="border rounded px-2 py-1">Empresas: <strong>{kpis.companies}</strong></div>
+        <div className="border rounded px-2 py-1">Tickers: <strong>{kpis.tickers}</strong></div>
+        <div className="border rounded px-2 py-1">Boletins: <strong>{kpis.total}</strong></div>
+        <div className="border rounded px-2 py-1">Mediana boletins/ticker: <strong>{kpis.med}</strong></div>
+        <div className="border rounded px-2 py-1">% tickers ≥2: <strong>{kpis.pctMulti}%</strong></div>
+      </div>
+
       <div className="flex items-center text-sm text-gray-600">
         {loading ? "Carregando…" : `${filteredSorted.length} boletins no filtro`}
       </div>
 
-      {/* Filtros superiores */}
+      {/* Controles superiores */}
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="block text-sm">Start</label>
@@ -574,6 +655,22 @@ export default function Page() {
               onChange={(e) => setOnlyMulti(e.target.checked)}
             />
             Somente tickers com ≥2 boletins
+          </label>
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={onlyFirst}
+              onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }}
+            />
+            Apenas primeiro
+          </label>
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={onlyLast}
+              onChange={(e) => { setOnlyLast(e.target.checked); if (e.target.checked) setOnlyFirst(false); }}
+            />
+            Apenas último
           </label>
         </div>
       </div>
@@ -640,12 +737,20 @@ export default function Page() {
                     <div><strong>Empresa:</strong> {d.company || "—"}</div>
                     <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
                     <div><strong>Canonical:</strong> {d.canonical_type || "—"}</div>
-                    <div><strong>Key:</strong> {d.composite_key || "—"}</div>
+                    <div className="mt-1 text-xs text-gray-600">
+                      Clique: filtra empresa | Shift+Clique: isola este boletim
+                    </div>
                   </div>
                 );
               }}
             />
-            <Scatter data={chartDataVis} />
+            <Scatter
+              data={chartDataVis}
+              // assinatura com rest parameter evita "any" e aceita evento quando presente
+              onClick={(p, idx, ...rest) =>
+                onPointClick(p as ScatterDatum, idx as number, ...rest)
+              }
+            />
           </ScatterChart>
         </ResponsiveContainer>
         {selTickers.length > 0 && chartDataVis.length === 0 && (
@@ -659,7 +764,7 @@ export default function Page() {
       )}
 
       {/* Tabela */}
-      <div className="space-y-2">
+      <div className="space-y-2" ref={tableRef}>
         <h2 className="text-xl font-semibold">Resultados</h2>
         <div className="border rounded overflow-x-auto">
           <table className="w-full text-sm">
@@ -723,10 +828,11 @@ export default function Page() {
               </tr>
             </thead>
             <tbody>
-              {tableRowsPage.map((row) => {
+              {tableRowsPage.map((row, i) => {
                 const compositeKey = row.composite_key ?? "—";
+                const refAttr = i === 0 ? { ref: firstRowRef } : {};
                 return (
-                  <tr key={row.id} className="border-b hover:bg-gray-50">
+                  <tr key={row.id} className="border-b hover:bg-gray-50" {...refAttr}>
                     <td className="p-2">{row.company}</td>
                     <td className="p-2">{row.ticker}</td>
                     <td className="p-2">
@@ -759,7 +865,7 @@ export default function Page() {
           </table>
         </div>
 
-        {/* Paginação simples */}
+        {/* Paginação */}
         <div className="flex items-center justify-between text-sm">
           <div>
             Mostrando {Math.min(tableLimit, tableRows.length)} de {tableRows.length}
