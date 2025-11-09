@@ -22,7 +22,7 @@ type Row = {
   id: number;
   source_file?: string | null;
   company: string | null;
-  ticker: string | null;
+  ticker: string | null; // publicado, pode ser *.P
   bulletin_type: string | null;
   canonical_type: string | null;
   bulletin_date: string | null;
@@ -32,13 +32,22 @@ type Row = {
 
 type ScatterDatum = {
   company: string;
-  ticker: string;
+  ticker: string;        // publicado
+  ticker_root: string;   // normalizado, não mostrado na UI
   dateNum: number;
   canonical_type: string;
   dateISO: string;
   composite_key?: string;
 };
 
+type Opt = { value: string; label: string };
+
+const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
+
+type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "canonical_type";
+type SortDir = "asc" | "desc";
+
+// -------- helpers de data ----------
 function toDateNum(iso: string | null | undefined): number {
   if (!iso) return Number.NaN;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso || "").trim());
@@ -48,13 +57,11 @@ function toDateNum(iso: string | null | undefined): number {
   const d = Number(m[3]);
   return Date.UTC(y, mo, d, 12, 0, 0);
 }
-
 function fmtUTC(ts: number): string {
   if (!Number.isFinite(ts)) return "—";
   const d = new Date(ts);
   return d.toISOString().slice(0, 10);
 }
-
 function fmtDayMonth(ts: number): string {
   if (!Number.isFinite(ts)) return "—";
   const d = new Date(ts);
@@ -63,11 +70,13 @@ function fmtDayMonth(ts: number): string {
   return `${dd}/${mm}`;
 }
 
-type Opt = { value: string; label: string };
-const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
-
-type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "canonical_type";
-type SortDir = "asc" | "desc";
+// -------- normalização de ticker ----------
+function normalizeTicker(t?: string | null) {
+  return (t ?? "").trim().toUpperCase().replace(/\.P$/, "");
+}
+function keyCT(company?: string | null, ticker?: string | null) {
+  return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
+}
 
 export default function Page() {
   const [loading, setLoading] = useState(true);
@@ -81,7 +90,7 @@ export default function Page() {
   const [endDate, setEndDate] = useState<string>("");
 
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
-  const [selTickers, setSelTickers] = useState<Opt[]>([]);
+  const [selTickers, setSelTickers] = useState<Opt[]>([]); // value = raiz normalizada
   const [onlyMulti, setOnlyMulti] = useState(false);
 
   const [onlyFirst, setOnlyFirst] = useState(false);
@@ -115,13 +124,22 @@ export default function Page() {
     if (s) setStartDate(s);
     if (e) setEndDate(e);
     if (m === "1") setOnlyMulti(true);
-    if (t) setSelTickers(t.split(",").map(v => ({ value: v, label: v })));
+    if (t) {
+      // aceitar parâmetros antigos e normalizar
+      setSelTickers(
+        t.split(",")
+          .map(v => normalizeTicker(v))
+          .filter(Boolean)
+          .map(v => ({ value: v, label: v }))
+      );
+    }
     if (c) setSelCompanies(c.split(",").map(v => ({ value: v, label: v })));
   }, []);
 
   async function load() {
     setLoading(true);
 
+    // 1) coorte de âncoras por company|ticker_root
     const { data: cohort, error: e1 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select("company, ticker, bulletin_date, canonical_type")
@@ -137,16 +155,16 @@ export default function Page() {
     const anchors = new Map<string, string>();
     const companies = new Set<string>();
     for (const r of cohort || []) {
-      const key = `${r.company ?? ""}|${r.ticker ?? ""}`;
+      const key = keyCT(r.company, r.ticker);
       const d = r.bulletin_date!;
-      if (!anchors.has(key)) anchors.set(key, d);
-      else if (d < anchors.get(key)!) anchors.set(key, d);
+      if (!anchors.has(key) || d < (anchors.get(key) as string)) anchors.set(key, d);
       if (r.company) companies.add(r.company);
     }
 
     const compArr = Array.from(companies).sort();
     const globalAnchor = [...anchors.values()].sort()[0] || null;
 
+    // 2) timeline ampla, depois filtro por âncora (raiz)
     const { data: timeline, error: e2 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
@@ -164,7 +182,7 @@ export default function Page() {
     const r = (timeline || []) as Row[];
 
     const filteredByAnchor = r.filter((row) => {
-      const key = `${row.company ?? ""}|${row.ticker ?? ""}`;
+      const key = keyCT(row.company, row.ticker);
       const anchor = anchors.get(key);
       if (!anchor) return false;
       if (!row.bulletin_date) return false;
@@ -201,7 +219,7 @@ export default function Page() {
     const p = new URLSearchParams();
     if (startDate) p.set("s", startDate);
     if (endDate) p.set("e", endDate);
-    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(","));
+    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(",")); // raiz normalizada na URL
     if (selCompanies.length) p.set("c", selCompanies.map(o => o.value).join(","));
     if (onlyMulti) p.set("m", "1");
     history.replaceState(null, "", `?${p.toString()}`);
@@ -222,49 +240,63 @@ export default function Page() {
     return Array.from(s).sort().map((v) => ({ value: v, label: v }));
   }, [rowsInWindow]);
 
+  // opções de ticker por raiz; rótulo simples
   const tickerOpts = useMemo<Opt[]>(() => {
-    const s = new Set<string>();
-    for (const r of rowsInWindow) if (r.ticker) s.add(r.ticker);
-    return Array.from(s).sort().map((v) => ({ value: v, label: v }));
+    const roots = new Map<string, Set<string>>();
+    for (const r of rowsInWindow) {
+      const root = normalizeTicker(r.ticker);
+      if (!root) continue;
+      if (!roots.has(root)) roots.set(root, new Set());
+      roots.get(root)!.add(r.ticker ?? "");
+    }
+    return Array.from(roots.keys())
+      .sort((a, b) => a.localeCompare(b))
+      .map((root) => ({ value: root, label: root }));
   }, [rowsInWindow]);
 
   useEffect(() => {
     const validCompanies = new Set(companyOpts.map((o) => o.value));
-    const validTickers = new Set(tickerOpts.map((o) => o.value));
+    const validTickers = new Set(tickerOpts.map((o) => o.value)); // raízes válidas
     setSelCompanies((prev) => prev.filter((o) => validCompanies.has(o.value)));
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
+  // contador por raiz
   const tickerCount = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rowsInWindow) {
-      if (!r.ticker) continue;
-      m.set(r.ticker, (m.get(r.ticker) ?? 0) + 1);
+      const t = normalizeTicker(r.ticker);
+      if (!t) continue;
+      m.set(t, (m.get(t) ?? 0) + 1);
     }
     return m;
   }, [rowsInWindow]);
 
+  // base filtrada por seleção; seleção é por raiz
   const filteredBase = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value));
+    const tset = new Set(selTickers.map((o) => o.value)); // já são raízes
     return rowsInWindow.filter((r) => {
+      const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!r.ticker || !tset.has(r.ticker))) return false;
-      if (onlyMulti && (!r.ticker || (tickerCount.get(r.ticker) ?? 0) < 2)) return false;
+      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
+      if (onlyMulti && (!tRoot || (tickerCount.get(tRoot) ?? 0) < 2)) return false;
       return true;
     });
   }, [rowsInWindow, selCompanies, selTickers, onlyMulti, tickerCount]);
 
+  // first/last por raiz
   const filtered = useMemo(() => {
     if (!onlyFirst && !onlyLast) return filteredBase;
-    const byTicker = new Map<string, Row[]>();
+    const byRoot = new Map<string, Row[]>();
     for (const r of filteredBase) {
-      if (!r.ticker) continue;
-      if (!byTicker.has(r.ticker)) byTicker.set(r.ticker, []);
-      byTicker.get(r.ticker)!.push(r);
+      const t = normalizeTicker(r.ticker);
+      if (!t) continue;
+      if (!byRoot.has(t)) byRoot.set(t, []);
+      byRoot.get(t)!.push(r);
     }
     const out: Row[] = [];
-    for (const arr of byTicker.values()) {
+    for (const arr of byRoot.values()) {
       arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
       if (onlyFirst) out.push(arr[0]);
       if (onlyLast) out.push(arr[arr.length - 1]);
@@ -277,11 +309,13 @@ export default function Page() {
     [filtered],
   );
 
+  // dados do gráfico com ticker_root
   const chartData: ScatterDatum[] = useMemo(
     () =>
       filteredSorted.map((r) => ({
         company: r.company ?? "",
         ticker: r.ticker ?? "",
+        ticker_root: normalizeTicker(r.ticker),
         dateNum: toDateNum(r.bulletin_date),
         canonical_type: r.canonical_type ?? "",
         dateISO: r.bulletin_date ?? "",
@@ -301,11 +335,12 @@ export default function Page() {
     return [min - PAD, max + PAD];
   }, [filteredSorted]);
 
+  // ordem por primeiro evento da raiz
   const tickerOrder = useMemo<string[]>(() => {
     if (selTickers.length) return selTickers.map((o) => o.value);
     const first = new Map<string, number>();
     for (const r of filteredSorted) {
-      const t = r.ticker ?? "";
+      const t = normalizeTicker(r.ticker);
       if (!t) continue;
       const ts = toDateNum(r.bulletin_date);
       const prev = first.get(t);
@@ -334,7 +369,7 @@ export default function Page() {
   );
 
   const chartDataVis = useMemo(
-    () => chartData.filter((d) => d.ticker && visibleTickers.includes(d.ticker)),
+    () => chartData.filter((d) => d.ticker_root && visibleTickers.includes(d.ticker_root)),
     [chartData, visibleTickers],
   );
 
@@ -414,6 +449,7 @@ export default function Page() {
   const sortIndicator = (k: SortKey) =>
     sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null;
 
+  // tabela: filtros de texto continuam olhando o ticker publicado
   const tableRows = useMemo(() => {
     const cf = dfCompany.trim().toLowerCase();
     const tf = dfTicker.trim().toLowerCase();
@@ -423,7 +459,7 @@ export default function Page() {
 
     const arr = filtered.filter((r) => {
       const c = (r.company ?? "").toLowerCase();
-      const t = (r.ticker ?? "").toLowerCase();
+      const t = (r.ticker ?? "").toLowerCase(); // publicado
       const k = (r.composite_key ?? "").toLowerCase();
       const d = r.bulletin_date ?? "";
       const y = (r.canonical_type ?? r.bulletin_type ?? "").toLowerCase();
@@ -460,13 +496,15 @@ export default function Page() {
   const kpis = useMemo(() => {
     const total = tableRows.length;
     const companies = new Set(tableRows.map(r => r.company).filter(Boolean) as string[]).size;
-    const tickers = new Set(tableRows.map(r => r.ticker).filter(Boolean) as string[]).size;
-    const perTicker = new Map<string, number>();
+    // contagem de tickers para KPI pode considerar raiz, para ciclo contínuo
+    const perRoot = new Map<string, number>();
     for (const r of tableRows) {
-      if (!r.ticker) continue;
-      perTicker.set(r.ticker, (perTicker.get(r.ticker) ?? 0) + 1);
+      const t = normalizeTicker(r.ticker);
+      if (!t) continue;
+      perRoot.set(t, (perRoot.get(t) ?? 0) + 1);
     }
-    const counts = Array.from(perTicker.values()).sort((a,b)=>a-b);
+    const tickers = perRoot.size;
+    const counts = Array.from(perRoot.values()).sort((a,b)=>a-b);
     const med = counts.length ? (counts.length % 2 ? counts[(counts.length-1)/2] : (counts[counts.length/2-1]+counts[counts.length/2])/2) : 0;
     const pctMulti = counts.length ? Math.round(100 * (counts.filter(n => n>=2).length / counts.length)) : 0;
     return { total, companies, tickers, med, pctMulti };
@@ -690,7 +728,7 @@ export default function Page() {
             isMulti
             options={tickerOpts}
             value={selTickers}
-            onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
+            onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])} // value = raiz
             classNamePrefix="cpc-select"
           />
         </div>
@@ -711,7 +749,7 @@ export default function Page() {
             />
             <YAxis
               type="category"
-              dataKey="ticker"
+              dataKey="ticker_root"            // usa raiz para agrupar o ciclo completo
               name="Ticker"
               ticks={visibleTickers}
               domain={visibleTickers}
@@ -757,7 +795,7 @@ export default function Page() {
         </div>
       )}
 
-      {/* Tabela com header sticky */}
+      {/* Tabela */}
       <div className="space-y-2" ref={tableRef}>
         <h2 className="text-xl font-semibold">Resultados</h2>
         <div className="border rounded overflow-auto max-h-[70vh]">
