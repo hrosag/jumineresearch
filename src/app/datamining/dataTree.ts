@@ -13,7 +13,7 @@ export const reportTree: ReportNode[] = [
     children: [
       { id: "notices", label: "Notices" },
       { id: "canonical-map", label: "Canonical Map" },
-      { id: "new-listings", label: "New Issuers" },
+      { id: "new-listings", label: "New Issuers" }, // apenas no menu
     ],
   },
   {

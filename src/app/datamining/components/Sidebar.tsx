@@ -2,6 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { reportTree } from "../dataTree";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  NewspaperIcon,
+  ArrowsRightLeftIcon,
+  BellAlertIcon,
+  MapIcon,
+  SparklesIcon,
+  DocumentTextIcon,
+} from "@heroicons/react/24/outline";
 
 type SidebarProps = {
   selectedReport: string;
@@ -11,6 +21,26 @@ type SidebarProps = {
 export default function Sidebar({ selectedReport, setSelectedReport }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  function IconFor({ id }: { id: string }) {
+    const cls = "h-5 w-5 shrink-0";
+    switch (id) {
+      case "bulletins":
+        return <NewspaperIcon className={cls} />;
+      case "lifecycle":
+        return <ArrowsRightLeftIcon className={cls} />;
+      case "notices":
+        return <BellAlertIcon className={cls} />;
+      case "canonical-map":
+        return <MapIcon className={cls} />;
+      case "new-listings":
+        return <SparklesIcon className={cls} />;
+      case "cpc":
+        return <DocumentTextIcon className={cls} />;
+      default:
+        return <span className="inline-block h-5 w-5" />;
+    }
+  }
 
   useEffect(() => {
     try {
@@ -46,7 +76,9 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
   }, [open]);
 
   const rootClasses = useMemo(
-    () => `flex h-full flex-col text-white ${collapsed ? "w-12" : "w-64"}`,
+    () =>
+      "flex h-full flex-col text-white transition-all duration-200 " +
+      (collapsed ? "w-14" : "w-64"),
     [collapsed]
   );
 
@@ -75,11 +107,18 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
                 aria-expanded={isOpen}
                 title={group.label}
               >
-                <span className="text-xs">{isOpen ? "▾" : "▸"}</span>
-                <span className={collapsed ? "sr-only" : ""}>{group.label}</span>
+                <span className="w-4">
+                  {isOpen ? (
+                    <ChevronDownIcon className="h-4 w-4" />
+                  ) : (
+                    <ChevronRightIcon className="h-4 w-4" />
+                  )}
+                </span>
+                <IconFor id={group.id} />
+                <span className={"truncate " + (collapsed ? "sr-only" : "")}>{group.label}</span>
               </button>
 
-              {isOpen && !collapsed && group.children?.length ? (
+              {isOpen && group.children?.length ? (
                 <ul className="ml-5 mt-1 border-l border-slate-700">
                   {group.children.map((child) => {
                     const active = selectedReport === child.id;
@@ -88,11 +127,13 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
                         <button
                           type="button"
                           onClick={() => setSelectedReport(child.id)}
-                          className={`w-full rounded-l-md px-2 py-1.5 text-left hover:bg-slate-800 ${
+                          className={`flex w-full items-center gap-2 rounded-l-md px-2 py-1.5 text-left hover:bg-slate-800 ${
                             active ? "bg-yellow-600 text-black" : "text-slate-200"
                           }`}
                         >
-                          {child.label}
+                          <span className="w-4" />
+                          <IconFor id={child.id} />
+                          <span className={collapsed ? "sr-only" : "truncate"}>{child.label}</span>
                         </button>
                       </li>
                     );
