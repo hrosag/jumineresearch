@@ -36,6 +36,7 @@ type ScatterDatum = {
   ticker_root: string;   // normalizado, não mostrado na UI
   dateNum: number;
   canonical_type: string;
+  type_display: string;  // fallback p/ bulletin_type
   dateISO: string;
   composite_key?: string;
 };
@@ -113,49 +114,41 @@ function makeTicksAdaptive(domain: [number, number]) {
   }
   const span = max - min;
 
-  // formatadores em pt-BR
   const fYear = new Intl.DateTimeFormat("pt-BR", { year: "numeric", timeZone: "UTC" });
   const fMonY = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
   const fMon = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" });
   const fDayMon = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 
-  // regras por abrangência
   if (span >= 3 * 365 * DAY) {
-    // ≥3 anos → ticks anuais: "2008"
     let t = startOfYearUTC(min);
     const ticks: number[] = [];
     while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 12); }
     return { ticks, formatter: (v: number) => fYear.format(v) };
   }
   if (span >= 12 * 30 * DAY) {
-    // ~1–3 anos → ticks trimestrais: "jan 2008", "abr 2008", ...
     let t = startOfQuarterUTC(min);
     const ticks: number[] = [];
     while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 3); }
     return { ticks, formatter: (v: number) => fMonY.format(v) };
   }
   if (span >= 3 * 30 * DAY) {
-    // 3–12 meses → ticks mensais: "jan", "fev", ...
     let t = startOfMonthUTC(min);
     const ticks: number[] = [];
     while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 1); }
     return { ticks, formatter: (v: number) => fMon.format(v) };
   }
   if (span >= 60 * DAY) {
-    // 60–90 dias+ → quinzenal: "dd/MM"
     let t = startOfDayUTC(min);
     const ticks: number[] = [];
     while (t <= max) { ticks.push(t); t = addDaysUTC(t, 15); }
     return { ticks, formatter: (v: number) => fDayMon.format(v) };
   }
   if (span >= 14 * DAY) {
-    // 14–60 dias → semanal: "dd/MM"
     let t = startOfDayUTC(min);
     const ticks: number[] = [];
     while (t <= max) { ticks.push(t); t = addDaysUTC(t, 7); }
     return { ticks, formatter: (v: number) => fDayMon.format(v) };
   }
-  // <14 dias → diário
   {
     let t = startOfDayUTC(min);
     const ticks: number[] = [];
@@ -405,6 +398,7 @@ export default function Page() {
         ticker_root: normalizeTicker(r.ticker),
         dateNum: toDateNum(r.bulletin_date),
         canonical_type: r.canonical_type ?? "",
+        type_display: r.canonical_type ?? r.bulletin_type ?? "",
         dateISO: r.bulletin_date ?? "",
         composite_key: r.composite_key ?? undefined,
       })),
@@ -577,7 +571,7 @@ export default function Page() {
       k === "bulletin_date" ? toDateNum(r.bulletin_date)
       : k === "company" ? (r.company ?? "").toLowerCase()
       : k === "ticker" ? (r.ticker ?? "").toLowerCase()
-      : k === "canonical_type" ? (r.canonical_type ?? "").toLowerCase()
+      : k === "canonical_type" ? (r.canonical_type ?? r.bulletin_type ?? "").toLowerCase()
       : (r.composite_key ?? "").toLowerCase();
 
     arr.sort((a, b) => {
@@ -605,7 +599,11 @@ export default function Page() {
     }
     const tickers = perRoot.size;
     const counts = Array.from(perRoot.values()).sort((a,b)=>a-b);
-    const med = counts.length ? (counts.length % 2 ? counts[(counts.length-1)/2] : (counts[(counts.length/2)-1]+counts[counts.length/2])/2) : 0;
+    const med = counts.length
+      ? (counts.length % 2
+          ? counts[(counts.length-1)/2]
+          : (counts[(counts.length/2)-1]+counts[counts.length/2])/2)
+      : 0;
     const pctMulti = counts.length ? Math.round(100 * (counts.filter(n => n>=2).length / counts.length)) : 0;
     return { total, companies, tickers, med, pctMulti };
   }, [tableRows]);
@@ -652,7 +650,7 @@ export default function Page() {
       (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
     );
     const story = sorted
-      .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
+      .map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`)
       .join("\n--------------------------------\n");
     const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
     const safeEnd = endDate ? endDate.replaceAll("-", "") : "fim";
@@ -676,7 +674,7 @@ export default function Page() {
     }
     const withBodies = await ensureBodies(base);
     const story = withBodies
-      .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
+      .map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`)
       .join("\n--------------------------------\n");
     const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
     const safeEnd = endDate ? endDate.replaceAll("-", "") : "fim";
@@ -869,10 +867,9 @@ export default function Page() {
               dataKey="ticker_root"
               name="Ticker"
               ticks={visibleTickers}
-              domain={visibleTickers}
               interval={0}
               tickLine={false}
-              width={showTickerAxis ?  ninetyWidth() : 0}
+              width={showTickerAxis ? ninetyWidth() : 0}
               tick={showTickerAxis ? { fontSize: 12 } : undefined}
               allowDuplicatedCategory={false}
               tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
@@ -889,7 +886,7 @@ export default function Page() {
                     <div><strong>Data:</strong> {date}</div>
                     <div><strong>Empresa:</strong> {d.company || "—"}</div>
                     <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
-                    <div><strong>Canonical:</strong> {d.canonical_type || "—"}</div>
+                    <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
                     <div className="mt-1 text-xs text-gray-600">
                       Clique: filtra empresa | Shift+Clique: isola este boletim
                     </div>
@@ -918,7 +915,7 @@ export default function Page() {
         <h2 className="text-xl font-semibold">Resultados</h2>
         <div className="border rounded overflow-auto max-h-[70vh]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-100 border-b sticky top-0 z-10 bg-white">
+            <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
                 <th className="p-2" aria-sort={sortKey==="company" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>
@@ -1000,7 +997,7 @@ export default function Page() {
                       )}
                     </td>
                     <td className="p-2">{row.bulletin_date}</td>
-                    <td className="p-2">{row.canonical_type ?? "—"}</td>
+                    <td className="p-2">{row.canonical_type ?? row.bulletin_type ?? "—"}</td>
                   </tr>
                 );
               })}
