@@ -96,6 +96,8 @@ export default function Page() {
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
 
+  const [showTickerAxis, setShowTickerAxis] = useState(true); // NOVO: alterna exibição do eixo Y
+
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
@@ -310,7 +312,7 @@ export default function Page() {
   );
 
   // dados do gráfico com ticker_root
-  const chartData: ScatterDatum[] = useMemo(
+  const chartData = useMemo(
     () =>
       filteredSorted.map((r) => ({
         company: r.company ?? "",
@@ -322,7 +324,7 @@ export default function Page() {
         composite_key: r.composite_key ?? undefined,
       })),
     [filteredSorted],
-  );
+  ) as ScatterDatum[];
 
   const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
     const times = filteredSorted
@@ -388,6 +390,7 @@ export default function Page() {
     setOnlyMulti(false);
     setOnlyFirst(false);
     setOnlyLast(false);
+    setShowTickerAxis(true);
     setSortKey("bulletin_date");
     setSortDir("asc");
     setFCompany("");
@@ -411,6 +414,19 @@ export default function Page() {
     }
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
+
+  // NOVO: Fechar modal com ESC
+  useEffect(() => {
+    if (!selectedBulletin) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeBulletinModal();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedBulletin]);
 
   function onPointClick(
     payload: ScatterDatum,
@@ -707,6 +723,15 @@ export default function Page() {
             />
             Apenas último
           </label>
+          {/* NOVO: Alterna o eixo Y (tickers) */}
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={showTickerAxis}
+              onChange={(e) => setShowTickerAxis(e.target.checked)}
+            />
+            Mostrar tickers no eixo Y
+          </label>
         </div>
       </div>
 
@@ -755,10 +780,11 @@ export default function Page() {
               domain={visibleTickers}
               interval={0}
               tickLine={false}
-              width={90}
-              tick={{ fontSize: 12 }}
+              width={showTickerAxis ? 90 : 0}
+              tick={showTickerAxis ? { fontSize: 12 } : undefined}
               allowDuplicatedCategory={false}
-              tickFormatter={(t) => `${t} (${tickerCount.get(String(t)) ?? 0})`}
+              tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
+              hide={!showTickerAxis}
             />
             <Tooltip
               content={({ active, payload }) => {
@@ -923,7 +949,12 @@ export default function Page() {
         </div>
 
         {selectedBulletin && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) closeBulletinModal();
+            }}
+          >
             <div
               className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
               role="dialog"
