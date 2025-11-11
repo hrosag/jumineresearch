@@ -220,10 +220,11 @@ export default function Page() {
     setLoading(true);
 
     // 1) coorte de âncoras por company|ticker_root
+    // Inclui boletins múltiplos: canonical_type == CPC ou bulletin_type contém CPC
     const { data: cohort, error: e1 } = await supabase
       .from("vw_bulletins_with_canonical")
-      .select("company, ticker, bulletin_date, canonical_type")
-      .eq("canonical_type", CPC_CANONICAL);
+      .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
+      .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`);
 
     if (e1) {
       console.error(e1.message);
@@ -236,7 +237,12 @@ export default function Page() {
     const companies = new Set<string>();
     for (const r of cohort || []) {
       const key = keyCT(r.company, r.ticker);
-      const d = r.bulletin_date!;
+      const d = r.bulletin_date || "";
+      if (!d) continue;
+      const hasCpc =
+        r.canonical_type === CPC_CANONICAL ||
+        (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
+      if (!hasCpc) continue; // defesa extra
       if (!anchors.has(key) || d < (anchors.get(key) as string)) anchors.set(key, d);
       if (r.company) companies.add(r.company);
     }
