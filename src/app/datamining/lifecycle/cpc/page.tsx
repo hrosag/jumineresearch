@@ -79,7 +79,7 @@ function keyCT(company?: string | null, ticker?: string | null) {
   return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
 }
 
-// -------- helpers p/ eixos: geração adaptativa de ticks ----------
+// -------- helpers p/ eixos ----------
 const DAY = 24 * 60 * 60 * 1000;
 function startOfDayUTC(ts: number) {
   const d = new Date(ts);
@@ -219,8 +219,7 @@ export default function Page() {
   async function load() {
     setLoading(true);
 
-    // 1) coorte de âncoras por company|ticker_root
-    // Inclui boletins múltiplos: canonical_type == CPC ou bulletin_type contém CPC
+    // 1) coorte de âncoras incluindo boletins múltiplos
     const { data: cohort, error: e1 } = await supabase
       .from("vw_bulletins_with_canonical")
       .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
@@ -242,7 +241,7 @@ export default function Page() {
       const hasCpc =
         r.canonical_type === CPC_CANONICAL ||
         (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
-      if (!hasCpc) continue; // defesa extra
+      if (!hasCpc) continue;
       if (!anchors.has(key) || d < (anchors.get(key) as string)) anchors.set(key, d);
       if (r.company) companies.add(r.company);
     }
@@ -614,6 +613,13 @@ export default function Page() {
     return { total, companies, tickers, med, pctMulti };
   }, [tableRows]);
 
+  // -------- export helpers ----------
+  function safeRange(a: string, b: string) {
+    const s = a ? a.replaceAll("-", "") : "inicio";
+    const e = b ? b.replaceAll("-", "") : "fim";
+    return `${s}_${e}`;
+  }
+
   async function ensureBodies(rowsArg: Row[]): Promise<Row[]> {
     const missing = Array.from(
       new Set(
@@ -646,7 +652,7 @@ export default function Page() {
     );
   }
 
-  const handleExportSelectionTxt = async () => {
+  async function handleExportSelectionTxt() {
     if (!tableRows.length) {
       alert("Nada a exportar. Ajuste os filtros/seleção.");
       return;
@@ -658,19 +664,15 @@ export default function Page() {
     const story = sorted
       .map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`)
       .join("\n--------------------------------\n");
-    const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
-    const safeEnd = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `cpc_notices_selecao_${safeStart}_${safeEnd}.txt`;
+    const filename = `cpc_notices_selecao_${safeRange(startDate, endDate)}.txt`;
     const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
+    a.href = url; a.download = filename; a.click();
     window.URL.revokeObjectURL(url);
-  };
+  }
 
-  const handleExportWindowTxt = async () => {
+  async function handleExportWindowTxt() {
     const base = [...rowsInWindow].sort(
       (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
     );
@@ -682,17 +684,49 @@ export default function Page() {
     const story = withBodies
       .map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`)
       .join("\n--------------------------------\n");
-    const safeStart = startDate ? startDate.replaceAll("-", "") : "inicio";
-    const safeEnd = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `cpc_notices_periodo_${safeStart}_${safeEnd}.txt`;
+    const filename = `cpc_notices_periodo_${safeRange(startDate, endDate)}.txt`;
     const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
+    a.href = url; a.download = filename; a.click();
     window.URL.revokeObjectURL(url);
-  };
+  }
+
+  // NOVO: XLSX agregado da TABELA PÓS-FILTRO
+  async function handleExportTableAggXlsx() {
+    if (!tableRows.length) {
+      alert("Tabela vazia. Ajuste os filtros.");
+      return;
+    }
+    // agrupa apenas o que está na tabela pós-filtro
+    const groups = new Map<string, Row[]>();
+    for (const r of tableRows) {
+      const root = normalizeTicker(r.ticker);
+      if (!root) continue;
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root)!.push(r);
+    }
+    const agg = Array.from(groups.entries()).map(([root, arr]) => {
+      const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      const first = ordered[0];
+      const last = ordered[ordered.length - 1];
+      return {
+        ticker_root: root,
+        company_first: first?.company ?? "",
+        company_last: last?.company ?? "",
+        events: ordered.length,
+        first_date: first?.bulletin_date ?? "",
+        last_date: last?.bulletin_date ?? "",
+      };
+    }).sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
+
+    const XLSX = await import("xlsx"); // sheetjs
+    const ws = XLSX.utils.json_to_sheet(agg);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "CPC_TabelaAgregada");
+    const filename = `cpc_tabela_agregada_${safeRange(startDate, endDate)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
 
   // ticks dinâmicos para eixo X
   const xTicksMemo = useMemo(() => {
@@ -721,6 +755,14 @@ export default function Page() {
             title="Exporta todo o período, ignorando filtros da tabela"
           >
             🗂️ Exportar período
+          </button>
+          <button
+            onClick={handleExportTableAggXlsx}
+            disabled={loading || !tableRows.length}
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
+            title="Exporta XLSX agregado do conteúdo atual da TABELA (pós-filtro)"
+          >
+            📊 Exportar tabela agregada (.xlsx)
           </button>
         </div>
       </div>
