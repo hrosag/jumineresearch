@@ -42,6 +42,7 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
     }
   }
 
+  // persistência
   useEffect(() => {
     try {
       const c = localStorage.getItem("dm:sidebar:collapsed");
@@ -50,30 +51,21 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
       if (o) setOpen(JSON.parse(o));
     } catch {}
   }, []);
-
   useEffect(() => {
     setOpen((prev) => {
       const next = { ...prev };
       for (const node of reportTree) {
-        if (next[node.id] === undefined) {
-          next[node.id] = !!node.defaultExpanded;
-        }
+        if (next[node.id] === undefined) next[node.id] = !!node.defaultExpanded;
       }
       return next;
     });
   }, []);
-
   useEffect(() => {
     try {
       localStorage.setItem("dm:sidebar:collapsed", collapsed ? "1" : "0");
-    } catch {}
-  }, [collapsed]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem("dm:sidebar:open", JSON.stringify(open));
     } catch {}
-  }, [open]);
+  }, [collapsed, open]);
 
   const rootClasses = useMemo(
     () =>
@@ -84,42 +76,45 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
 
   return (
     <div className={rootClasses}>
+      {/* header */}
       <div className="flex items-center justify-between border-b border-slate-700 bg-[#18212c] px-2 py-2">
         <span className={`text-sm font-semibold ${collapsed ? "sr-only" : ""}`}>Data Mining</span>
         <button
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           onClick={() => setCollapsed((value) => !value)}
-          className="rounded p-1 hover:bg-slate-800"
+          className="rounded p-1 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-yellow-500/40"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <span className="text-xl leading-none">{collapsed ? "›" : "‹"}</span>
+          <span className="text-base leading-none">{collapsed ? "›" : "‹"}</span>
         </button>
       </div>
 
-      <nav className="flex-1 space-y-2 overflow-auto bg-[#1e2a38] px-2 py-2">
+      {/* conteúdo */}
+      <nav className="flex-1 overflow-auto bg-[#1e2a38] px-2 py-2 space-y-2">
         {reportTree.map((group) => {
           const isOpen = !!open[group.id];
           return (
             <div key={group.id} className="text-sm">
+              {/* botão do grupo */}
               <button
                 onClick={() => setOpen((prev) => ({ ...prev, [group.id]: !prev[group.id] }))}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-slate-800"
+                className={
+                  "flex w-full h-9 items-center rounded hover:bg-slate-800 " +
+                  (collapsed ? "justify-center px-0" : "gap-2 px-2")
+                }
                 aria-expanded={isOpen}
                 title={group.label}
               >
-                <span className="w-4">
-                  {isOpen ? (
-                    <ChevronDownIcon className="h-4 w-4" />
-                  ) : (
-                    <ChevronRightIcon className="h-4 w-4" />
-                  )}
+                <span className={`w-4 ${collapsed ? "hidden" : ""}`}>
+                  {isOpen ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
                 </span>
                 <IconFor id={group.id} />
                 <span className={"truncate " + (collapsed ? "sr-only" : "")}>{group.label}</span>
               </button>
 
+              {/* itens */}
               {isOpen && group.children?.length ? (
-                <ul className="ml-5 mt-1 border-l border-slate-700">
+                <ul className={"mt-1 " + (collapsed ? "ml-0 border-l-0" : "ml-5 border-l border-slate-700")}>
                   {group.children.map((child) => {
                     const active = selectedReport === child.id;
                     return (
@@ -127,12 +122,17 @@ export default function Sidebar({ selectedReport, setSelectedReport }: SidebarPr
                         <button
                           type="button"
                           onClick={() => setSelectedReport(child.id)}
-                          className={`flex w-full items-center gap-2 rounded-l-md px-2 py-1.5 text-left hover:bg-slate-800 ${
-                            active ? "bg-yellow-600 text-black" : "text-slate-200"
-                          }`}
+                          title={child.label}
+                          className={
+                            "flex w-full h-9 items-center text-left rounded-l-md hover:bg-slate-800 " +
+                            (collapsed ? "justify-center px-0" : "gap-2 px-2") + " " +
+                            (active && !collapsed ? "bg-yellow-600 text-black" : "text-slate-200")
+                          }
                         >
-                          <span className="w-4" />
-                          <IconFor id={child.id} />
+                          <span className={`w-4 ${collapsed ? "hidden" : ""}`} />
+                          <span className={collapsed ? (active ? "rounded bg-yellow-600 p-1.5 text-black" : "p-1.5") : ""}>
+                            <IconFor id={child.id} />
+                          </span>
                           <span className={collapsed ? "sr-only" : "truncate"}>{child.label}</span>
                         </button>
                       </li>
