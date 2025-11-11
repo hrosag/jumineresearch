@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
@@ -78,6 +76,92 @@ function keyCT(company?: string | null, ticker?: string | null) {
   return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
 }
 
+// -------- helpers p/ eixos: geração adaptativa de ticks ----------
+const DAY = 24 * 60 * 60 * 1000;
+function startOfDayUTC(ts: number) {
+  const d = new Date(ts);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function startOfMonthUTC(ts: number) {
+  const d = new Date(ts);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+function startOfQuarterUTC(ts: number) {
+  const d = new Date(ts);
+  const q0 = Math.floor(d.getUTCMonth() / 3) * 3;
+  return Date.UTC(d.getUTCFullYear(), q0, 1);
+}
+function startOfYearUTC(ts: number) {
+  const d = new Date(ts);
+  return Date.UTC(d.getUTCFullYear(), 0, 1);
+}
+function addDaysUTC(ts: number, n: number) {
+  return ts + n * DAY;
+}
+function addMonthsUTC(ts: number, n: number) {
+  const d = new Date(ts);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  return Date.UTC(y, m + n, 1);
+}
+function makeTicksAdaptive(domain: [number, number]) {
+  const [min, max] = domain;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+    return { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) };
+  }
+  const span = max - min;
+
+  // formatadores em pt-BR
+  const fYear = new Intl.DateTimeFormat("pt-BR", { year: "numeric", timeZone: "UTC" });
+  const fMonY = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
+  const fMon = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" });
+  const fDayMon = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+
+  // regras por abrangência
+  if (span >= 3 * 365 * DAY) {
+    // ≥3 anos → ticks anuais: "2008"
+    let t = startOfYearUTC(min);
+    const ticks: number[] = [];
+    while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 12); }
+    return { ticks, formatter: (v: number) => fYear.format(v) };
+  }
+  if (span >= 12 * 30 * DAY) {
+    // ~1–3 anos → ticks trimestrais: "jan 2008", "abr 2008", ...
+    let t = startOfQuarterUTC(min);
+    const ticks: number[] = [];
+    while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 3); }
+    return { ticks, formatter: (v: number) => fMonY.format(v) };
+  }
+  if (span >= 3 * 30 * DAY) {
+    // 3–12 meses → ticks mensais: "jan", "fev", ...
+    let t = startOfMonthUTC(min);
+    const ticks: number[] = [];
+    while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 1); }
+    return { ticks, formatter: (v: number) => fMon.format(v) };
+  }
+  if (span >= 60 * DAY) {
+    // 60–90 dias+ → quinzenal: "dd/MM"
+    let t = startOfDayUTC(min);
+    const ticks: number[] = [];
+    while (t <= max) { ticks.push(t); t = addDaysUTC(t, 15); }
+    return { ticks, formatter: (v: number) => fDayMon.format(v) };
+  }
+  if (span >= 14 * DAY) {
+    // 14–60 dias → semanal: "dd/MM"
+    let t = startOfDayUTC(min);
+    const ticks: number[] = [];
+    while (t <= max) { ticks.push(t); t = addDaysUTC(t, 7); }
+    return { ticks, formatter: (v: number) => fDayMon.format(v) };
+  }
+  // <14 dias → diário
+  {
+    let t = startOfDayUTC(min);
+    const ticks: number[] = [];
+    while (t <= max) { ticks.push(t); t = addDaysUTC(t, 1); }
+    return { ticks, formatter: (v: number) => fDayMon.format(v) };
+  }
+}
+
 export default function Page() {
   const [loading, setLoading] = useState(true);
   const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
@@ -96,7 +180,7 @@ export default function Page() {
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
 
-  const [showTickerAxis, setShowTickerAxis] = useState(true); // NOVO: alterna exibição do eixo Y
+  const [showTickerAxis, setShowTickerAxis] = useState(true); // alterna exibição do eixo Y
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -127,7 +211,6 @@ export default function Page() {
     if (e) setEndDate(e);
     if (m === "1") setOnlyMulti(true);
     if (t) {
-      // aceitar parâmetros antigos e normalizar
       setSelTickers(
         t.split(",")
           .map(v => normalizeTicker(v))
@@ -326,12 +409,12 @@ export default function Page() {
     [filteredSorted],
   ) as ScatterDatum[];
 
-  const xDomain: [number | "auto", number | "auto"] = useMemo(() => {
+  const xDomain = useMemo<[number | "auto", number | "auto"]>(() => {
     const times = filteredSorted
       .map((r) => toDateNum(r.bulletin_date))
       .filter((v): v is number => Number.isFinite(v));
     if (!times.length) return ["auto", "auto"];
-    const PAD = 5 * 24 * 60 * 60 * 1000;
+    const PAD = 5 * DAY;
     const min = Math.min(...times);
     const max = Math.max(...times);
     return [min - PAD, max + PAD];
@@ -415,7 +498,7 @@ export default function Page() {
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
 
-  // NOVO: Fechar modal com ESC
+  // Fechar modal com ESC
   useEffect(() => {
     if (!selectedBulletin) return;
     const onKey = (e: KeyboardEvent) => {
@@ -512,7 +595,6 @@ export default function Page() {
   const kpis = useMemo(() => {
     const total = tableRows.length;
     const companies = new Set(tableRows.map(r => r.company).filter(Boolean) as string[]).size;
-    // contagem de tickers para KPI pode considerar raiz, para ciclo contínuo
     const perRoot = new Map<string, number>();
     for (const r of tableRows) {
       const t = normalizeTicker(r.ticker);
@@ -521,7 +603,7 @@ export default function Page() {
     }
     const tickers = perRoot.size;
     const counts = Array.from(perRoot.values()).sort((a,b)=>a-b);
-    const med = counts.length ? (counts.length % 2 ? counts[(counts.length-1)/2] : (counts[counts.length/2-1]+counts[counts.length/2])/2) : 0;
+    const med = counts.length ? (counts.length % 2 ? counts[(counts.length-1)/2] : (counts[(counts.length/2)-1]+counts[counts.length/2])/2) : 0;
     const pctMulti = counts.length ? Math.round(100 * (counts.filter(n => n>=2).length / counts.length)) : 0;
     return { total, companies, tickers, med, pctMulti };
   }, [tableRows]);
@@ -605,6 +687,12 @@ export default function Page() {
     a.click();
     window.URL.revokeObjectURL(url);
   };
+
+  // ticks dinâmicos para eixo X
+  const xTicksMemo = useMemo(() => {
+    if (xDomain[0] === "auto" || xDomain[1] === "auto") return { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) };
+    return makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number]);
+  }, [xDomain]);
 
   return (
     <div className="p-6 space-y-4">
@@ -723,7 +811,7 @@ export default function Page() {
             />
             Apenas último
           </label>
-          {/* NOVO: Alterna o eixo Y (tickers) */}
+          {/* Alterna o eixo Y (tickers) */}
           <label className="flex items-center gap-1 text-sm">
             <input
               type="checkbox"
@@ -768,19 +856,21 @@ export default function Page() {
               dataKey="dateNum"
               type="number"
               domain={xDomain}
-              tickFormatter={(v) => fmtDayMonth(Number(v))}
+              ticks={xTicksMemo.ticks}
+              tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
               name="Data"
               tick={{ fontSize: 11 }}
+              allowDecimals={false}
             />
             <YAxis
               type="category"
-              dataKey="ticker_root"            // usa raiz para agrupar o ciclo completo
+              dataKey="ticker_root"
               name="Ticker"
               ticks={visibleTickers}
               domain={visibleTickers}
               interval={0}
               tickLine={false}
-              width={showTickerAxis ? 90 : 0}
+              width={showTickerAxis ?  ninetyWidth() : 0}
               tick={showTickerAxis ? { fontSize: 12 } : undefined}
               allowDuplicatedCategory={false}
               tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
@@ -988,3 +1078,6 @@ export default function Page() {
     </div>
   );
 }
+
+// largura do YAxis quando visível
+function ninetyWidth(){ return 90; }
