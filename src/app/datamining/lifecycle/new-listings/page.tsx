@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import {
   ResponsiveContainer,
@@ -30,6 +30,7 @@ type Row = {
   canonical_type: string | null;
   composite_key: string | null;
   body_text: string | null;
+  bulletin_type: string | null; // novo: para detectar “mixed”
 };
 
 type ChartDatum = Row & {
@@ -69,6 +70,37 @@ const typeOptions: TypeOption[] = [
 
 const defaultSelectedTypes = typeOptions.map((opt) => opt.canonical);
 
+// helpers de sort na tabela expandida
+type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "tag";
+type SortDir = "asc" | "desc";
+type RowWithTag = Row & { _mixed: boolean };
+
+function valueForSort(r: RowWithTag, key: SortKey): string {
+  switch (key) {
+    case "company":
+      return r.company ?? "";
+    case "ticker":
+      return r.ticker ?? "";
+    case "composite_key":
+      return r.composite_key ?? "";
+    case "bulletin_date":
+      return r.bulletin_date ?? "";
+    case "tag":
+      return r._mixed ? "mixed" : "";
+  }
+}
+
+function sortRows(rows: RowWithTag[], key: SortKey, dir: SortDir) {
+  const mul = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = valueForSort(a, key);
+    const bv = valueForSort(b, key);
+    if (av < bv) return -1 * mul;
+    if (av > bv) return 1 * mul;
+    return 0;
+  });
+}
+
 export default function NewListingsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +112,15 @@ export default function NewListingsPage() {
     defaultSelectedTypes,
   );
   const [selectedBody, setSelectedBody] = useState<string | null>(null);
+
+  // filtros de texto nas tabelas
+  const [qCompany, setQCompany] = useState("");
+  const [qTicker, setQTicker] = useState("");
+  const [includeMixed, setIncludeMixed] = useState(true);
+
+  // sort das tabelas
+  const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   useEffect(() => {
     setListingStartDate("");
@@ -99,12 +140,23 @@ export default function NewListingsPage() {
       }
 
       setLoading(true);
+
+      // .or para pegar canônicos + boletins mistos
+      // canonical_type.in.("A","B","C"),bulletin_type.ilike.%A%,bulletin_type.ilike.%B%,...
+      const inList = `canonical_type.in.(${selectedTypes
+        .map((s) => `"${s}"`)
+        .join(",")})`;
+      const ilikes = selectedTypes.map(
+        (t) => `bulletin_type.ilike.%${t}%`,
+      );
+      const orExpr = [inList, ...ilikes].join(",");
+
       const { data, error } = await supabase
         .from("vw_bulletins_with_canonical")
         .select(
-          "id, company, ticker, bulletin_date, canonical_type, composite_key, body_text",
+          "id, company, ticker, bulletin_date, canonical_type, composite_key, body_text, bulletin_type",
         )
-        .in("canonical_type", selectedTypes)
+        .or(orExpr)
         .order("bulletin_date", { ascending: true });
 
       if (error) {
@@ -139,9 +191,13 @@ export default function NewListingsPage() {
     fetchData();
   }, [selectedTypes]);
 
+  // dataset para gráficos: mantém SOMENTE canônicos, para preservar contagens e visual
   const chartData: ChartDatum[] = rows
     .filter(
-      (row): row is Row & { bulletin_date: string } => Boolean(row.bulletin_date),
+      (row): row is Row & { bulletin_date: string } =>
+        Boolean(row.bulletin_date) &&
+        row.canonical_type !== null &&
+        selectedTypes.includes(row.canonical_type),
     )
     .map((row) => ({
       ...row,
@@ -192,15 +248,50 @@ export default function NewListingsPage() {
     setListingEndDate(globalMaxDate);
   };
 
-  // agrupar dinamicamente por tipo
-  const groupedByType = filteredChartData.reduce<
-    Record<string, ChartDatum[]>
-  >((acc, row) => {
-    if (!row.canonical_type) return acc;
-    acc[row.canonical_type] = acc[row.canonical_type] || [];
-    acc[row.canonical_type].push(row);
-    return acc;
-  }, {});
+  // agrupamento p/ TABELA: inclui canônicos e “mixed”
+  // regra: targetType = canonical_type se igual a um selecionado
+  // senão, se bulletin_type contém algum selecionado, agrupa por esse e marca _mixed = true
+  const groupedByType = useMemo(() => {
+    const map: Record<string, RowWithTag[]> = {};
+    const selectedSet = new Set(selectedTypes);
+
+    for (const row of rows) {
+      if (!row.bulletin_date) continue;
+      if (
+        listingStartDate &&
+        row.bulletin_date < listingStartDate
+      ) {
+        continue;
+      }
+      if (
+        listingEndDate &&
+        row.bulletin_date > listingEndDate
+      ) {
+        continue;
+      }
+
+      const canonical = row.canonical_type ?? "";
+      const btUpper = (row.bulletin_type || "").toUpperCase();
+
+      // canônico puro
+      if (canonical && selectedSet.has(canonical)) {
+        const r2: RowWithTag = { ...row, _mixed: false };
+        (map[canonical] ||= []).push(r2);
+        continue;
+      }
+
+      // tentar classificar como mixed
+      for (const t of selectedTypes) {
+        const T = t.toUpperCase();
+        if (btUpper.includes(T)) {
+          const r2: RowWithTag = { ...row, _mixed: true };
+          (map[t] ||= []).push(r2);
+          break;
+        }
+      }
+    }
+    return map;
+  }, [rows, selectedTypes, listingStartDate, listingEndDate]);
 
   // ticks de início de ano
   const yearTicks: number[] = [];
@@ -286,6 +377,46 @@ export default function NewListingsPage() {
     </ResponsiveContainer>
   );
 
+  // helpers UI da tabela expandida
+  const onSort = (k: SortKey) => {
+    if (k === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(k);
+      setSortDir("asc");
+    }
+  };
+  const Th = ({
+    label,
+    k,
+  }: {
+    label: string;
+    k: SortKey;
+  }) => {
+    const active = sortKey === k;
+    const arrow = !active ? "" : sortDir === "asc" ? " ▲" : " ▼";
+    return (
+      <th
+        className="border px-2 py-1 text-left"
+        style={{ cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" }}
+        title="Clique para ordenar"
+        onClick={() => onSort(k)}
+      >
+        {label}
+        {arrow}
+      </th>
+    );
+  };
+
+  // filtros por texto na tabela
+  const matchesTableFilters = (r: RowWithTag): boolean => {
+    const qc = qCompany.trim().toUpperCase();
+    const qt = qTicker.trim().toUpperCase();
+    if (!includeMixed && r._mixed) return false;
+    if (qc && !(r.company || "").toUpperCase().includes(qc)) return false;
+    if (qt && !(r.ticker || "").toUpperCase().includes(qt)) return false;
+    return true;
+  };
+
   return (
     <div className="p-6">
       <h2 className="text-xl font-bold mb-4">New Issuers (TSXV)</h2>
@@ -315,6 +446,7 @@ export default function NewListingsPage() {
           <button
             onClick={handleResetFilters}
             className="mb-1 px-3 py-1 bg-gray-200 text-black rounded hover:bg-gray-300"
+            title="Resetar data"
           >
             🔄
           </button>
@@ -337,7 +469,7 @@ export default function NewListingsPage() {
                     setSelectedTypes((prev) =>
                       prev.includes(canonical)
                         ? prev.filter((t) => t !== canonical)
-                        : [...prev, canonical]
+                        : [...prev, canonical],
                     );
                   }}
                   className="h-4 w-4"
@@ -379,12 +511,8 @@ export default function NewListingsPage() {
                     dataKey="percent"
                     position="right"
                     formatter={(label: unknown) => {
-                      if (typeof label === "number") {
-                        return `${label.toFixed(1)}%`;
-                      }
-                      if (typeof label === "string") {
-                        return label;
-                      }
+                      if (typeof label === "number") return `${label.toFixed(1)}%`;
+                      if (typeof label === "string") return label;
                       return "";
                     }}
                   />
@@ -399,7 +527,7 @@ export default function NewListingsPage() {
         <div>⏳ Carregando...</div>
       ) : (
         <>
-          {/* scatter principal */}
+          {/* scatter principal - inalterado, só canônicos */}
           <div className="mb-2">
             <ResponsiveContainer width="100%" height={300}>
               <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
@@ -426,12 +554,7 @@ export default function NewListingsPage() {
                   width={0}
                 />
                 {yearTicks.map((ts) => (
-                  <ReferenceLine
-                    key={ts}
-                    x={ts}
-                    stroke="#999"
-                    strokeDasharray="3 3"
-                  />
+                  <ReferenceLine key={ts} x={ts} stroke="#999" strokeDasharray="3 3" />
                 ))}
                 <Tooltip
                   cursor={{ strokeDasharray: "3 3" }}
@@ -459,18 +582,20 @@ export default function NewListingsPage() {
                     return null;
                   }}
                 />
-                {scatterSeries.map((series) => (
-                  <Scatter
-                    key={series.canonical}
-                    data={series.data}
-                    fill={series.color}
-                  />
-                ))}
+                {typeOptions.map((opt) =>
+                  selectedTypes.includes(opt.canonical) ? (
+                    <Scatter
+                      key={opt.canonical}
+                      data={scatterSeries.find((s) => s.canonical === opt.canonical)?.data || []}
+                      fill={opt.color}
+                    />
+                  ) : null,
+                )}
               </ScatterChart>
             </ResponsiveContainer>
           </div>
 
-          {/* mini-scatter por tipo */}
+          {/* mini-scatter por tipo - inalterado, só canônicos */}
           <div className="flex gap-4 mt-4">
             {typeOptions.map((opt) =>
               selectedTypes.includes(opt.canonical) ? (
@@ -483,8 +608,7 @@ export default function NewListingsPage() {
                     {opt.label}
                   </h3>
                   {renderScatterChart(
-                    scatterSeries.find((s) => s.canonical === opt.canonical)
-                      ?.data || [],
+                    scatterSeries.find((s) => s.canonical === opt.canonical)?.data || [],
                     opt.color,
                   )}
                 </div>
@@ -492,57 +616,111 @@ export default function NewListingsPage() {
             )}
           </div>
 
-          {/* tabela agrupada por tipo */}
+          {/* tabela agrupada por tipo com “mixed”, filtros e sort */}
           <div className="mt-6 border rounded-lg p-4 bg-gray-50">
             <h2 className="text-lg font-semibold mb-2">Resultados</h2>
             {Object.keys(groupedByType).length === 0 ? (
               <p className="text-gray-400">Nenhuma empresa encontrada.</p>
             ) : (
-              Object.entries(groupedByType).map(([type, rows]) => (
-                <details key={type} className="mb-4 border rounded">
-                  <summary className="cursor-pointer bg-gray-200 px-2 py-1 font-medium">
-                    {type} ({rows.length})
-                  </summary>
-                  <table className="w-full text-sm border table-fixed">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="border px-2 py-1 text-left w-[40%]">
-                          Empresa
-                        </th>
-                        <th className="border px-2 py-1 text-left w-[15%]">
-                          Ticker
-                        </th>
-                        <th className="border px-2 py-1 text-left w-[25%]">
-                          Composite Key
-                        </th>
-                        <th className="border px-2 py-1 text-left w-[20%]">Data</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row) => (
-                        <tr key={row.id} className="hover:bg-gray-50">
-                          <td className="border px-2 py-1 w-[40%]">{row.company}</td>
-                          <td className="border px-2 py-1 w-[15%]">{row.ticker}</td>
-                          <td className="border px-2 py-1 w-[25%]">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedBody(row.body_text)}
-                              className="text-blue-600 hover:underline"
-                            >
-                              {row.composite_key ?? "—"}
-                            </button>
-                          </td>
-                          <td className="border px-2 py-1 w-[20%]">
-                            {row.bulletin_date}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </details>
-              ))
+              typeOptions
+                .filter((opt) => groupedByType[opt.canonical]?.length)
+                .map((opt) => {
+                  const allRows = groupedByType[opt.canonical] || [];
+                  const filtered = allRows.filter(matchesTableFilters);
+                  const total = allRows.length;
+                  const mixedCount = allRows.filter((r) => r._mixed).length;
+                  const sorted = sortRows(filtered, sortKey, sortDir);
+
+                  return (
+                    <details key={opt.canonical} className="mb-4 border rounded" open>
+                      <summary className="cursor-pointer bg-gray-200 px-2 py-1 font-medium">
+                        {opt.canonical} ({total})
+                        {mixedCount ? (
+                          <span
+                            className="ml-2 inline-flex items-center rounded border px-2 py-0.5 text-xs opacity-80"
+                            aria-label={`mixed ${mixedCount}`}
+                          >
+                            mixed {mixedCount}
+                          </span>
+                        ) : null}
+                      </summary>
+
+                      {/* filtros da tabela */}
+                      <div className="flex items-center gap-4 px-2 py-2">
+                        <div className="flex items-center gap-2">
+                          <span>Empresa</span>
+                          <input
+                            value={qCompany}
+                            onChange={(e) => setQCompany(e.target.value)}
+                            placeholder="filtrar..."
+                            className="border rounded px-2 py-0.5"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span>Ticker</span>
+                          <input
+                            value={qTicker}
+                            onChange={(e) => setQTicker(e.target.value)}
+                            placeholder="filtrar..."
+                            className="border rounded px-2 py-0.5"
+                          />
+                        </div>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={includeMixed}
+                            onChange={(e) => setIncludeMixed(e.target.checked)}
+                          />
+                          <span>Incluir mixed</span>
+                        </label>
+                      </div>
+
+                      <table className="w-full text-sm border table-fixed">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <Th label="Empresa" k="company" />
+                            <Th label="Ticker" k="ticker" />
+                            <Th label="Composite Key" k="composite_key" />
+                            <Th label="Data" k="bulletin_date" />
+                            <Th label="Tag" k="tag" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sorted.map((row) => (
+                            <tr key={row.id} className="hover:bg-gray-50">
+                              <td className="border px-2 py-1">{row.company}</td>
+                              <td className="border px-2 py-1">{row.ticker}</td>
+                              <td className="border px-2 py-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedBody(row.body_text)}
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {row.composite_key ?? "—"}
+                                </button>
+                              </td>
+                              <td className="border px-2 py-1">
+                                {row.bulletin_date ?? "—"}
+                              </td>
+                              <td className="border px-2 py-1">
+                                {row._mixed ? (
+                                  <span className="inline-flex items-center rounded border px-2 py-0.5 text-xs opacity-80">
+                                    mixed
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  );
+                })
             )}
           </div>
+
           {selectedBody && (
             <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
               <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
@@ -565,4 +743,3 @@ export default function NewListingsPage() {
     </div>
   );
 }
-
