@@ -60,6 +60,7 @@ const defaultSelectedTypes = typeOptions.map(o => o.canonical);
 // ---------------- sort helpers p/ tabela
 type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "tag";
 type SortDir = "asc" | "desc";
+type DupMode = "all" | "dup" | "unique";
 
 function valueForSort(r: RowWithTag, key: SortKey): string {
   switch (key) {
@@ -95,11 +96,12 @@ export default function NewListingsPage() {
   const [selectedBody,  setSelectedBody]  = useState<string | null>(null);
 
   // filtros de tabela (linha de inputs abaixo do header)
-  const [fCompany, setFCompany]       = useState("");
-  const [fTicker,  setFTicker]        = useState("");
-  const [fCK,      setFCK]            = useState("");
-  const [fDate,    setFDate]          = useState(""); // YYYY ou YYYY-MM
-  const [fTag,     setFTag]           = useState(""); // digite “mixed” para só- mixed
+  const [fCompany, setFCompany] = useState("");
+  const [fTicker,  setFTicker]  = useState("");
+  const [fCK,      setFCK]      = useState("");
+  const [fDate,    setFDate]    = useState(""); // YYYY ou YYYY-MM
+  const [fTag,     setFTag]     = useState(""); // digite “mixed” para só- mixed
+  const [dupMode,  setDupMode]  = useState<DupMode>("all");
 
   // sort da tabela
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
@@ -296,18 +298,15 @@ export default function NewListingsPage() {
     );
   };
 
-  // filtros por coluna (sem inventar novos controles fora do header)
+  // filtros por coluna
   const matchDateText = (d: string | null, q: string): boolean => {
     if (!q) return true;
     if (!d) return false;
-    // YYYY
-    if (/^\d{4}$/.test(q)) return d.startsWith(q);
-    // YYYY-MM
-    if (/^\d{4}-\d{2}$/.test(q)) return d.startsWith(q);
-    // fallback contém
+    if (/^\d{4}$/.test(q))       return d.startsWith(q); // YYYY
+    if (/^\d{4}-\d{2}$/.test(q)) return d.startsWith(q); // YYYY-MM
     return d.includes(q);
   };
-  const matchesTableFilters = (r: RowWithTag): boolean => {
+  const baseRowFilter = (r: RowWithTag): boolean => {
     if (fCompany && !(r.company || "").toUpperCase().includes(fCompany.toUpperCase())) return false;
     if (fTicker  && !(r.ticker  || "").toUpperCase().includes(fTicker.toUpperCase()))   return false;
     if (fCK      && !(r.composite_key || "").toUpperCase().includes(fCK.toUpperCase())) return false;
@@ -454,7 +453,7 @@ export default function NewListingsPage() {
             )}
           </div>
 
-          {/* tabela agrupada por tipo com “mixed” + filtros NOS HEADERS */}
+          {/* tabela agrupada por tipo com “mixed” + filtros NOS HEADERS + filtro de duplicados */}
           <div className="mt-6 border rounded-lg p-4 bg-gray-50">
             <h2 className="text-lg font-semibold mb-2">Resultados</h2>
 
@@ -462,15 +461,36 @@ export default function NewListingsPage() {
               .filter((opt) => (groupedByType[opt.canonical] || []).length > 0)
               .map((opt) => {
                 const allRows = groupedByType[opt.canonical] || [];
-                const total = allRows.length;
-                const mixedCount = allRows.filter(r => r._mixed).length;
-                const filtered = allRows.filter(matchesTableFilters);
-                const sorted = sortRows(filtered, sortKey, sortDir);
+                const totalGroup = allRows.length;
+                const mixedCount  = allRows.filter(r => r._mixed).length;
+
+                // set de tickers duplicados deste grupo
+                const counts = new Map<string, number>();
+                for (const r of allRows) {
+                  const t = (r.ticker || "").toUpperCase();
+                  if (!t) continue;
+                  counts.set(t, (counts.get(t) || 0) + 1);
+                }
+                const dupTickers = new Set(
+                  Array.from(counts.entries()).filter(([, c]) => c >= 2).map(([t]) => t)
+                );
+
+                // filtros base + modo duplicados
+                const filteredBase = allRows.filter(baseRowFilter);
+                const filtered =
+                  dupMode === "all"
+                    ? filteredBase
+                    : filteredBase.filter((r) => {
+                        const t = (r.ticker || "").toUpperCase();
+                        return dupMode === "dup" ? dupTickers.has(t) : !dupTickers.has(t);
+                      });
+
+                const sorted   = sortRows(filtered, sortKey, sortDir);
 
                 return (
-                  <details key={opt.canonical} className="mb-4 border rounded" open>
+                  <details key={opt.canonical} className="mb-4 border rounded">
                     <summary className="cursor-pointer bg-gray-200 px-2 py-1 font-medium">
-                      {opt.canonical} ({total})
+                      {opt.canonical} ({totalGroup})
                       {mixedCount ? (
                         <span className="ml-2 inline-flex items-center rounded border px-2 py-0.5 text-xs opacity-80">
                           mixed {mixedCount}
@@ -478,7 +498,15 @@ export default function NewListingsPage() {
                       ) : null}
                     </summary>
 
-                    <table className="w-full text-sm border table-fixed">
+                    <table className="w-full text-sm border" style={{ borderCollapse: "collapse" }}>
+                      <colgroup>
+                        <col style={{ width: "40%" }} /> {/* Empresa */}
+                        <col style={{ width: "15%" }} /> {/* Ticker */}
+                        <col style={{ width: "25%" }} /> {/* Composite Key */}
+                        <col style={{ width: "15%" }} /> {/* Data */}
+                        <col style={{ width: "5%"  }} /> {/* Tag  */}
+                      </colgroup>
+
                       <thead>
                         <tr className="bg-gray-100">
                           <Th label="Empresa"       k="company" />
@@ -487,29 +515,75 @@ export default function NewListingsPage() {
                           <Th label="Data"          k="bulletin_date" />
                           <Th label="Tag"           k="tag" />
                         </tr>
+
+                        {/* linha de filtros */}
                         <tr className="bg-white">
-                          <th className="border px-2 py-1">
-                            <input className="w-full border px-2 py-0.5" placeholder="Filtrar"
-                              value={fCompany} onChange={(e) => setFCompany(e.target.value)} />
+                          <th className="border px-2 py-1" style={{ verticalAlign: "middle" }}>
+                            <input
+                              className="w-full border px-2 py-0.5"
+                              style={{ boxSizing: "border-box" }}
+                              placeholder="Filtrar"
+                              value={fCompany}
+                              onChange={(e) => setFCompany(e.target.value)}
+                            />
                           </th>
-                          <th className="border px-2 py-1">
-                            <input className="w-full border px-2 py-0.5" placeholder="Filtrar"
-                              value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
+
+                          {/* Ticker: grid 1fr auto com seletor de duplicados */}
+                          <th className="border px-2 py-1" style={{ verticalAlign: "middle" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6 }}>
+                              <input
+                                className="border px-2 py-0.5"
+                                style={{ width: "100%", boxSizing: "border-box" }}
+                                placeholder="Filtrar"
+                                value={fTicker}
+                                onChange={(e) => setFTicker(e.target.value)}
+                              />
+                              <select
+                                className="border px-1 py-0.5 text-xs"
+                                value={dupMode}
+                                onChange={(e) => setDupMode(e.target.value as DupMode)}
+                                title="Duplicados"
+                                style={{ height: 26 }}
+                              >
+                                <option value="all">Todos</option>
+                                <option value="dup">Duplicados</option>
+                                <option value="unique">Únicos</option>
+                              </select>
+                            </div>
                           </th>
-                          <th className="border px-2 py-1">
-                            <input className="w-full border px-2 py-0.5" placeholder="Filtrar"
-                              value={fCK} onChange={(e) => setFCK(e.target.value)} />
+
+                          <th className="border px-2 py-1" style={{ verticalAlign: "middle" }}>
+                            <input
+                              className="w-full border px-2 py-0.5"
+                              style={{ boxSizing: "border-box" }}
+                              placeholder="Filtrar"
+                              value={fCK}
+                              onChange={(e) => setFCK(e.target.value)}
+                            />
                           </th>
-                          <th className="border px-2 py-1">
-                            <input className="w-full border px-2 py-0.5" placeholder="YYYY ou YYYY-MM"
-                              value={fDate} onChange={(e) => setFDate(e.target.value)} />
+
+                          <th className="border px-2 py-1" style={{ verticalAlign: "middle" }}>
+                            <input
+                              className="w-full border px-2 py-0.5"
+                              style={{ boxSizing: "border-box" }}
+                              placeholder="YYYY ou YYYY-MM"
+                              value={fDate}
+                              onChange={(e) => setFDate(e.target.value)}
+                            />
                           </th>
-                          <th className="border px-2 py-1">
-                            <input className="w-full border px-2 py-0.5" placeholder="Filtrar"
-                              value={fTag} onChange={(e) => setFTag(e.target.value)} />
+
+                          <th className="border px-2 py-1" style={{ verticalAlign: "middle" }}>
+                            <input
+                              className="w-full border px-2 py-0.5"
+                              style={{ boxSizing: "border-box" }}
+                              placeholder="Filtrar"
+                              value={fTag}
+                              onChange={(e) => setFTag(e.target.value)}
+                            />
                           </th>
                         </tr>
                       </thead>
+
                       <tbody>
                         {sorted.map((row) => (
                           <tr key={row.id} className="hover:bg-gray-50">
