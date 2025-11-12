@@ -60,6 +60,7 @@ const defaultSelectedTypes = typeOptions.map(o => o.canonical);
 // ---------------- sort helpers p/ tabela
 type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "tag";
 type SortDir = "asc" | "desc";
+type DupMode = "all" | "dup" | "unique";
 
 function valueForSort(r: RowWithTag, key: SortKey): string {
   switch (key) {
@@ -95,11 +96,12 @@ export default function NewListingsPage() {
   const [selectedBody,  setSelectedBody]  = useState<string | null>(null);
 
   // filtros de tabela (linha de inputs abaixo do header)
-  const [fCompany, setFCompany]       = useState("");
-  const [fTicker,  setFTicker]        = useState("");
-  const [fCK,      setFCK]            = useState("");
-  const [fDate,    setFDate]          = useState(""); // YYYY ou YYYY-MM
-  const [fTag,     setFTag]           = useState(""); // digite “mixed” para só- mixed
+  const [fCompany, setFCompany] = useState("");
+  const [fTicker,  setFTicker]  = useState("");
+  const [fCK,      setFCK]      = useState("");
+  const [fDate,    setFDate]    = useState(""); // YYYY ou YYYY-MM
+  const [fTag,     setFTag]     = useState(""); // digite “mixed” para apenas mixed
+  const [dupMode,  setDupMode]  = useState<DupMode>("all"); // Todos | Duplicados | Únicos
 
   // sort da tabela
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
@@ -296,18 +298,15 @@ export default function NewListingsPage() {
     );
   };
 
-  // filtros por coluna (sem inventar novos controles fora do header)
+  // filtros por coluna
   const matchDateText = (d: string | null, q: string): boolean => {
     if (!q) return true;
     if (!d) return false;
-    // YYYY
-    if (/^\d{4}$/.test(q)) return d.startsWith(q);
-    // YYYY-MM
-    if (/^\d{4}-\d{2}$/.test(q)) return d.startsWith(q);
-    // fallback contém
+    if (/^\d{4}$/.test(q))       return d.startsWith(q);     // YYYY
+    if (/^\d{4}-\d{2}$/.test(q)) return d.startsWith(q);     // YYYY-MM
     return d.includes(q);
   };
-  const matchesTableFilters = (r: RowWithTag): boolean => {
+  const matchesTableFilters = (r: RowWithTag, dupTickers: Set<string>): boolean => {
     if (fCompany && !(r.company || "").toUpperCase().includes(fCompany.toUpperCase())) return false;
     if (fTicker  && !(r.ticker  || "").toUpperCase().includes(fTicker.toUpperCase()))   return false;
     if (fCK      && !(r.composite_key || "").toUpperCase().includes(fCK.toUpperCase())) return false;
@@ -316,6 +315,9 @@ export default function NewListingsPage() {
       const tag = r._mixed ? "mixed" : "";
       if (!tag.toUpperCase().includes(fTag.toUpperCase())) return false;
     }
+    const t = (r.ticker || "").toUpperCase();
+    if (dupMode === "dup"    && !dupTickers.has(t)) return false;
+    if (dupMode === "unique" &&  dupTickers.has(t)) return false;
     return true;
   };
 
@@ -362,11 +364,11 @@ export default function NewListingsPage() {
                 />
                 <label htmlFor={opt.value} className="flex items-center gap-2">
                   <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: opt.color }} />
-                  {opt.label} ({typeCounts[opt.canonical] ?? 0})
+                  {opt.label} ({(filteredChartData.filter(r => r.canonical_type === opt.canonical)).length})
                 </label>
               </div>
             ))}
-            <div className="mt-2 font-semibold text-sm text-right border-t pt-1">Total: {total}</div>
+            <div className="mt-2 font-semibold text-sm text-right border-t pt-1">Total: {filteredChartData.length}</div>
           </div>
 
           <div className="flex-1 min-w-[250px] h-[160px]">
@@ -454,7 +456,7 @@ export default function NewListingsPage() {
             )}
           </div>
 
-          {/* tabela agrupada por tipo com “mixed” + filtros NOS HEADERS */}
+          {/* tabela agrupada por tipo com “mixed” + filtros NOS HEADERS + filtro de duplicados */}
           <div className="mt-6 border rounded-lg p-4 bg-gray-50">
             <h2 className="text-lg font-semibold mb-2">Resultados</h2>
 
@@ -462,15 +464,27 @@ export default function NewListingsPage() {
               .filter((opt) => (groupedByType[opt.canonical] || []).length > 0)
               .map((opt) => {
                 const allRows = groupedByType[opt.canonical] || [];
-                const total = allRows.length;
-                const mixedCount = allRows.filter(r => r._mixed).length;
-                const filtered = allRows.filter(matchesTableFilters);
-                const sorted = sortRows(filtered, sortKey, sortDir);
+                const totalGroup = allRows.length;
+                const mixedCount  = allRows.filter(r => r._mixed).length;
+
+                // set de tickers duplicados deste grupo
+                const counts = new Map<string, number>();
+                for (const r of allRows) {
+                  const t = (r.ticker || "").toUpperCase();
+                  if (!t) continue;
+                  counts.set(t, (counts.get(t) || 0) + 1);
+                }
+                const dupTickers = new Set(
+                  Array.from(counts.entries()).filter(([, c]) => c >= 2).map(([t]) => t)
+                );
+
+                const filtered = allRows.filter(r => matchesTableFilters(r, dupTickers));
+                const sorted   = sortRows(filtered, sortKey, sortDir);
 
                 return (
-                  <details key={opt.canonical} className="mb-4 border rounded" open>
+                  <details key={opt.canonical} className="mb-4 border rounded">
                     <summary className="cursor-pointer bg-gray-200 px-2 py-1 font-medium">
-                      {opt.canonical} ({total})
+                      {opt.canonical} ({totalGroup})
                       {mixedCount ? (
                         <span className="ml-2 inline-flex items-center rounded border px-2 py-0.5 text-xs opacity-80">
                           mixed {mixedCount}
@@ -493,8 +507,20 @@ export default function NewListingsPage() {
                               value={fCompany} onChange={(e) => setFCompany(e.target.value)} />
                           </th>
                           <th className="border px-2 py-1">
-                            <input className="w-full border px-2 py-0.5" placeholder="Filtrar"
-                              value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
+                            <div className="flex items-center gap-2">
+                              <input className="flex-1 border px-2 py-0.5" placeholder="Filtrar"
+                                value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
+                              <select
+                                className="border px-1 py-0.5 text-xs"
+                                value={dupMode}
+                                onChange={(e) => setDupMode(e.target.value as DupMode)}
+                                title="Duplicados"
+                              >
+                                <option value="all">Todos</option>
+                                <option value="dup">Duplicados</option>
+                                <option value="unique">Únicos</option>
+                              </select>
+                            </div>
                           </th>
                           <th className="border px-2 py-1">
                             <input className="w-full border px-2 py-0.5" placeholder="Filtrar"
@@ -543,7 +569,7 @@ export default function NewListingsPage() {
 
           {selectedBody && (
             <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30">
-              <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+              <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-height[80vh] overflow-y-auto p-6">
                 <button
                   type="button"
                   className="absolute top-3 right-3 text-sm text-gray-600 hover:text-gray-800"
