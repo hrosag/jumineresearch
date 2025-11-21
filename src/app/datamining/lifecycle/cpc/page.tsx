@@ -11,6 +11,7 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  Brush, // <-- NEW
 } from "recharts";
 
 const supabase = createClient(
@@ -196,6 +197,28 @@ export default function Page() {
 
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
+
+  // ---- NEW: navegador (accordion) com Brush ----
+  const [showNavigator, setShowNavigator] = useState(false);
+  const xValues = useMemo(() => {
+    const xs = rows
+      .map(r => toDateNum(r.bulletin_date))
+      .filter((v): v is number => Number.isFinite(v))
+      .sort((a, b) => a - b);
+    return Array.from(new Set(xs));
+  }, [rows]);
+  function idxFromISO(iso?: string) {
+    if (!iso || !xValues.length) return 0;
+    const ts = toDateNum(iso);
+    if (!Number.isFinite(ts)) return 0;
+    // binary search lower_bound
+    let lo = 0, hi = xValues.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xValues[mid] < ts) lo = mid + 1; else hi = mid;
+    }
+    return Math.max(0, Math.min(xValues.length - 1, lo));
+  }
 
   useEffect(() => {
     const q = new URLSearchParams(location.search);
@@ -483,6 +506,8 @@ export default function Page() {
     setFDate("");
     setFType("");
     setTableLimit(PAGE);
+    // opcional: fechar o navegador ao resetar
+    setShowNavigator(false);
   };
 
   const openBulletinModal = async (row: Row) => {
@@ -868,6 +893,15 @@ export default function Page() {
             />
             Mostrar tickers no eixo Y
           </label>
+
+          {/* NOVO: alternar navegador (Brush) */}
+          <button
+            className="border rounded px-3 py-1"
+            onClick={() => setShowNavigator(v => !v)}
+            title="Mostrar/ocultar o navegador de tempo (Brush)"
+          >
+            {showNavigator ? "Esconder navegador" : "Mostrar navegador"}
+          </button>
         </div>
       </div>
 
@@ -895,61 +929,85 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Gráfico */}
-      <div className="w-full border rounded p-2" style={{ height: chartHeight }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart>
-            <CartesianGrid />
-            <XAxis
-              dataKey="dateNum"
-              type="number"
-              domain={xDomain}
-              ticks={xTicksMemo.ticks}
-              tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
-              name="Data"
-              tick={{ fontSize: 11 }}
-              allowDecimals={false}
-            />
-            <YAxis
-              type="category"
-              dataKey="ticker_root"
-              name="Ticker"
-              ticks={visibleTickers}
-              interval={0}
-              tickLine={false}
-              width={showTickerAxis ? ninetyWidth() : 0}
-              tick={showTickerAxis ? { fontSize: 12 } : undefined}
-              allowDuplicatedCategory={false}
-              tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
-              hide={!showTickerAxis}
-            />
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                const d = payload[0]?.payload as ScatterDatum | undefined;
-                if (!d) return null;
-                const date = d.dateISO || fmtUTC(d.dateNum);
-                return (
-                  <div className="bg-white p-2 border rounded shadow text-sm">
-                    <div><strong>Data:</strong> {date}</div>
-                    <div><strong>Empresa:</strong> {d.company || "—"}</div>
-                    <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
-                    <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
-                    <div className="mt-1 text-xs text-gray-600">
-                      Clique: filtra empresa | Shift+Clique: isola este boletim
+      {/* Gráfico + "acordeão" p/ Brush */}
+      <div
+        className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        style={{ maxHeight: (showNavigator ? chartHeight + 80 : chartHeight) }}
+      >
+        <div className="p-2" style={{ height: chartHeight }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart>
+              <CartesianGrid />
+              <XAxis
+                dataKey="dateNum"
+                type="number"
+                domain={xDomain}
+                ticks={xTicksMemo.ticks}
+                tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
+                name="Data"
+                tick={{ fontSize: 11 }}
+                allowDecimals={false}
+              />
+
+              {/* Brush condicional (retângulo-navegador) */}
+              {showNavigator && xValues.length >= 2 && (
+                <Brush
+                  dataKey="dateNum"
+                  height={28}
+                  travellerWidth={8}
+                  startIndex={Math.min(idxFromISO(startDate), xValues.length - 2)}
+                  endIndex={Math.max(idxFromISO(endDate), 1)}
+                  onChange={(range: any) => {
+                    if (!range || range.startIndex == null || range.endIndex == null) return;
+                    const s = xValues[Math.min(range.startIndex, range.endIndex)];
+                    const e = xValues[Math.max(range.startIndex, range.endIndex)];
+                    setStartDate(fmtUTC(s));
+                    setEndDate(fmtUTC(e));
+                  }}
+                />
+              )}
+
+              <YAxis
+                type="category"
+                dataKey="ticker_root"
+                name="Ticker"
+                ticks={visibleTickers}
+                interval={0}
+                tickLine={false}
+                width={showTickerAxis ? ninetyWidth() : 0}
+                tick={showTickerAxis ? { fontSize: 12 } : undefined}
+                allowDuplicatedCategory={false}
+                tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
+                hide={!showTickerAxis}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  const d = payload[0]?.payload as ScatterDatum | undefined;
+                  if (!d) return null;
+                  const date = d.dateISO || fmtUTC(d.dateNum);
+                  return (
+                    <div className="bg-white p-2 border rounded shadow text-sm">
+                      <div><strong>Data:</strong> {date}</div>
+                      <div><strong>Empresa:</strong> {d.company || "—"}</div>
+                      <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
+                      <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        Clique: filtra empresa | Shift+Clique: isola este boletim
+                      </div>
                     </div>
-                  </div>
-                );
-              }}
-            />
-            <Scatter
-              data={chartDataVis}
-              onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)}
-            />
-          </ScatterChart>
-        </ResponsiveContainer>
+                  );
+                }}
+              />
+              <Scatter
+                data={chartDataVis}
+                onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)}
+              />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
         {selTickers.length > 0 && chartDataVis.length === 0 && (
-          <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
+          <div className="text-xs text-gray-600 mt-1 px-2 pb-2">Sem eventos para a seleção no período.</div>
         )}
       </div>
       {!loading && filtered.length === 0 && (
