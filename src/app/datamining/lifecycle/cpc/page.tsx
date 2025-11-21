@@ -13,6 +13,7 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
+  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -172,7 +173,10 @@ export default function Page() {
 
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]); // value = raiz normalizada
-  const [onlyMulti, setOnlyMulti] = useState(false);
+
+  // filtros por quantidade de boletins por ticker-root
+  const [onlyMulti, setOnlyMulti] = useState(false);  // ≥2 tipos
+  const [onlySingle, setOnlySingle] = useState(false); // =1 tipo
 
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
@@ -199,9 +203,8 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
-  // Toggle para abrir/fechar o gráfico Scatter
+  // Toggle para abrir/fechar o gráfico Scatter e o bloco de estatísticas
   const [showChart, setShowChart] = useState(true);
-  // Toggle para abrir/fechar o bloco de estatísticas
   const [showStats, setShowStats] = useState(true);
 
   useEffect(() => {
@@ -372,10 +375,13 @@ export default function Page() {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      if (onlyMulti && (!tRoot || (tickerCount.get(tRoot) ?? 0) < 2)) return false;
+
+      const cnt = tRoot ? (tickerCount.get(tRoot) ?? 0) : 0;
+      if (onlySingle && cnt !== 1) return false;
+      if (onlyMulti && cnt < 2) return false;
       return true;
     });
-  }, [rowsInWindow, selCompanies, selTickers, onlyMulti, tickerCount]);
+  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, tickerCount]);
 
   // first/last por raiz
   const filtered = useMemo(() => {
@@ -479,6 +485,7 @@ export default function Page() {
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
     setOnlyMulti(false);
+    setOnlySingle(false);
     setOnlyFirst(false);
     setOnlyLast(false);
     setShowTickerAxis(true);
@@ -602,6 +609,7 @@ export default function Page() {
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
   useEffect(() => { setTableLimit(PAGE); }, [filtered.length, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
 
+  // KPIs (sem mediana e %)
   const kpis = useMemo(() => {
     const total = tableRows.length;
     const companies = new Set(tableRows.map(r => r.company).filter(Boolean) as string[]).size;
@@ -612,19 +620,10 @@ export default function Page() {
       perRoot.set(t, (perRoot.get(t) ?? 0) + 1);
     }
     const tickers = perRoot.size;
-    const counts = Array.from(perRoot.values()).sort((a,b)=>a-b);
-    const med = counts.length
-      ? (counts.length % 2
-          ? counts[(counts.length-1)/2]
-          : (counts[(counts.length/2)-1]+counts[counts.length/2])/2)
-      : 0;
-    const pctMulti = counts.length ? Math.round(100 * (counts.filter(n => n>=2).length / counts.length)) : 0;
-    return { total, companies, tickers, med, pctMulti };
+    return { total, companies, tickers };
   }, [tableRows]);
 
-  // -------- Estatísticas (empresas com 1 boletim vs ≥2) ----------
-  // Base de estatística respeita Data/Company/Ticker selecionados,
-  // mas ignora onlyMulti/onlyFirst/onlyLast para não distorcer.
+  // -------- Estatísticas (empresas total, =1 e ≥2) ----------
   const statsBase = useMemo(() => {
     const cset = new Set(selCompanies.map(o => o.value));
     const tset = new Set(selTickers.map(o => o.value));
@@ -646,9 +645,12 @@ export default function Page() {
     for (const cnt of perCompany.values()) {
       if (cnt === 1) one++; else if (cnt >= 2) ge2++;
     }
+    const total = one + ge2;
+    // ordem: Total, =1, ≥2
     return [
-      { group: "=1", count: one },
-      { group: "≥2", count: ge2 },
+      { group: "Total", count: total, label: "Total de empresas" },
+      { group: "=1", count: one, label: "Apenas 1 boletim" },
+      { group: "≥2", count: ge2, label: "Dois ou mais boletins" },
     ];
   }, [statsBase]);
 
@@ -806,13 +808,11 @@ export default function Page() {
         </div>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs enxutos */}
       <div className="flex flex-wrap gap-3 text-sm">
         <div className="border rounded px-2 py-1">Empresas: <strong>{kpis.companies}</strong></div>
         <div className="border rounded px-2 py-1">Tickers: <strong>{kpis.tickers}</strong></div>
         <div className="border rounded px-2 py-1">Boletins: <strong>{kpis.total}</strong></div>
-        <div className="border rounded px-2 py-1">Mediana boletins/ticker: <strong>{kpis.med}</strong></div>
-        <div className="border rounded px-2 py-1">% tickers ≥2: <strong>{kpis.pctMulti}%</strong></div>
       </div>
 
       <div className="flex items-center text-sm text-gray-600">
@@ -874,14 +874,25 @@ export default function Page() {
           <span className="text-sm pl-2">
             {visibleTickers.length}/{tickerOrder.length || 0}
           </span>
+
+          {/* novos filtros por quantidade */}
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={onlySingle}
+              onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }}
+            />
+            Somente tickers com 1 tipo de boletim
+          </label>
           <label className="flex items-center gap-1 text-sm">
             <input
               type="checkbox"
               checked={onlyMulti}
-              onChange={(e) => setOnlyMulti(e.target.checked)}
+              onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }}
             />
-            Somente tickers com ≥2 boletins
+            Somente tickers com ≥2 tipos de boletins
           </label>
+
           <label className="flex items-center gap-1 text-sm">
             <input
               type="checkbox"
@@ -912,9 +923,9 @@ export default function Page() {
           <button
             className="border rounded px-3 py-1"
             onClick={() => setShowChart(v => !v)}
-            title="Abrir/fechar o gráfico de dispersão"
+            title="Abrir/fechar o Scatter"
           >
-            {showChart ? "Fechar gráfico" : "Abrir gráfico"}
+            {showChart ? "Fechar Scatter" : "Abrir Scatter"}
           </button>
           <button
             className="border rounded px-3 py-1"
@@ -1014,16 +1025,16 @@ export default function Page() {
         </div>
       </div>
 
-      {/* NOVO BLOCO: Estatísticas (abrir/fechar) */}
+      {/* BLOCO: Estatísticas (abrir/fechar) */}
       <div
         className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
-        style={{ maxHeight: showStats ? 240 : 0 }}
+        style={{ maxHeight: showStats ? 260 : 0 }}
         aria-hidden={!showStats}
       >
-        <div className="p-3" style={{ height: 220 }}>
+        <div className="p-3" style={{ height: 240 }}>
           <div className="text-sm text-gray-700 mb-2">
-            Empresas com 1 boletim versus ≥2 no período selecionado
-            {selCompanies.length || selTickers.length ? " (respeitando filtros de Company/Ticker)" : ""}.
+            Empresas no período selecionado (Total, apenas 1 boletim, ≥2 boletins)
+            {selCompanies.length || selTickers.length ? " — respeitando filtros de Company/Ticker" : ""}.
           </div>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={statsData}>
@@ -1031,10 +1042,12 @@ export default function Page() {
               <XAxis dataKey="group" tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
               <Tooltip
-                formatter={(v: number) => [String(v), "Empresas"]}
-                labelFormatter={(l: string) => (l === "=1" ? "Apenas 1 boletim" : "Dois ou mais boletins")}
+                formatter={(v: number, _n, p: any) => [String(v), (p?.payload?.label ?? "Empresas")]}
+                labelFormatter={(l: string) => l}
               />
-              <Bar dataKey="count" />
+              <Bar dataKey="count">
+                <LabelList dataKey="count" position="top" />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1042,14 +1055,14 @@ export default function Page() {
 
       {!loading && filtered.length === 0 && (
         <div className="text-sm text-gray-600 mt-2">
-          Sem resultados. Ajuste datas, empresa/ticker ou “Somente ≥2”.
+          Sem resultados. Ajuste datas, empresa/ticker ou filtros “Somente =1/≥2”.
         </div>
       )}
 
       {/* Tabela */}
       <div className="space-y-2" ref={tableRef}>
         <h2 className="text-xl font-semibold">Resultados</h2>
-        <div className="border rounded overflow-auto max-h=[70vh]">
+        <div className="border rounded overflow-auto max-h-[70vh]">
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
@@ -1213,6 +1226,3 @@ export default function Page() {
     </div>
   );
 }
-
-// largura do YAxis quando visível
-function ninetyWidth(){ return 90; }
