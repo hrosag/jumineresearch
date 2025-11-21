@@ -13,7 +13,6 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
-  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -160,6 +159,86 @@ function makeTicksAdaptive(domain: [number, number]) {
   }
 }
 
+// -------- Tipos p/ eventos (anúncio + confirmação) ----------
+type Event = {
+  ticker_root: string;
+  company: string;
+  canonical_type: string;
+  event_date: string;      // ISO do 1º
+  confirm_date?: string;   // ISO do 2º (se houver)
+  bulletins: Row[];        // boletins usados
+};
+
+function isConfirmText(txt: string): boolean {
+  const s = txt.toLowerCase();
+  return (
+    s.includes("upon confirmation of closing") ||
+    s.includes("confirmation of closing") ||
+    s.includes("commence trading") ||
+    s.includes("will commence trading") ||
+    s.includes("sera admise à la négociation") ||
+    s.includes("confirmation de la clôture")
+  );
+}
+
+function foldCpcEvents(rows: Row[]): Event[] {
+  const byKey = new Map<string, Row[]>();
+  for (const r of rows) {
+    if (!r.bulletin_date) continue;
+    const ctype = (r.canonical_type ?? r.bulletin_type ?? "").toUpperCase();
+    if (ctype !== CPC_CANONICAL) continue;
+    const k = `${normalizeTicker(r.ticker)}|${ctype}`;
+    const arr = byKey.get(k) ?? [];
+    arr.push(r);
+    byKey.set(k, arr);
+  }
+
+  const out: Event[] = [];
+  for (const arr0 of byKey.values()) {
+    const arr = [...arr0].sort((a,b)=>toDateNum(a.bulletin_date)-toDateNum(b.bulletin_date));
+    if (arr.length === 1) {
+      const r = arr[0];
+      out.push({
+        ticker_root: normalizeTicker(r.ticker),
+        company: r.company ?? "",
+        canonical_type: (r.canonical_type ?? r.bulletin_type ?? "").toUpperCase(),
+        event_date: r.bulletin_date!,
+        bulletins: [r],
+      });
+      continue;
+    }
+    let i = 0;
+    while (i < arr.length) {
+      const a = arr[i];
+      const b = arr[i+1];
+      if (b && (toDateNum(b.bulletin_date) - toDateNum(a.bulletin_date)) <= DAY) {
+        const confirmish = isConfirmText(b.body_text ?? "") || isConfirmText(a.body_text ?? "");
+        if (confirmish) {
+          out.push({
+            ticker_root: normalizeTicker(a.ticker),
+            company: a.company ?? "",
+            canonical_type: (a.canonical_type ?? a.bulletin_type ?? "").toUpperCase(),
+            event_date: a.bulletin_date!,
+            confirm_date: b.bulletin_date!,
+            bulletins: [a,b],
+          });
+          i += 2;
+          continue;
+        }
+      }
+      out.push({
+        ticker_root: normalizeTicker(a.ticker),
+        company: a.company ?? "",
+        canonical_type: (a.canonical_type ?? a.bulletin_type ?? "").toUpperCase(),
+        event_date: a.bulletin_date!,
+        bulletins: [a],
+      });
+      i += 1;
+    }
+  }
+  return out;
+}
+
 export default function Page() {
   const [loading, setLoading] = useState(true);
   const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
@@ -174,14 +253,13 @@ export default function Page() {
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]); // value = raiz normalizada
 
-  // filtros por quantidade de boletins por ticker-root
-  const [onlyMulti, setOnlyMulti] = useState(false);  // ≥2 tipos
-  const [onlySingle, setOnlySingle] = useState(false); // =1 tipo
-
+  // Flags
+  const [onlyMultiTypes, setOnlyMultiTypes] = useState(false); // ≥2 tipos (eventos) por ticker
+  const [onlySingleType, setOnlySingleType] = useState(false); // =1 tipo (evento) por ticker
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
-
-  const [showTickerAxis, setShowTickerAxis] = useState(true); // alterna exibição do eixo Y
+  const [fuseConfirm, setFuseConfirm] = useState(true); // fundir confirmações no scatter
+  const [showTickerAxis, setShowTickerAxis] = useState(true);
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -203,7 +281,7 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
-  // Toggle para abrir/fechar o gráfico Scatter e o bloco de estatísticas
+  // Toggle para abrir/fechar blocos
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
@@ -211,10 +289,8 @@ export default function Page() {
     const q = new URLSearchParams(location.search);
     const s = q.get("s"); const e = q.get("e");
     const t = q.get("t"); const c = q.get("c");
-    const m = q.get("m");
     if (s) setStartDate(s);
     if (e) setEndDate(e);
-    if (m === "1") setOnlyMulti(true);
     if (t) {
       setSelTickers(
         t.split(",")
@@ -228,65 +304,23 @@ export default function Page() {
 
   async function load() {
     setLoading(true);
-
-    // 1) coorte de âncoras incluindo boletins múltiplos
-    const { data: cohort, error: e1 } = await supabase
+    const { data, error } = await supabase
       .from("vw_bulletins_with_canonical")
-      .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
-      .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`);
-
-    if (e1) {
-      console.error(e1.message);
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-
-    const anchors = new Map<string, string>();
-    const companies = new Set<string>();
-    for (const r of cohort || []) {
-      const key = keyCT(r.company, r.ticker);
-      const d = r.bulletin_date || "";
-      if (!d) continue;
-      const hasCpc =
-        r.canonical_type === CPC_CANONICAL ||
-        (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
-      if (!hasCpc) continue;
-      if (!anchors.has(key) || d < (anchors.get(key) as string)) anchors.set(key, d);
-      if (r.company) companies.add(r.company);
-    }
-
-    const compArr = Array.from(companies).sort();
-    const globalAnchor = [...anchors.values()].sort()[0] || null;
-
-    // 2) timeline ampla, depois filtro por âncora (raiz)
-    const { data: timeline, error: e2 } = await supabase
-      .from("vw_bulletins_with_canonical")
-      .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
-      .in("company", compArr.length ? compArr : ["__none__"])
-      .gte("bulletin_date", globalAnchor ?? "1900-01-01")
+      .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key, body_text")
+      .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`)
       .order("bulletin_date", { ascending: true });
 
-    if (e2) {
-      console.error(e2.message);
+    if (error) {
+      console.error(error.message);
       setRows([]);
       setLoading(false);
       return;
     }
 
-    const r = (timeline || []) as Row[];
+    const r = (data || []) as Row[];
+    setRows(r);
 
-    const filteredByAnchor = r.filter((row) => {
-      const key = keyCT(row.company, row.ticker);
-      const anchor = anchors.get(key);
-      if (!anchor) return false;
-      if (!row.bulletin_date) return false;
-      return row.bulletin_date >= anchor;
-    });
-
-    setRows(filteredByAnchor);
-
-    const ds = filteredByAnchor.map((x) => x.bulletin_date).filter(Boolean) as string[];
+    const ds = r.map((x) => x.bulletin_date).filter(Boolean) as string[];
     if (ds.length) {
       const min = ds.reduce((a, b) => (a < b ? a : b));
       const max = ds.reduce((a, b) => (a > b ? a : b));
@@ -300,7 +334,6 @@ export default function Page() {
       setStartDate("");
       setEndDate("");
     }
-
     setLoading(false);
   }
 
@@ -314,12 +347,12 @@ export default function Page() {
     const p = new URLSearchParams();
     if (startDate) p.set("s", startDate);
     if (endDate) p.set("e", endDate);
-    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(",")); // raiz normalizada na URL
+    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(","));
     if (selCompanies.length) p.set("c", selCompanies.map(o => o.value).join(","));
-    if (onlyMulti) p.set("m", "1");
     history.replaceState(null, "", `?${p.toString()}`);
-  }, [startDate, endDate, selTickers, selCompanies, onlyMulti]);
+  }, [startDate, endDate, selTickers, selCompanies]);
 
+  // janela temporal
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -329,61 +362,72 @@ export default function Page() {
     });
   }, [rows, startDate, endDate]);
 
+  // filtros de seletores
   const companyOpts = useMemo<Opt[]>(() => {
     const s = new Set<string>();
     for (const r of rowsInWindow) if (r.company) s.add(r.company);
     return Array.from(s).sort().map((v) => ({ value: v, label: v }));
   }, [rowsInWindow]);
 
-  // opções de ticker por raiz; rótulo simples
   const tickerOpts = useMemo<Opt[]>(() => {
-    const roots = new Map<string, Set<string>>();
+    const roots = new Set<string>();
     for (const r of rowsInWindow) {
       const root = normalizeTicker(r.ticker);
       if (!root) continue;
-      if (!roots.has(root)) roots.set(root, new Set());
-      roots.get(root)!.add(r.ticker ?? "");
+      roots.add(root);
     }
-    return Array.from(roots.keys())
-      .sort((a, b) => a.localeCompare(b))
-      .map((root) => ({ value: root, label: root }));
+    return Array.from(roots).sort().map((root) => ({ value: root, label: root }));
   }, [rowsInWindow]);
 
   useEffect(() => {
     const validCompanies = new Set(companyOpts.map((o) => o.value));
-    const validTickers = new Set(tickerOpts.map((o) => o.value)); // raízes válidas
+    const validTickers = new Set(tickerOpts.map((o) => o.value));
     setSelCompanies((prev) => prev.filter((o) => validCompanies.has(o.value)));
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
-  // contador por raiz
-  const tickerCount = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of rowsInWindow) {
-      const t = normalizeTicker(r.ticker);
-      if (!t) continue;
-      m.set(t, (m.get(t) ?? 0) + 1);
-    }
-    return m;
-  }, [rowsInWindow]);
-
-  // base filtrada por seleção; seleção é por raiz
-  const filteredBase = useMemo(() => {
+  // Base respeitando Company/Ticker (para eventos/estatística)
+  const baseFilteredBySelectors = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value)); // já são raízes
+    const tset = new Set(selTickers.map((o) => o.value)); // raízes
     return rowsInWindow.filter((r) => {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-
-      const cnt = tRoot ? (tickerCount.get(tRoot) ?? 0) : 0;
-      if (onlySingle && cnt !== 1) return false;
-      if (onlyMulti && cnt < 2) return false;
       return true;
     });
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, tickerCount]);
+  }, [rowsInWindow, selCompanies, selTickers]);
 
-  // first/last por raiz
+  // Eventos (anúncio+confirmação)
+  const events = useMemo(() => foldCpcEvents(baseFilteredBySelectors), [baseFilteredBySelectors]);
+
+  // flags por nº de eventos por ticker_root
+  const eventsPerRoot = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of events) {
+      const k = e.ticker_root;
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [events]);
+
+  // Base da TABELA (boletins brutos) ainda respeita flags básicas de "apenas primeiro/último" por raiz (não por evento)
+  const filteredBase = useMemo(() => {
+    // aplica flags de nº de eventos por root
+    const allowByRoot = new Set<string>();
+    for (const [root, cnt] of eventsPerRoot.entries()) {
+      if (onlySingleType && cnt !== 1) continue;
+      if (onlyMultiTypes && cnt < 2) continue;
+      allowByRoot.add(root);
+    }
+    return baseFilteredBySelectors.filter((r) => {
+      const tRoot = normalizeTicker(r.ticker);
+      if (!tRoot || !allowByRoot.has(tRoot)) return false;
+      return true;
+    });
+  }, [baseFilteredBySelectors, eventsPerRoot, onlySingleType, onlyMultiTypes]);
+
+  // first/last por raiz para a tabela
   const filtered = useMemo(() => {
     if (!onlyFirst && !onlyLast) return filteredBase;
     const byRoot = new Map<string, Row[]>();
@@ -407,10 +451,11 @@ export default function Page() {
     [filtered],
   );
 
-  // dados do gráfico com ticker_root
-  const chartData = useMemo(
-    () =>
-      filteredSorted.map((r) => ({
+  // dados do gráfico (pode ser por boletins ou por eventos fundidos)
+  const chartData = useMemo(() => {
+    if (!fuseConfirm) {
+      // raw boletins
+      return filteredSorted.map((r) => ({
         company: r.company ?? "",
         ticker: r.ticker ?? "",
         ticker_root: normalizeTicker(r.ticker),
@@ -419,38 +464,55 @@ export default function Page() {
         type_display: r.canonical_type ?? r.bulletin_type ?? "",
         dateISO: r.bulletin_date ?? "",
         composite_key: r.composite_key ?? undefined,
-      })),
-    [filteredSorted],
-  ) as ScatterDatum[];
+      })) as ScatterDatum[];
+    }
+    // por eventos (um ponto por event_date)
+    // também aplica flags onlySingleType/onlyMultiTypes
+    const allowByRoot = new Set<string>();
+    for (const [root, cnt] of eventsPerRoot.entries()) {
+      if (onlySingleType && cnt !== 1) continue;
+      if (onlyMultiTypes && cnt < 2) continue;
+      allowByRoot.add(root);
+    }
+    return events
+      .filter(e => allowByRoot.has(e.ticker_root))
+      .map((e) => ({
+        company: e.company,
+        ticker: e.ticker_root, // rótulo aproxima
+        ticker_root: e.ticker_root,
+        dateNum: toDateNum(e.event_date),
+        canonical_type: e.canonical_type,
+        type_display: e.canonical_type,
+        dateISO: e.event_date,
+        composite_key: e.bulletins[0]?.composite_key,
+      })) as ScatterDatum[];
+  }, [filteredSorted, fuseConfirm, events, eventsPerRoot, onlySingleType, onlyMultiTypes]);
 
   const xDomain = useMemo<[number | "auto", number | "auto"]>(() => {
-    const times = filteredSorted
-      .map((r) => toDateNum(r.bulletin_date))
-      .filter((v): v is number => Number.isFinite(v));
+    const times = chartData.map((d) => d.dateNum).filter((v): v is number => Number.isFinite(v));
     if (!times.length) return ["auto", "auto"];
     const PAD = 5 * DAY;
     const min = Math.min(...times);
     const max = Math.max(...times);
     return [min - PAD, max + PAD];
-  }, [filteredSorted]);
+  }, [chartData]);
 
   // ordem por primeiro evento da raiz
   const tickerOrder = useMemo<string[]>(() => {
-    if (selTickers.length) return selTickers.map((o) => o.value);
     const first = new Map<string, number>();
-    for (const r of filteredSorted) {
-      const t = normalizeTicker(r.ticker);
+    for (const d of chartData) {
+      const t = d.ticker_root;
       if (!t) continue;
-      const ts = toDateNum(r.bulletin_date);
+      const ts = d.dateNum;
       const prev = first.get(t);
-      if (Number.isFinite(ts) && (prev === undefined || (ts as number) < prev!)) {
-        first.set(t, ts as number);
+      if (Number.isFinite(ts) && (prev === undefined || ts < prev!)) {
+        first.set(t, ts);
       }
     }
     return Array.from(first.entries())
       .sort((a, b) => a[1] - b[1])
       .map(([t]) => t);
-  }, [filteredSorted, selTickers]);
+  }, [chartData]);
 
   const [yLimit, setYLimit] = useState<number>(10);
 
@@ -484,10 +546,11 @@ export default function Page() {
     setSelTickers([]);
     setStartDate(globalMinDate);
     setEndDate(globalMaxDate);
-    setOnlyMulti(false);
-    setOnlySingle(false);
+    setOnlyMultiTypes(false);
+    setOnlySingleType(false);
     setOnlyFirst(false);
     setOnlyLast(false);
+    setFuseConfirm(true);
     setShowTickerAxis(true);
     setSortKey("bulletin_date");
     setSortDir("asc");
@@ -510,7 +573,7 @@ export default function Page() {
       .eq("composite_key", row.composite_key)
       .single();
     if (!error && data) {
-      setSelectedBulletin((prev) => (prev ? { ...prev, body_text: data.body_text } : prev));
+      setSelectedBulletin((prev) => (prev ? { ...prev, body_text: (data as {body_text: string}).body_text } : prev));
     }
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
@@ -575,7 +638,7 @@ export default function Page() {
 
     const arr = filtered.filter((r) => {
       const c = (r.company ?? "").toLowerCase();
-      const t = (r.ticker ?? "").toLowerCase(); // publicado
+      const t = (r.ticker ?? "").toLowerCase();
       const k = (r.composite_key ?? "").toLowerCase();
       const d = r.bulletin_date ?? "";
       const y = (r.canonical_type ?? r.bulletin_type ?? "").toLowerCase();
@@ -609,165 +672,32 @@ export default function Page() {
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
   useEffect(() => { setTableLimit(PAGE); }, [filtered.length, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
 
-  // KPIs (sem mediana e %)
+  // KPIs simplificados
   const kpis = useMemo(() => {
     const total = tableRows.length;
     const companies = new Set(tableRows.map(r => r.company).filter(Boolean) as string[]).size;
-    const perRoot = new Map<string, number>();
-    for (const r of tableRows) {
-      const t = normalizeTicker(r.ticker);
-      if (!t) continue;
-      perRoot.set(t, (perRoot.get(t) ?? 0) + 1);
-    }
-    const tickers = perRoot.size;
-    return { total, companies, tickers };
+    const perRoot = new Set(tableRows.map(r => normalizeTicker(r.ticker)).filter(Boolean) as string[]).size;
+    return { total, companies, tickers: perRoot };
   }, [tableRows]);
 
-  // -------- Estatísticas (empresas total, =1 e ≥2) ----------
-  const statsBase = useMemo(() => {
-    const cset = new Set(selCompanies.map(o => o.value));
-    const tset = new Set(selTickers.map(o => o.value));
-    return rowsInWindow.filter(r => {
-      const tRoot = normalizeTicker(r.ticker);
-      if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      return true;
-    });
-  }, [rowsInWindow, selCompanies, selTickers]);
-
+  // -------- Estatísticas (=1 vs ≥2 eventos por empresa) ----------
   const statsData = useMemo(() => {
     const perCompany = new Map<string, number>();
-    for (const r of statsBase) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
+    for (const e of events) {
+      const key = e.company || "";
+      if (!key) continue;
+      perCompany.set(key, (perCompany.get(key) ?? 0) + 1);
     }
     let one = 0, ge2 = 0;
     for (const cnt of perCompany.values()) {
       if (cnt === 1) one++; else if (cnt >= 2) ge2++;
     }
-    const total = one + ge2;
-    // ordem: Total, =1, ≥2
     return [
-      { group: "Total", count: total, label: "Total de empresas" },
-      { group: "=1", count: one, label: "Apenas 1 boletim" },
-      { group: "≥2", count: ge2, label: "Dois ou mais boletins" },
+      { group: "=1", count: one },
+      { group: "≥2", count: ge2 },
+      { group: "TOTAL", count: perCompany.size },
     ];
-  }, [statsBase]);
-
-  // -------- export helpers ----------
-  function safeRange(a: string, b: string) {
-    const s = a ? a.replaceAll("-", "") : "inicio";
-    const e = b ? b.replaceAll("-", "") : "fim";
-    return `${s}_${e}`;
-  }
-
-  async function ensureBodies(rowsArg: Row[]): Promise<Row[]> {
-    const missing = Array.from(
-      new Set(
-        rowsArg
-          .filter(r => !r.body_text && r.composite_key)
-          .map(r => r.composite_key as string)
-      )
-    );
-    if (missing.length === 0) return rowsArg;
-
-    const { data, error } = await supabase
-      .from("vw_bulletins_with_canonical")
-      .select("composite_key, body_text")
-      .in("composite_key", missing);
-
-    if (error) {
-      console.error("Falha ao buscar body_text:", error.message);
-      return rowsArg;
-    }
-
-    const map = new Map<string, string>();
-    for (const r of data || []) {
-      if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
-    }
-
-    return rowsArg.map(r =>
-      r.body_text || !r.composite_key
-        ? r
-        : { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" }
-    );
-  }
-
-  async function handleExportSelectionTxt() {
-    if (!tableRows.length) {
-      alert("Nada a exportar. Ajuste os filtros/seleção.");
-      return;
-    }
-    const withBodies = await ensureBodies(tableRows);
-    const sorted = [...withBodies].sort(
-      (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
-    );
-    const story = sorted
-      .map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`)
-      .join("\n--------------------------------\n");
-    const filename = `cpc_notices_selecao_${safeRange(startDate, endDate)}.txt`;
-    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    window.URL.revokeObjectURL(url);
-  }
-
-  async function handleExportWindowTxt() {
-    const base = [...rowsInWindow].sort(
-      (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
-    );
-    if (!base.length) {
-      alert("Nenhum boletim no período.");
-      return;
-    }
-    const withBodies = await ensureBodies(base);
-    const story = withBodies
-      .map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`)
-      .join("\n--------------------------------\n");
-    const filename = `cpc_notices_periodo_${safeRange(startDate, endDate)}.txt`;
-    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    window.URL.revokeObjectURL(url);
-  }
-
-  // NOVO: XLSX agregado da TABELA PÓS-FILTRO
-  async function handleExportTableAggXlsx() {
-    if (!tableRows.length) {
-      alert("Tabela vazia. Ajuste os filtros.");
-      return;
-    }
-    // agrupa apenas o que está na tabela pós-filtro
-    const groups = new Map<string, Row[]>();
-    for (const r of tableRows) {
-      const root = normalizeTicker(r.ticker);
-      if (!root) continue;
-      if (!groups.has(root)) groups.set(root, []);
-      groups.get(root)!.push(r);
-    }
-    const agg = Array.from(groups.entries()).map(([root, arr]) => {
-      const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-      const first = ordered[0];
-      const last = ordered[ordered.length - 1];
-      return {
-        ticker_root: root,
-        company_first: first?.company ?? "",
-        company_last: last?.company ?? "",
-        events: ordered.length,
-        first_date: first?.bulletin_date ?? "",
-        last_date: last?.bulletin_date ?? "",
-      };
-    }).sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
-
-    const XLSX = await import("xlsx"); // sheetjs
-    const ws = XLSX.utils.json_to_sheet(agg);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "CPC_TabelaAgregada");
-    const filename = `cpc_tabela_agregada_${safeRange(startDate, endDate)}.xlsx`;
-    XLSX.writeFile(wb, filename);
-  }
+  }, [events]);
 
   // ticks dinâmicos para eixo X
   const xTicksMemo = useMemo(() => {
@@ -782,33 +712,29 @@ export default function Page() {
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
         <div className="ml-auto flex flex-wrap gap-2">
           <button
-            onClick={handleExportSelectionTxt}
+            onClick={() => {
+              // export seleção (tabela)
+              const run = async () => {
+                if (!tableRows.length) { alert("Nada a exportar."); return; }
+                const sorted = [...tableRows].sort((a,b)=>toDateNum(a.bulletin_date)-toDateNum(b.bulletin_date));
+                const story = sorted.map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`).join("\n--------------------------------\n");
+                const filename = `cpc_notices_selecao_${(startDate||"").replaceAll("-","")}_${(endDate||"").replaceAll("-","")}.txt`;
+                const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); window.URL.revokeObjectURL(url);
+              };
+              void run();
+            }}
             disabled={loading || !tableRows.length}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
             title="Exporta exatamente o que aparece na tabela (todas as linhas filtradas)"
           >
             📜 Exportar seleção
           </button>
-          <button
-            onClick={handleExportWindowTxt}
-            disabled={loading || !rowsInWindow.length}
-            className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-            title="Exporta todo o período, ignorando filtros da tabela"
-          >
-            🗂️ Exportar período
-          </button>
-          <button
-            onClick={handleExportTableAggXlsx}
-            disabled={loading || !tableRows.length}
-            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
-            title="Exporta XLSX agregado do conteúdo atual da TABELA (pós-filtro)"
-          >
-            📊 Exportar tabela agregada (.xlsx)
-          </button>
         </div>
       </div>
 
-      {/* KPIs enxutos */}
+      {/* KPIs (simplificados) */}
       <div className="flex flex-wrap gap-3 text-sm">
         <div className="border rounded px-2 py-1">Empresas: <strong>{kpis.companies}</strong></div>
         <div className="border rounded px-2 py-1">Tickers: <strong>{kpis.tickers}</strong></div>
@@ -816,7 +742,7 @@ export default function Page() {
       </div>
 
       <div className="flex items-center text-sm text-gray-600">
-        {loading ? "Carregando…" : `${filteredSorted.length} boletins no filtro`}
+        {loading ? "Carregando…" : `${chartData.length} pontos no Scatter (${fuseConfirm ? "eventos fundidos" : "boletins"})`}
       </div>
 
       {/* Controles superiores */}
@@ -875,20 +801,20 @@ export default function Page() {
             {visibleTickers.length}/{tickerOrder.length || 0}
           </span>
 
-          {/* novos filtros por quantidade */}
+          {/* Flags novas por nº de eventos (tipos) */}
           <label className="flex items-center gap-1 text-sm">
             <input
               type="checkbox"
-              checked={onlySingle}
-              onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }}
+              checked={onlySingleType}
+              onChange={(e) => { setOnlySingleType(e.target.checked); if (e.target.checked) setOnlyMultiTypes(false); }}
             />
             Somente tickers com 1 tipo de boletim
           </label>
           <label className="flex items-center gap-1 text-sm">
             <input
               type="checkbox"
-              checked={onlyMulti}
-              onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }}
+              checked={onlyMultiTypes}
+              onChange={(e) => { setOnlyMultiTypes(e.target.checked); if (e.target.checked) setOnlySingleType(false); }}
             />
             Somente tickers com ≥2 tipos de boletins
           </label>
@@ -909,6 +835,7 @@ export default function Page() {
             />
             Apenas último
           </label>
+
           {/* Alterna o eixo Y (tickers) */}
           <label className="flex items-center gap-1 text-sm">
             <input
@@ -919,11 +846,21 @@ export default function Page() {
             Mostrar tickers no eixo Y
           </label>
 
+          {/* Fundir confirmações */}
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={fuseConfirm}
+              onChange={(e) => setFuseConfirm(e.target.checked)}
+            />
+            Fundir confirmações no Scatter
+          </label>
+
           {/* Botões de abrir/fechar */}
           <button
             className="border rounded px-3 py-1"
             onClick={() => setShowChart(v => !v)}
-            title="Abrir/fechar o Scatter"
+            title="Abrir/fechar o gráfico de dispersão"
           >
             {showChart ? "Fechar Scatter" : "Abrir Scatter"}
           </button>
@@ -991,7 +928,6 @@ export default function Page() {
                 width={showTickerAxis ? 90 : 0}
                 tick={showTickerAxis ? { fontSize: 12 } : undefined}
                 allowDuplicatedCategory={false}
-                tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
                 hide={!showTickerAxis}
               />
               <Tooltip
@@ -1025,7 +961,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* BLOCO: Estatísticas (abrir/fechar) */}
+      {/* NOVO BLOCO: Estatísticas (abrir/fechar) */}
       <div
         className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
         style={{ maxHeight: showStats ? 260 : 0 }}
@@ -1033,32 +969,34 @@ export default function Page() {
       >
         <div className="p-3" style={{ height: 240 }}>
           <div className="text-sm text-gray-700 mb-2">
-            Empresas no período selecionado (Total, apenas 1 boletim, ≥2 boletins)
-            {selCompanies.length || selTickers.length ? " — respeitando filtros de Company/Ticker" : ""}.
+            Empresas por nº de tipos de boletins (eventos) no período filtrado
           </div>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={statsData}>
+            <BarChart data={statsData.filter(d=>d.group!=='TOTAL')}>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="group" tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
               <Tooltip
-                formatter={(v: number, _n: unknown, p: unknown) => {
-                  const payload = (p as { payload?: { label?: string } } | undefined);
-                  return [String(v), payload?.payload?.label ?? "Empresas"];
+                formatter={(v: unknown) => {
+                  const n = typeof v === "number" ? v : Number(v);
+                  return [String(n), "Empresas"] as [string, string];
                 }}
-                labelFormatter={(l: string) => l}
+                labelFormatter={(l: unknown) => (String(l) === "=1" ? "Apenas 1 tipo" : "Dois ou mais tipos")}
               />
-              <Bar dataKey="count">
-                <LabelList dataKey="count" position="top" />
-              </Bar>
+              <Bar dataKey="count" />
             </BarChart>
           </ResponsiveContainer>
+          <div className="mt-2 text-xs text-gray-600">
+            Total de empresas no período: <strong>{(statsData.find(d=>d.group==='TOTAL')?.count) ?? 0}</strong> •
+            Apenas 1 tipo: <strong>{(statsData.find(d=>d.group==='=1')?.count) ?? 0}</strong> •
+            ≥2 tipos: <strong>{(statsData.find(d=>d.group==='≥2')?.count) ?? 0}</strong>
+          </div>
         </div>
       </div>
 
       {!loading && filtered.length === 0 && (
         <div className="text-sm text-gray-600 mt-2">
-          Sem resultados. Ajuste datas, empresa/ticker ou filtros “Somente =1/≥2”.
+          Sem resultados. Ajuste datas, filtros ou “Somente por tipo”.
         </div>
       )}
 
@@ -1229,3 +1167,6 @@ export default function Page() {
     </div>
   );
 }
+
+// largura do YAxis quando visível
+function ninetyWidth(){ return 90; }
