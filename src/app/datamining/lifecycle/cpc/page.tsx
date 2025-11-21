@@ -197,6 +197,9 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
+  // NEW: toggle para abrir/fechar o gráfico
+  const [showChart, setShowChart] = useState(true);
+
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const s = q.get("s"); const e = q.get("e");
@@ -483,6 +486,7 @@ export default function Page() {
     setFDate("");
     setFType("");
     setTableLimit(PAGE);
+    setShowChart(true);
   };
 
   const openBulletinModal = async (row: Row) => {
@@ -868,6 +872,15 @@ export default function Page() {
             />
             Mostrar tickers no eixo Y
           </label>
+
+          {/* Botão para abrir/fechar o gráfico */}
+          <button
+            className="border rounded px-3 py-1"
+            onClick={() => setShowChart(v => !v)}
+            title="Abrir/fechar o gráfico"
+          >
+            {showChart ? "Fechar gráfico" : "Abrir gráfico"}
+          </button>
         </div>
       </div>
 
@@ -895,62 +908,68 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Gráfico */}
-      <div className="w-full border rounded p-2" style={{ height: chartHeight }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart>
-            <CartesianGrid />
-            <XAxis
-              dataKey="dateNum"
-              type="number"
-              domain={xDomain}
-              ticks={xTicksMemo.ticks}
-              tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
-              name="Data"
-              tick={{ fontSize: 11 }}
-              allowDecimals={false}
-            />
-            <YAxis
-              type="category"
-              dataKey="ticker_root"
-              name="Ticker"
-              ticks={visibleTickers}
-              interval={0}
-              tickLine={false}
-              width={showTickerAxis ? ninetyWidth() : 0}
-              tick={showTickerAxis ? { fontSize: 12 } : undefined}
-              allowDuplicatedCategory={false}
-              tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
-              hide={!showTickerAxis}
-            />
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload || payload.length === 0) return null;
-                const d = payload[0]?.payload as ScatterDatum | undefined;
-                if (!d) return null;
-                const date = d.dateISO || fmtUTC(d.dateNum);
-                return (
-                  <div className="bg-white p-2 border rounded shadow text-sm">
-                    <div><strong>Data:</strong> {date}</div>
-                    <div><strong>Empresa:</strong> {d.company || "—"}</div>
-                    <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
-                    <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
-                    <div className="mt-1 text-xs text-gray-600">
-                      Clique: filtra empresa | Shift+Clique: isola este boletim
+      {/* Gráfico (acordeão simples) */}
+      <div
+        className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        style={{ maxHeight: showChart ? chartHeight : 0 }}
+        aria-hidden={!showChart}
+      >
+        <div className="p-2" style={{ height: chartHeight }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart>
+              <CartesianGrid />
+              <XAxis
+                dataKey="dateNum"
+                type="number"
+                domain={xDomain}
+                ticks={xTicksMemo.ticks}
+                tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
+                name="Data"
+                tick={{ fontSize: 11 }}
+                allowDecimals={false}
+              />
+              <YAxis
+                type="category"
+                dataKey="ticker_root"
+                name="Ticker"
+                ticks={visibleTickers}
+                interval={0}
+                tickLine={false}
+                width={showTickerAxis ? ninetyWidth() : 0}
+                tick={showTickerAxis ? { fontSize: 12 } : undefined}
+                allowDuplicatedCategory={false}
+                tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
+                hide={!showTickerAxis}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  const d = payload[0]?.payload as ScatterDatum | undefined;
+                  if (!d) return null;
+                  const date = d.dateISO || fmtUTC(d.dateNum);
+                  return (
+                    <div className="bg-white p-2 border rounded shadow text-sm">
+                      <div><strong>Data:</strong> {date}</div>
+                      <div><strong>Empresa:</strong> {d.company || "—"}</div>
+                      <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
+                      <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        Clique: filtra empresa | Shift+Clique: isola este boletim
+                      </div>
                     </div>
-                  </div>
-                );
-              }}
-            />
-            <Scatter
-              data={chartDataVis}
-              onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)}
-            />
-          </ScatterChart>
-        </ResponsiveContainer>
-        {selTickers.length > 0 && chartDataVis.length === 0 && (
-          <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
-        )}
+                  );
+                }}
+              />
+              <Scatter
+                data={chartDataVis}
+                onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)}
+              />
+            </ScatterChart>
+          </ResponsiveContainer>
+          {selTickers.length > 0 && chartDataVis.length === 0 && (
+            <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
+          )}
+        </div>
       </div>
       {!loading && filtered.length === 0 && (
         <div className="text-sm text-gray-600 mt-2">
