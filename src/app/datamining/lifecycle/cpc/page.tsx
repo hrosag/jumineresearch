@@ -11,6 +11,8 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  BarChart,
+  Bar,
 } from "recharts";
 
 const supabase = createClient(
@@ -197,8 +199,10 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
-  // NEW: toggle para abrir/fechar o gráfico
+  // Toggle para abrir/fechar o gráfico Scatter
   const [showChart, setShowChart] = useState(true);
+  // Toggle para abrir/fechar o bloco de estatísticas
+  const [showStats, setShowStats] = useState(true);
 
   useEffect(() => {
     const q = new URLSearchParams(location.search);
@@ -487,6 +491,7 @@ export default function Page() {
     setFType("");
     setTableLimit(PAGE);
     setShowChart(true);
+    setShowStats(true);
   };
 
   const openBulletinModal = async (row: Row) => {
@@ -616,6 +621,36 @@ export default function Page() {
     const pctMulti = counts.length ? Math.round(100 * (counts.filter(n => n>=2).length / counts.length)) : 0;
     return { total, companies, tickers, med, pctMulti };
   }, [tableRows]);
+
+  // -------- Estatísticas (empresas com 1 boletim vs ≥2) ----------
+  // Base de estatística respeita Data/Company/Ticker selecionados,
+  // mas ignora onlyMulti/onlyFirst/onlyLast para não distorcer.
+  const statsBase = useMemo(() => {
+    const cset = new Set(selCompanies.map(o => o.value));
+    const tset = new Set(selTickers.map(o => o.value));
+    return rowsInWindow.filter(r => {
+      const tRoot = normalizeTicker(r.ticker);
+      if (cset.size && (!r.company || !cset.has(r.company))) return false;
+      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
+      return true;
+    });
+  }, [rowsInWindow, selCompanies, selTickers]);
+
+  const statsData = useMemo(() => {
+    const perCompany = new Map<string, number>();
+    for (const r of statsBase) {
+      if (!r.company) continue;
+      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
+    }
+    let one = 0, ge2 = 0;
+    for (const cnt of perCompany.values()) {
+      if (cnt === 1) one++; else if (cnt >= 2) ge2++;
+    }
+    return [
+      { group: "=1", count: one },
+      { group: "≥2", count: ge2 },
+    ];
+  }, [statsBase]);
 
   // -------- export helpers ----------
   function safeRange(a: string, b: string) {
@@ -873,13 +908,20 @@ export default function Page() {
             Mostrar tickers no eixo Y
           </label>
 
-          {/* Botão para abrir/fechar o gráfico */}
+          {/* Botões de abrir/fechar */}
           <button
             className="border rounded px-3 py-1"
             onClick={() => setShowChart(v => !v)}
-            title="Abrir/fechar o gráfico"
+            title="Abrir/fechar o gráfico de dispersão"
           >
             {showChart ? "Fechar gráfico" : "Abrir gráfico"}
+          </button>
+          <button
+            className="border rounded px-3 py-1"
+            onClick={() => setShowStats(v => !v)}
+            title="Abrir/fechar o bloco de estatísticas"
+          >
+            {showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
           </button>
         </div>
       </div>
@@ -935,7 +977,7 @@ export default function Page() {
                 ticks={visibleTickers}
                 interval={0}
                 tickLine={false}
-                width={showTickerAxis ? ninetyWidth() : 0}
+                width={showTickerAxis ? 90 : 0}
                 tick={showTickerAxis ? { fontSize: 12 } : undefined}
                 allowDuplicatedCategory={false}
                 tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
@@ -971,6 +1013,33 @@ export default function Page() {
           )}
         </div>
       </div>
+
+      {/* NOVO BLOCO: Estatísticas (abrir/fechar) */}
+      <div
+        className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        style={{ maxHeight: showStats ? 240 : 0 }}
+        aria-hidden={!showStats}
+      >
+        <div className="p-3" style={{ height: 220 }}>
+          <div className="text-sm text-gray-700 mb-2">
+            Empresas com 1 boletim versus ≥2 no período selecionado
+            {selCompanies.length || selTickers.length ? " (respeitando filtros de Company/Ticker)" : ""}.
+          </div>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={statsData}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="group" tick={{ fontSize: 12 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+              <Tooltip
+                formatter={(v: number) => [String(v), "Empresas"]}
+                labelFormatter={(l: string) => (l === "=1" ? "Apenas 1 boletim" : "Dois ou mais boletins")}
+              />
+              <Bar dataKey="count" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
       {!loading && filtered.length === 0 && (
         <div className="text-sm text-gray-600 mt-2">
           Sem resultados. Ajuste datas, empresa/ticker ou “Somente ≥2”.
@@ -980,7 +1049,7 @@ export default function Page() {
       {/* Tabela */}
       <div className="space-y-2" ref={tableRef}>
         <h2 className="text-xl font-semibold">Resultados</h2>
-        <div className="border rounded overflow-auto max-h-[70vh]">
+        <div className="border rounded overflow-auto max-h=[70vh]">
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
