@@ -74,6 +74,13 @@ function fmtDayMonth(ts: number): string {
 function normalizeTicker(t?: string | null) {
   return (t ?? "").trim().toUpperCase().replace(/\.P$/, "");
 }
+
+function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
+  return rows.map(r => {
+    if (r.body_text || !r.composite_key) return r;
+    return { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" };
+  });
+}
 function keyCT(company?: string | null, ticker?: string | null) {
   return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
 }
@@ -121,6 +128,26 @@ function computeAnchorRange(map: Map<string, string>): { min: string; max: strin
   const min = dates.reduce((a, b) => (a < b ? a : b));
   const max = dates.reduce((a, b) => (a > b ? a : b));
   return { min, max };
+}
+
+// Tipagem explícita para evitar "any" no LabelList custom
+type BarLabelProps = {
+  x?: number;
+  y?: number;
+  width?: number;
+  value?: number | string;
+};
+
+// Custom label for BarChart values (consistent size/position)
+function BarValueLabel(props: BarLabelProps) {
+  const { x, y, width, value } = props;
+  const cx = (x ?? 0) + (width ?? 0) / 2;
+  const vy = (y ?? 0) - 6;
+  return (
+    <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>
+      {value}
+    </text>
+  );
 }
 
 // =========================================================
@@ -306,7 +333,8 @@ export default function Page() {
     if (endDate) p.set("e", endDate);
     if (selTickers.length) p.set("t", selTickers.map((o) => o.value).join(","));
     if (selCompanies.length) p.set("c", selCompanies.map((o) => o.value).join(","));
-    history.replaceState(null, "", `?${p.toString()}`);
+    const qs = p.toString();
+    history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
   }, [startDate, endDate, selTickers, selCompanies]);
 
   // janela básica (stats/tabela)
@@ -414,14 +442,8 @@ export default function Page() {
 
   // -------- Estatísticas --------
   const stats = useMemo(() => {
-    const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value));
-    const base = rowsInWindow.filter((r) => {
-      const tRoot = normalizeTicker(r.ticker);
-      if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      return true;
-    });
+    // Estatística GLOBAL: considera apenas o date_range (rowsInWindow).
+    const base = rowsInWindow;
 
     const totalBulletins = base.length;
     const perCompany = new Map<string, number>();
@@ -441,7 +463,7 @@ export default function Page() {
       { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
     ];
     return { chartData };
-  }, [rowsInWindow, selCompanies, selTickers]);
+  }, [rowsInWindow]);
 
   // -------- Scatter (usa flags) --------
   const filteredForChart = useMemo(() => {
@@ -496,12 +518,17 @@ export default function Page() {
     [filteredForChart],
   ) as ScatterDatum[];
 
-  const times = filteredForChart
-    .map((r) => toDateNum(r.bulletin_date))
-    .filter((v) => Number.isFinite(v)) as number[];
-  const xDomain: [number | "auto", number | "auto"] = times.length
-    ? [Math.min(...times) - 5 * DAY, Math.max(...times) + 5 * DAY]
-    : ["auto", "auto"];
+  // xDomain memoizado p/ satisfazer react-hooks/exhaustive-deps
+  const xDomain = useMemo<[number | "auto", number | "auto"]>(() => {
+    const times = filteredForChart
+      .map((r) => toDateNum(r.bulletin_date))
+      .filter((v) => Number.isFinite(v)) as number[];
+    if (!times.length) return ["auto", "auto"];
+    const min = Math.min(...times);
+    const max = Math.max(...times);
+    return [min - 5 * DAY, max + 5 * DAY];
+  }, [filteredForChart]);
+
   const xTicksMemo = useMemo(
     () =>
       xDomain[0] === "auto"
@@ -620,7 +647,45 @@ export default function Page() {
     }, 0);
   }
 
-  // ================= RENDER =================
+  // helper para exportar .txt unificado
+  async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
+    if (!baseRows.length) return;
+    const missing = Array.from(
+      new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)),
+    );
+    let filled: Row[] = baseRows;
+    if (missing.length) {
+      const { data } = await supabase
+        .from("vw_bulletins_with_canonical")
+        .select("composite_key, body_text")
+        .in("composite_key", missing);
+      const map = new Map<string, string>();
+      for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
+        if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
+      }
+      filled = withBodyTextFilled(baseRows, map);
+    }
+    const sorted = [...filled].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+    // Exporta SOMENTE o body_text (sem cabeçalho de data/tipo) para não contaminar o conteúdo
+    const story = sorted
+      .map((r) => (r.body_text ?? "").trim())
+      .filter((t) => t.length > 0)
+      .join("
+--------------------------------
+");
+    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
+    const e = endDate ? endDate.replaceAll("-", "") : "fim";
+    const filename = `${filenameBase}_${s}_${e}.txt`;
+    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+// ================= RENDER =================
   return (
     <div className="p-6 space-y-4">
       {/* Título + EXPORTS */}
@@ -630,41 +695,12 @@ export default function Page() {
           {/* Exportar seleção */}
           <button
             onClick={async () => {
-              const base = tableRows;
+              const base = [...tableRows];
               if (!base.length) {
                 alert("Nada a exportar. Ajuste os filtros/seleção.");
                 return;
               }
-              const missing = Array.from(
-                new Set(base.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)),
-              );
-              if (missing.length) {
-                const { data } = await supabase
-                  .from("vw_bulletins_with_canonical")
-                  .select("composite_key, body_text")
-                  .in("composite_key", missing);
-                const map = new Map<string, string>();
-                for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
-                  if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
-                }
-                base.forEach((r) => {
-                  if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? "";
-                });
-              }
-              const sorted = [...base].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-              const story = sorted
-                .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
-                .join("\n--------------------------------\n");
-              const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-              const e = endDate ? endDate.replaceAll("-", "") : "fim";
-              const filename = `cpc_notices_selecao_${s}_${e}.txt`;
-              const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
-              const url = window.URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = filename;
-              a.click();
-              window.URL.revokeObjectURL(url);
+              await exportRowsToTxt(base, "cpc_notices_selecao");
             }}
             disabled={!tableRows.length}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
@@ -675,40 +711,12 @@ export default function Page() {
           {/* Exportar período */}
           <button
             onClick={async () => {
-              const base = [...rowsInWindow].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+              const base = [...rowsInWindow];
               if (!base.length) {
                 alert("Nenhum boletim no período.");
                 return;
               }
-              const missing = Array.from(
-                new Set(base.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)),
-              );
-              if (missing.length) {
-                const { data } = await supabase
-                  .from("vw_bulletins_with_canonical")
-                  .select("composite_key, body_text")
-                  .in("composite_key", missing);
-                const map = new Map<string, string>();
-                for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
-                  if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
-                }
-                base.forEach((r) => {
-                  if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? "";
-                });
-              }
-              const story = base
-                .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
-                .join("\n--------------------------------\n");
-              const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-              const e = endDate ? endDate.replaceAll("-", "") : "fim";
-              const filename = `cpc_notices_periodo_${s}_${e}.txt`;
-              const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
-              const url = window.URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = filename;
-              a.click();
-              window.URL.revokeObjectURL(url);
+              await exportRowsToTxt(base, "cpc_notices_periodo");
             }}
             disabled={!rowsInWindow.length}
             className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
@@ -764,13 +772,13 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Linha única alinhada: Start | End | GO | 🧹 */}
+      {/* Linha única alinhada: Start | End | ⚡ | 🧹 */}
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col">
           <label className="block text-sm">Start</label>
           <input
             type="date"
-            className="border rounded px-2 py-1"
+            className="border rounded px-2 h-10"
             value={startDate}
             max={endDate || undefined}
             onChange={(e) => setStartDate(e.target.value)}
@@ -781,7 +789,7 @@ export default function Page() {
           <label className="block text-sm">End</label>
           <input
             type="date"
-            className="border rounded px-2 py-1"
+            className="border rounded px-2 h-10"
             value={endDate}
             min={startDate || undefined}
             onChange={(e) => setEndDate(e.target.value)}
@@ -791,14 +799,15 @@ export default function Page() {
         {/* botões alinhados ao fundo dos inputs */}
         <div className="flex items-end gap-2 pb-[2px]">
           <button
-            className="border rounded px-3 py-2 font-semibold"
-            title="GO"
+            className="border rounded px-3 h-10 font-semibold flex items-center justify-center"
+            title="Executar busca"
+            aria-label="Executar busca"
             onClick={() => (useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow())}
             disabled={loadingTimeline || (!startDate && !endDate && !useAnchor)}
           >
-            GO
+            ⚡
           </button>
-          <button className="border rounded px-2 py-2" onClick={handleReset} title="Limpar">
+          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">
             🧹
           </button>
         </div>
@@ -881,7 +890,7 @@ export default function Page() {
                   labelFormatter={(l: string) => l}
                 />
                 <Bar dataKey="count">
-                  <LabelList dataKey="count" position="top" />
+                  <LabelList dataKey="count" content={<BarValueLabel />} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -944,21 +953,21 @@ export default function Page() {
 
             <div className="ml-auto flex items-center gap-2">
               <button
-                className="border rounded px-2 py-1"
+                className="border rounded px-2 h-10"
                 onClick={() => setYLimit((v) => Math.max(10, v - 10))}
                 title="-10 linhas do eixo Y"
               >
                 −10
               </button>
               <button
-                className="border rounded px-2 py-1"
+                className="border rounded px-2 h-10"
                 onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
                 title="+10 linhas do eixo Y"
               >
                 +10
               </button>
               <button
-                className="border rounded px-2 py-1"
+                className="border rounded px-2 h-10"
                 onClick={() => setYLimit(tickerOrder.length || 10)}
                 title="Mostrar todas as linhas do eixo Y"
               >
@@ -1101,7 +1110,7 @@ export default function Page() {
           <div className="bg-white max-w-3xl w-full rounded shadow p-4 space-y-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center">
               <h3 className="font-semibold text-lg">Boletim</h3>
-              <button className="border rounded px-2 py-1" onClick={closeBulletinModal}>Fechar</button>
+              <button className="border rounded px-2 h-10" onClick={closeBulletinModal}>Fechar</button>
             </div>
             <div className="text-sm text-gray-700">
               <div><strong>Empresa:</strong> {selectedBulletin.company || "—"}</div>
