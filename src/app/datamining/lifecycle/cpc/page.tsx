@@ -161,9 +161,17 @@ function makeTicksAdaptive(domain: [number, number]) {
 }
 
 export default function Page() {
-  const [loading, setLoading] = useState(true);
-  const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
+  // --- estados de loading e erro
+  const [loadingAnchors, setLoadingAnchors] = useState(false);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // --- âncora opcional
+  const [useAnchor, setUseAnchor] = useState(false);
+  const [timelineLoaded, setTimelineLoaded] = useState(false);
+
+  // --- UI original
+  const [selectedBulletin, setSelectedBulletin] = useState<Row | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [globalMinDate, setGlobalMinDate] = useState<string>("");
   const [globalMaxDate, setGlobalMaxDate] = useState<string>("");
@@ -174,7 +182,6 @@ export default function Page() {
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]); // value = raiz normalizada
 
-  // filtros por quantidade de boletins por ticker-root
   const [onlyMulti, setOnlyMulti] = useState(false);  // ≥2 tipos
   const [onlySingle, setOnlySingle] = useState(false); // =1 tipo
 
@@ -203,10 +210,11 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
-  // Toggle para abrir/fechar o gráfico Scatter e o bloco de estatísticas
+  // Toggle para abrir/fechar os blocos (ficarão sob "Limpar")
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
+  // URL params (mantidos)
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const s = q.get("s"); const e = q.get("e");
@@ -226,100 +234,151 @@ export default function Page() {
     if (c) setSelCompanies(c.split(",").map(v => ({ value: v, label: v })));
   }, []);
 
-  async function load() {
-    setLoading(true);
+  // ---------- Fase 1 (leve): âncoras por company|root ----------
+  const [anchors, setAnchors] = useState<Map<string, string>>(new Map()); // keyCT -> anchorDate
+  const [anchorCompanies, setAnchorCompanies] = useState<string[]>([]);
 
-    // 1) coorte de âncoras incluindo boletins múltiplos
-    const { data: cohort, error: e1 } = await supabase
-      .from("vw_bulletins_with_canonical")
-      .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
-      .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`);
+  async function fetchAnchors() {
+    setLoadingAnchors(true);
+    setErrorMsg(null);
+    try {
+      const { data, error } = await supabase
+        .from("vw_bulletins_with_canonical")
+        .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
+        .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`);
 
-    if (e1) {
-      console.error(e1.message);
-      setRows([]);
-      setLoading(false);
-      return;
+      if (error) throw error;
+
+      const map = new Map<string, string>();
+      const companies = new Set<string>();
+      for (const r of (data || []) as Row[]) {
+        const key = keyCT(r.company, r.ticker);
+        const d = r.bulletin_date || "";
+        if (!d) continue;
+        const hasCpc =
+          r.canonical_type === CPC_CANONICAL ||
+          (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
+        if (!hasCpc) continue;
+        if (!map.has(key) || d < (map.get(key) as string)) map.set(key, d);
+        if (r.company) companies.add(r.company);
+      }
+      setAnchors(map);
+      setAnchorCompanies(Array.from(companies).sort());
+    } catch (err: any) {
+      setErrorMsg(err?.message || String(err));
+    } finally {
+      setLoadingAnchors(false);
     }
-
-    const anchors = new Map<string, string>();
-    const companies = new Set<string>();
-    for (const r of cohort || []) {
-      const key = keyCT(r.company, r.ticker);
-      const d = r.bulletin_date || "";
-      if (!d) continue;
-      const hasCpc =
-        r.canonical_type === CPC_CANONICAL ||
-        (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
-      if (!hasCpc) continue;
-      if (!anchors.has(key) || d < (anchors.get(key) as string)) anchors.set(key, d);
-      if (r.company) companies.add(r.company);
-    }
-
-    const compArr = Array.from(companies).sort();
-    const globalAnchor = [...anchors.values()].sort()[0] || null;
-
-    // 2) timeline ampla, depois filtro por âncora (raiz)
-    const { data: timeline, error: e2 } = await supabase
-      .from("vw_bulletins_with_canonical")
-      .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
-      .in("company", compArr.length ? compArr : ["__none__"])
-      .gte("bulletin_date", globalAnchor ?? "1900-01-01")
-      .order("bulletin_date", { ascending: true });
-
-    if (e2) {
-      console.error(e2.message);
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-
-    const r = (timeline || []) as Row[];
-
-    const filteredByAnchor = r.filter((row) => {
-      const key = keyCT(row.company, row.ticker);
-      const anchor = anchors.get(key);
-      if (!anchor) return false;
-      if (!row.bulletin_date) return false;
-      return row.bulletin_date >= anchor;
-    });
-
-    setRows(filteredByAnchor);
-
-    const ds = filteredByAnchor.map((x) => x.bulletin_date).filter(Boolean) as string[];
-    if (ds.length) {
-      const min = ds.reduce((a, b) => (a < b ? a : b));
-      const max = ds.reduce((a, b) => (a > b ? a : b));
-      setGlobalMinDate(min);
-      setGlobalMaxDate(max);
-      setStartDate((prev) => prev || min);
-      setEndDate((prev) => prev || max);
-    } else {
-      setGlobalMinDate("");
-      setGlobalMaxDate("");
-      setStartDate("");
-      setEndDate("");
-    }
-
-    setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  // ---------- Fase 2 (pesada): timeline pós-âncora (só quando usuário quer) ----------
+  function chunk<T>(arr: T[], size: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  }
 
+  function computeMinAnchorByCompany(map: Map<string, string>) {
+    const perCompany = new Map<string, string>();
+    for (const k of map.keys()) {
+      const [company] = k.split("|");
+      const d = map.get(k)!;
+      const prev = perCompany.get(company);
+      if (!prev || d < prev) perCompany.set(company, d);
+    }
+    return perCompany;
+  }
+
+  async function fetchTimelineAfterAnchor() {
+    if (!useAnchor) return;
+    if (!anchors.size || !anchorCompanies.length) {
+      setErrorMsg("Carregue as âncoras primeiro.");
+      return;
+    }
+    setLoadingTimeline(true);
+    setErrorMsg(null);
+    try {
+      const perCompanyMin = computeMinAnchorByCompany(anchors);
+      const chunks = chunk(anchorCompanies, 100);
+
+      const allowedKeys = new Set(anchors.keys());
+      const all: Row[] = [];
+      for (const companies of chunks) {
+        // menor data entre as empresas do chunk (para bound do servidor)
+        let chunkMin = "9999-12-31";
+        for (const c of companies) {
+          const d = perCompanyMin.get(c)!;
+          if (d < chunkMin) chunkMin = d;
+        }
+        const { data, error } = await supabase
+          .from("vw_bulletins_with_canonical")
+          .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
+          .in("company", companies)
+          .gte("bulletin_date", chunkMin)
+          .lte("bulletin_date", endDate || "9999-12-31")
+          .order("bulletin_date", { ascending: true });
+        if (error) throw error;
+        for (const r of (data || []) as Row[]) {
+          const key = keyCT(r.company, r.ticker);
+          if (!allowedKeys.has(key)) continue;
+          const anchor = anchors.get(key);
+          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
+          all.push(r);
+        }
+      }
+
+      setRows(all);
+      // define ranges globais
+      const ds = all.map(x => x.bulletin_date).filter(Boolean) as string[];
+      if (ds.length) {
+        const min = ds.reduce((a, b) => (a < b ? a : b));
+        const max = ds.reduce((a, b) => (a > b ? a : b));
+        setGlobalMinDate(min);
+        setGlobalMaxDate(max);
+        setStartDate((prev) => prev || min);
+        setEndDate((prev) => prev || max);
+      } else {
+        setGlobalMinDate("");
+        setGlobalMaxDate("");
+        setStartDate("");
+        setEndDate("");
+      }
+      setTimelineLoaded(true);
+    } catch (err: any) {
+      setErrorMsg(err?.message || String(err));
+    } finally {
+      setLoadingTimeline(false);
+    }
+  }
+
+  // ao montar, agora NÃO carrega timeline pesada automaticamente; só âncoras (leve)
+  useEffect(() => { fetchAnchors(); }, []);
+
+  // se já tiver carregado timeline e o usuário mantiver a flag ativa, recarrega quando período/filtros mudarem
+  useEffect(() => {
+    if (timelineLoaded && useAnchor) {
+      fetchTimelineAfterAnchor();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate, onlySingle, onlyMulti, onlyFirst, onlyLast]);
+
+  // sanity de datas
   useEffect(() => {
     if (startDate && endDate && startDate > endDate) setEndDate(startDate);
   }, [startDate, endDate]);
 
+  // manter URL atualizada (como no original)
   useEffect(() => {
     const p = new URLSearchParams();
     if (startDate) p.set("s", startDate);
     if (endDate) p.set("e", endDate);
-    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(",")); // raiz normalizada na URL
+    if (selTickers.length) p.set("t", selTickers.map(o => o.value).join(","));
     if (selCompanies.length) p.set("c", selCompanies.map(o => o.value).join(","));
     if (onlyMulti) p.set("m", "1");
     history.replaceState(null, "", `?${p.toString()}`);
   }, [startDate, endDate, selTickers, selCompanies, onlyMulti]);
 
+  // === derivação e filtros iguais ao original ===
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -335,7 +394,6 @@ export default function Page() {
     return Array.from(s).sort().map((v) => ({ value: v, label: v }));
   }, [rowsInWindow]);
 
-  // opções de ticker por raiz; rótulo simples
   const tickerOpts = useMemo<Opt[]>(() => {
     const roots = new Map<string, Set<string>>();
     for (const r of rowsInWindow) {
@@ -351,12 +409,11 @@ export default function Page() {
 
   useEffect(() => {
     const validCompanies = new Set(companyOpts.map((o) => o.value));
-    const validTickers = new Set(tickerOpts.map((o) => o.value)); // raízes válidas
+    const validTickers = new Set(tickerOpts.map((o) => o.value));
     setSelCompanies((prev) => prev.filter((o) => validCompanies.has(o.value)));
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
-  // contador por raiz
   const tickerCount = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rowsInWindow) {
@@ -367,10 +424,9 @@ export default function Page() {
     return m;
   }, [rowsInWindow]);
 
-  // base filtrada por seleção; seleção é por raiz
   const filteredBase = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value)); // já são raízes
+    const tset = new Set(selTickers.map((o) => o.value));
     return rowsInWindow.filter((r) => {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
@@ -383,7 +439,6 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, tickerCount]);
 
-  // first/last por raiz
   const filtered = useMemo(() => {
     if (!onlyFirst && !onlyLast) return filteredBase;
     const byRoot = new Map<string, Row[]>();
@@ -407,7 +462,6 @@ export default function Page() {
     [filtered],
   );
 
-  // dados do gráfico com ticker_root
   const chartData = useMemo(
     () =>
       filteredSorted.map((r) => ({
@@ -434,7 +488,6 @@ export default function Page() {
     return [min - PAD, max + PAD];
   }, [filteredSorted]);
 
-  // ordem por primeiro evento da raiz
   const tickerOrder = useMemo<string[]>(() => {
     if (selTickers.length) return selTickers.map((o) => o.value);
     const first = new Map<string, number>();
@@ -501,6 +554,7 @@ export default function Page() {
     setShowStats(true);
   };
 
+  // ------- modal -------
   const openBulletinModal = async (row: Row) => {
     setSelectedBulletin(row);
     if (!row.composite_key || row.body_text) return;
@@ -514,28 +568,16 @@ export default function Page() {
     }
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
-
-  // Fechar modal com ESC
   useEffect(() => {
     if (!selectedBulletin) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeBulletinModal();
-      }
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); closeBulletinModal(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedBulletin]);
 
-  function onPointClick(
-    payload: ScatterDatum,
-    _index: number,
-    ...rest: unknown[]
-  ): void {
+  function onPointClick(payload: ScatterDatum, _index: number, ...rest: unknown[]) {
     const evt = (rest[0] as { shiftKey?: boolean } | undefined);
     const isShift = !!(evt && evt.shiftKey);
-
     if (isShift && payload.composite_key) {
       setFKey(payload.composite_key);
       setFCompany("");
@@ -565,15 +607,14 @@ export default function Page() {
   const sortIndicator = (k: SortKey) =>
     sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null;
 
-  // tabela: filtros de texto continuam olhando o ticker publicado
-  const tableRows = useMemo(() => {
+  const tableRowsBase = useMemo(() => {
     const cf = dfCompany.trim().toLowerCase();
     const tf = dfTicker.trim().toLowerCase();
     const kf = dfKey.trim().toLowerCase();
     const dfv = dfDate.trim();
     const yf = dfType.trim().toLowerCase();
 
-    const arr = filtered.filter((r) => {
+    return filtered.filter((r) => {
       const c = (r.company ?? "").toLowerCase();
       const t = (r.ticker ?? "").toLowerCase(); // publicado
       const k = (r.composite_key ?? "").toLowerCase();
@@ -587,7 +628,9 @@ export default function Page() {
       if (yf && !y.includes(yf)) return false;
       return true;
     });
+  }, [filtered, dfCompany, dfTicker, dfKey, dfDate, dfType]);
 
+  const tableRows = useMemo(() => {
     const getVal = (r: Row, k: SortKey) =>
       k === "bulletin_date" ? toDateNum(r.bulletin_date)
       : k === "company" ? (r.company ?? "").toLowerCase()
@@ -595,6 +638,7 @@ export default function Page() {
       : k === "canonical_type" ? (r.canonical_type ?? r.bulletin_type ?? "").toLowerCase()
       : (r.composite_key ?? "").toLowerCase();
 
+    const arr = [...tableRowsBase];
     arr.sort((a, b) => {
       const va = getVal(a, sortKey);
       const vb = getVal(b, sortKey);
@@ -602,14 +646,13 @@ export default function Page() {
       if (va > vb) return sortDir === "asc" ? 1 : -1;
       return 0;
     });
-
     return arr;
-  }, [filtered, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
+  }, [tableRowsBase, sortKey, sortDir]);
 
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
   useEffect(() => { setTableLimit(PAGE); }, [filtered.length, dfCompany, dfTicker, dfKey, dfDate, dfType, sortKey, sortDir]);
 
-  // KPIs (sem mediana e %)
+  // KPIs simples
   const kpis = useMemo(() => {
     const total = tableRows.length;
     const companies = new Set(tableRows.map(r => r.company).filter(Boolean) as string[]).size;
@@ -623,7 +666,7 @@ export default function Page() {
     return { total, companies, tickers };
   }, [tableRows]);
 
-  // -------- Estatísticas (empresas total, =1 e ≥2) ----------
+  // -------- Estatísticas ----------
   const statsBase = useMemo(() => {
     const cset = new Set(selCompanies.map(o => o.value));
     const tset = new Set(selTickers.map(o => o.value));
@@ -646,7 +689,6 @@ export default function Page() {
       if (cnt === 1) one++; else if (cnt >= 2) ge2++;
     }
     const total = one + ge2;
-    // ordem: Total, =1, ≥2
     return [
       { group: "Total", count: total, label: "Total de empresas" },
       { group: "=1", count: one, label: "Apenas 1 boletim" },
@@ -654,7 +696,7 @@ export default function Page() {
     ];
   }, [statsBase]);
 
-  // -------- export helpers ----------
+  // -------- export helpers (mantidos) ----------
   function safeRange(a: string, b: string) {
     const s = a ? a.replaceAll("-", "") : "inicio";
     const e = b ? b.replaceAll("-", "") : "fim";
@@ -733,15 +775,14 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   }
 
-  // NOVO: XLSX agregado da TABELA PÓS-FILTRO
   async function handleExportTableAggXlsx() {
-    if (!tableRows.length) {
+    const baseRows = tableRows;
+    if (!baseRows.length) {
       alert("Tabela vazia. Ajuste os filtros.");
       return;
     }
-    // agrupa apenas o que está na tabela pós-filtro
     const groups = new Map<string, Row[]>();
-    for (const r of tableRows) {
+    for (const r of baseRows) {
       const root = normalizeTicker(r.ticker);
       if (!root) continue;
       if (!groups.has(root)) groups.set(root, []);
@@ -761,7 +802,7 @@ export default function Page() {
       };
     }).sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
 
-    const XLSX = await import("xlsx"); // sheetjs
+    const XLSX = await import("xlsx");
     const ws = XLSX.utils.json_to_sheet(agg);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "CPC_TabelaAgregada");
@@ -769,171 +810,183 @@ export default function Page() {
     XLSX.writeFile(wb, filename);
   }
 
-  // ticks dinâmicos para eixo X
   const xTicksMemo = useMemo(() => {
     if (xDomain[0] === "auto" || xDomain[1] === "auto") return { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) };
     return makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number]);
   }, [xDomain]);
 
+  // ================= RENDER =================
   return (
     <div className="p-6 space-y-4">
-      {/* Título + botões */}
+      {/* Título + export */}
       <div className="flex items-center gap-4">
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
         <div className="ml-auto flex flex-wrap gap-2">
           <button
             onClick={handleExportSelectionTxt}
-            disabled={loading || !tableRows.length}
+            disabled={!tableRows.length}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-            title="Exporta exatamente o que aparece na tabela (todas as linhas filtradas)"
           >
             📜 Exportar seleção
           </button>
           <button
             onClick={handleExportWindowTxt}
-            disabled={loading || !rowsInWindow.length}
+            disabled={!rowsInWindow.length}
             className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-            title="Exporta todo o período, ignorando filtros da tabela"
           >
             🗂️ Exportar período
           </button>
           <button
             onClick={handleExportTableAggXlsx}
-            disabled={loading || !tableRows.length}
+            disabled={!tableRows.length}
             className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
-            title="Exporta XLSX agregado do conteúdo atual da TABELA (pós-filtro)"
           >
             📊 Exportar tabela agregada (.xlsx)
           </button>
         </div>
       </div>
 
-      {/* KPIs enxutos */}
-      <div className="flex flex-wrap gap-3 text-sm">
-        <div className="border rounded px-2 py-1">Empresas: <strong>{kpis.companies}</strong></div>
-        <div className="border rounded px-2 py-1">Tickers: <strong>{kpis.tickers}</strong></div>
-        <div className="border rounded px-2 py-1">Boletins: <strong>{kpis.total}</strong></div>
-      </div>
+      {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
 
-      <div className="flex items-center text-sm text-gray-600">
-        {loading ? "Carregando…" : `${filteredSorted.length} boletins no filtro`}
-      </div>
+      {/* LINHA 1: datas + botões principais (esquerda) | flags (direita) */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-end gap-3 justify-between">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-sm">Start</label>
+              <input
+                type="date"
+                className="border rounded px-2 py-1"
+                value={startDate}
+                min={globalMinDate || undefined}
+                max={endDate || undefined}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm">End</label>
+              <input
+                type="date"
+                className="border rounded px-2 py-1"
+                value={endDate}
+                min={startDate || undefined}
+                max={globalMaxDate || undefined}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2 items-end flex-wrap">
+              <button className="border rounded px-3 py-1" onClick={handleReset} title="Limpar filtros">
+                🔄 Limpar
+              </button>
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYLimit((v) => Math.max(10, v - 10))}
+                title="-10 linhas" disabled={false}
+              >
+                −10
+              </button>
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
+                title="+10 linhas" disabled={false}
+              >
+                +10
+              </button>
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYLimit(tickerOrder.length || 10)}
+                title="Mostrar todas"
+              >
+                Todos
+              </button>
+              <span className="text-sm pl-2">
+                {visibleTickers.length}/{tickerOrder.length || 0}
+              </span>
+            </div>
+          </div>
 
-      {/* Controles superiores */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="block text-sm">Start</label>
-          <input
-            type="date"
-            className="border rounded px-2 py-1"
-            value={startDate}
-            min={globalMinDate || undefined}
-            max={endDate || undefined}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
+          {/* FLAGS à direita */}
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                checked={onlySingle}
+                onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }}
+              />
+              Somente tickers com 1 tipo de boletim
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                checked={onlyMulti}
+                onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }}
+              />
+              Somente tickers com ≥2 tipos de boletins
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                checked={onlyFirst}
+                onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }}
+              />
+              Apenas primeiro
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                checked={onlyLast}
+                onChange={(e) => { setOnlyLast(e.target.checked); if (e.target.checked) setOnlyFirst(false); }}
+              />
+              Apenas último
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                checked={showTickerAxis}
+                onChange={(e) => setShowTickerAxis(e.target.checked)}
+              />
+              Mostrar tickers no eixo Y
+            </label>
+          </div>
         </div>
-        <div>
-          <label className="block text-sm">End</label>
-          <input
-            type="date"
-            className="border rounded px-2 py-1"
-            value={endDate}
-            min={startDate || undefined}
-            max={globalMaxDate || undefined}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
-        </div>
-        <div className="flex gap-2 items-end flex-wrap">
-          <button className="border rounded px-3 py-1" onClick={handleReset} title="Limpar filtros">
-            🔄 Limpar
-          </button>
-          <button
-            className="border rounded px-2 py-1"
-            onClick={() => setYLimit((v) => Math.max(10, v - 10))}
-            title="-10 linhas"
-            disabled={yLimit <= 10}
-          >
-            −10
-          </button>
-          <button
-            className="border rounded px-2 py-1"
-            onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
-            title="+10 linhas"
-            disabled={!tickerOrder.length || yLimit >= tickerOrder.length}
-          >
-            +10
-          </button>
-          <button
-            className="border rounded px-2 py-1"
-            onClick={() => setYLimit(tickerOrder.length || 10)}
-            disabled={!tickerOrder.length || visibleTickers.length === (tickerOrder.length || 0)}
-            title="Mostrar todas"
-          >
-            Todos
-          </button>
-          <span className="text-sm pl-2">
-            {visibleTickers.length}/{tickerOrder.length || 0}
-          </span>
 
-          {/* novos filtros por quantidade */}
-          <label className="flex items-center gap-1 text-sm">
-            <input
-              type="checkbox"
-              checked={onlySingle}
-              onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }}
-            />
-            Somente tickers com 1 tipo de boletim
-          </label>
-          <label className="flex items-center gap-1 text-sm">
-            <input
-              type="checkbox"
-              checked={onlyMulti}
-              onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }}
-            />
-            Somente tickers com ≥2 tipos de boletins
-          </label>
-
-          <label className="flex items-center gap-1 text-sm">
-            <input
-              type="checkbox"
-              checked={onlyFirst}
-              onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }}
-            />
-            Apenas primeiro
-          </label>
-          <label className="flex items-center gap-1 text-sm">
-            <input
-              type="checkbox"
-              checked={onlyLast}
-              onChange={(e) => { setOnlyLast(e.target.checked); if (e.target.checked) setOnlyFirst(false); }}
-            />
-            Apenas último
-          </label>
-          {/* Alterna o eixo Y (tickers) */}
-          <label className="flex items-center gap-1 text-sm">
-            <input
-              type="checkbox"
-              checked={showTickerAxis}
-              onChange={(e) => setShowTickerAxis(e.target.checked)}
-            />
-            Mostrar tickers no eixo Y
-          </label>
-
-          {/* Botões de abrir/fechar */}
-          <button
-            className="border rounded px-3 py-1"
-            onClick={() => setShowChart(v => !v)}
-            title="Abrir/fechar o Scatter"
-          >
+        {/* LINHA 2: botões Abrir/Fechar gráficos (abaixo de "Limpar") */}
+        <div className="flex items-center gap-2">
+          <button className="border rounded px-3 py-1" onClick={() => setShowChart(v => !v)}>
             {showChart ? "Fechar Scatter" : "Abrir Scatter"}
           </button>
-          <button
-            className="border rounded px-3 py-1"
-            onClick={() => setShowStats(v => !v)}
-            title="Abrir/fechar o bloco de estatísticas"
-          >
+          <button className="border rounded px-3 py-1" onClick={() => setShowStats(v => !v)}>
             {showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
           </button>
+        </div>
+
+        {/* LINHA 3: ÂNCORA OPCIONAL */}
+        <div className="flex items-center gap-3">
+          <button
+            className="border rounded px-3 py-1"
+            onClick={fetchAnchors}
+            disabled={loadingAnchors}
+            title="Busca leve de âncoras (CPC)"
+          >
+            {loadingAnchors ? "Carregando âncoras…" : "Recarregar âncoras"}
+          </button>
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={useAnchor}
+              onChange={(e) => setUseAnchor(e.target.checked)}
+            />
+            Usar âncora (NEW LISTING-CPC-SHARES)
+          </label>
+          <button
+            className="border rounded px-3 py-1"
+            onClick={fetchTimelineAfterAnchor}
+            disabled={!useAnchor || loadingTimeline}
+            title="Carrega a timeline pós-âncora"
+          >
+            {loadingTimeline ? "Carregando timeline…" : "Carregar timeline"}
+          </button>
+          {timelineLoaded && <span className="text-sm text-gray-700">timeline carregada</span>}
         </div>
       </div>
 
@@ -955,13 +1008,13 @@ export default function Page() {
             isMulti
             options={tickerOpts}
             value={selTickers}
-            onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])} // value = raiz
+            onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
             classNamePrefix="cpc-select"
           />
         </div>
       </div>
 
-      {/* Gráfico (acordeão simples) */}
+      {/* Scatter */}
       <div
         className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
         style={{ maxHeight: showChart ? chartHeight : 0 }}
@@ -977,7 +1030,7 @@ export default function Page() {
                 domain={xDomain}
                 ticks={xTicksMemo.ticks}
                 tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
-                name="Data"
+                name="Data (UTC)"
                 tick={{ fontSize: 11 }}
                 allowDecimals={false}
               />
@@ -1025,7 +1078,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* BLOCO: Estatísticas (abrir/fechar) */}
+      {/* Estatísticas */}
       <div
         className="w-full border rounded overflow-hidden transition-[max-height] duration-300 ease-in-out"
         style={{ maxHeight: showStats ? 260 : 0 }}
@@ -1055,12 +1108,6 @@ export default function Page() {
           </ResponsiveContainer>
         </div>
       </div>
-
-      {!loading && filtered.length === 0 && (
-        <div className="text-sm text-gray-600 mt-2">
-          Sem resultados. Ajuste datas, empresa/ticker ou filtros “Somente =1/≥2”.
-        </div>
-      )}
 
       {/* Tabela */}
       <div className="space-y-2" ref={tableRef}>
