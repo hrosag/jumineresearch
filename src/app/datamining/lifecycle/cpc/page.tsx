@@ -454,7 +454,7 @@ export default function Page() {
   }, [tableRowsBase, sortKey, sortDir]);
 
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
-  useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY, sortKey, sortDir]);
+  useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
   // -------- Estatísticas (esquerda) --------
   const stats = useMemo(() => {
