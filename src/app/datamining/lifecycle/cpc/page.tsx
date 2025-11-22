@@ -28,6 +28,7 @@ type Row = {
   ticker: string | null;
   bulletin_type: string | null;
   canonical_type: string | null;
+  canonical_class?: string | null; // NEW: 'unicos' | 'mistos'
   bulletin_date: string | null;
   composite_key?: string | null;
   body_text: string | null;
@@ -72,9 +73,8 @@ function fmtDayMonth(ts: number): string {
   return `${dd}/${mm}`;
 }
 function normalizeTicker(t?: string | null) {
-  return (t ?? "").trim().toUpperCase().replace(/\.P$/, "");
+  return (t ?? "").trim().toUpperCase().split(".")[0]; // raiz do ticker
 }
-
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map(r => {
     if (r.body_text || !r.composite_key) return r;
@@ -88,7 +88,6 @@ function keyCT(company?: string | null, ticker?: string | null) {
 function startOfDayUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 function startOfMonthUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
 function startOfQuarterUTC(ts: number) { const d = new Date(ts); const q0 = Math.floor(d.getUTCMonth() / 3) * 3; return Date.UTC(d.getUTCFullYear(), q0, 1); }
-function startOfYearUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), 0, 1); }
 function addDaysUTC(ts: number, n: number) { return ts + n * DAY; }
 function addMonthsUTC(ts: number, n: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1); }
 
@@ -100,12 +99,10 @@ function makeTicksAdaptive(domain: [number, number]) {
   const fMonY = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
   const fMon = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" });
   const fDayMon = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
-  if (span >= 3 * 365 * DAY) { let t = startOfYearUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 12); } return { ticks, formatter: (v: number) => fYear.format(v) }; }
+  if (span >= 3 * 365 * DAY) { let t = startOfMonthUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 12); } return { ticks, formatter: (v: number) => fYear.format(v) }; }
   if (span >= 12 * 30 * DAY) { let t = startOfQuarterUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 3); } return { ticks, formatter: (v: number) => fMonY.format(v) }; }
   if (span >= 3 * 30 * DAY) { let t = startOfMonthUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addMonthsUTC(t, 1); } return { ticks, formatter: (v: number) => fMon.format(v) }; }
-  if (span >= 60 * DAY) { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 15); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
-  if (span >= 14 * DAY) { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 7); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
-  { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 1); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
+  { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 15); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -121,7 +118,6 @@ function errMessage(e: unknown): string {
   }
   return "Erro desconhecido";
 }
-
 function computeAnchorRange(map: Map<string, string>): { min: string; max: string } | null {
   const dates = Array.from(map.values()).filter(Boolean);
   if (!dates.length) return null;
@@ -137,17 +133,11 @@ type BarLabelProps = {
   width?: number;
   value?: number | string;
 };
-
-// Custom label for BarChart values (consistent size/position)
 function BarValueLabel(props: BarLabelProps) {
   const { x, y, width, value } = props;
   const cx = (x ?? 0) + (width ?? 0) / 2;
   const vy = (y ?? 0) - 6;
-  return (
-    <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>
-      {value}
-    </text>
-  );
+  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
 }
 
 // =========================================================
@@ -166,14 +156,13 @@ export default function Page() {
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
-  // FLAGS: só afetam o Scatter
+  // FLAGS: afetam Scatter e, via regra abaixo, a TABELA
   const [onlyMulti, setOnlyMulti] = useState(false);
   const [onlySingle, setOnlySingle] = useState(false);
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
   const [showTickerAxis, setShowTickerAxis] = useState(true);
 
-  // filtros da tabela
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
@@ -194,11 +183,9 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
-  // acordeões
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
-  // Âncoras
   const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
   const [anchorCompanies, setAnchorCompanies] = useState<string[]>([]);
 
@@ -211,7 +198,7 @@ export default function Page() {
         const { data, error } = await supabase
           .from("vw_bulletins_with_canonical")
           .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
-          .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`);
+          .ilike("canonical_type", `%${CPC_CANONICAL}%`);
         if (error) throw error;
 
         const map = new Map<string, string>();
@@ -221,7 +208,7 @@ export default function Page() {
           const d = r.bulletin_date || "";
           if (!d) continue;
           const hasCpc =
-            r.canonical_type === CPC_CANONICAL ||
+            (r.canonical_type || "").toUpperCase().includes(CPC_CANONICAL) ||
             (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
           if (!hasCpc) continue;
           if (!map.has(key) || d < (map.get(key) as string)) map.set(key, d);
@@ -237,7 +224,7 @@ export default function Page() {
     })();
   }, []);
 
-  // 3) ao ligar "ancorar dados", preencher Start/End com o range CPC
+  // ancorar datas com base nas âncoras
   useEffect(() => {
     if (!useAnchor) return;
     const r = computeAnchorRange(anchors);
@@ -246,14 +233,14 @@ export default function Page() {
     if (!endDate) setEndDate(r.max);
   }, [useAnchor, anchors, startDate, endDate]);
 
-  // dataset simples (GO sem âncora)
+  // buscas
   async function fetchSimpleWindow() {
     setLoadingTimeline(true);
     setErrorMsg(null);
     try {
       const q = supabase
         .from("vw_bulletins_with_canonical")
-        .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
+        .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
         .order("bulletin_date", { ascending: true });
       if (startDate) q.gte("bulletin_date", startDate);
       if (endDate) q.lte("bulletin_date", endDate);
@@ -266,8 +253,6 @@ export default function Page() {
       setLoadingTimeline(false);
     }
   }
-
-  // timeline pós-âncora (GO com âncora)
   function computeMinAnchorByCompany(map: Map<string, string>) {
     const perCompany = new Map<string, string>();
     for (const k of map.keys()) {
@@ -298,7 +283,7 @@ export default function Page() {
         }
         const query = supabase
           .from("vw_bulletins_with_canonical")
-          .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
+          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
           .in("company", companies)
           .gte("bulletin_date", chunkMin)
           .order("bulletin_date", { ascending: true });
@@ -337,7 +322,7 @@ export default function Page() {
     history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
   }, [startDate, endDate, selTickers, selCompanies]);
 
-  // janela básica (stats/tabela)
+  // janela por período
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -361,7 +346,7 @@ export default function Page() {
       if (!roots.has(root)) roots.set(root, new Set());
       roots.get(root)!.add(r.ticker ?? "");
     }
-    return Array.from(roots.keys()).sort((a, b) => a.localeCompare(b)).map((root) => ({ value: root, label: root }));
+    return Array.from(roots.keys()).sort().map((root) => ({ value: root, label: root }));
   }, [rowsInWindow]);
   useEffect(() => {
     const validCompanies = new Set(companyOpts.map((o) => o.value));
@@ -372,15 +357,47 @@ export default function Page() {
 
   // -------- Tabela --------
   const filteredBaseForTable = useMemo(() => {
+    // Base por período + Company/Ticker
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
-    return rowsInWindow.filter((r) => {
+    let data = rowsInWindow.filter((r) => {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
       return true;
     });
-  }, [rowsInWindow, selCompanies, selTickers]);
+
+    // Se flags do Scatter estiverem ativas, aplica a mesma lógica aqui
+    const flagsActive = onlySingle || onlyMulti || onlyFirst || onlyLast;
+    if (flagsActive) {
+      const counts = new Map<string, number>();
+      for (const r of data) {
+        const root = normalizeTicker(r.ticker);
+        if (!root) continue;
+        counts.set(root, (counts.get(root) ?? 0) + 1);
+      }
+      if (onlySingle) data = data.filter((r) => counts.get(normalizeTicker(r.ticker)) === 1);
+      if (onlyMulti)  data = data.filter((r) => (counts.get(normalizeTicker(r.ticker)) ?? 0) >= 2);
+      if (onlyFirst || onlyLast) {
+        const byRoot = new Map<string, Row[]>();
+        for (const r of data) {
+          const root = normalizeTicker(r.ticker);
+          if (!root) continue;
+          const arr = byRoot.get(root) || [];
+          arr.push(r);
+          byRoot.set(root, arr);
+        }
+        const picked: Row[] = [];
+        for (const arr of byRoot.values()) {
+          arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+          if (onlyFirst) picked.push(arr[0]);
+          if (onlyLast) picked.push(arr[arr.length - 1]);
+        }
+        data = picked;
+      }
+    }
+    return data;
+  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
 
   const tC = useDeferredValue(dfCompany);
   const tT = useDeferredValue(dfTicker);
@@ -416,8 +433,7 @@ export default function Page() {
       return k;
     });
   }
-  const sortIndicator = (k: SortKey) =>
-    sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null;
+  const sortIndicator = (k: SortKey) => (sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null);
 
   const tableRows = useMemo(() => {
     const getVal = (r: Row, k: SortKey) =>
@@ -440,14 +456,11 @@ export default function Page() {
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY, sortKey, sortDir]);
 
-  // -------- Estatísticas --------
+  // -------- Estatísticas (esquerda) --------
   const stats = useMemo(() => {
-    // Estatística GLOBAL: considera apenas o date_range (rowsInWindow).
-    const base = rowsInWindow;
-
-    const totalBulletins = base.length;
+    const totalBulletins = rowsInWindow.length;
     const perCompany = new Map<string, number>();
-    for (const r of base) {
+    for (const r of rowsInWindow) {
       if (!r.company) continue;
       perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
     }
@@ -465,7 +478,7 @@ export default function Page() {
     return { chartData };
   }, [rowsInWindow]);
 
-  // -------- Scatter (usa flags) --------
+  // -------- Scatter --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
@@ -518,7 +531,6 @@ export default function Page() {
     [filteredForChart],
   ) as ScatterDatum[];
 
-  // xDomain memoizado p/ satisfazer react-hooks/exhaustive-deps
   const xDomain = useMemo<[number | "auto", number | "auto"]>(() => {
     const times = filteredForChart
       .map((r) => toDateNum(r.bulletin_date))
@@ -528,12 +540,9 @@ export default function Page() {
     const max = Math.max(...times);
     return [min - 5 * DAY, max + 5 * DAY];
   }, [filteredForChart]);
-
   const xTicksMemo = useMemo(
-    () =>
-      xDomain[0] === "auto"
-        ? { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) }
-        : makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number]),
+    () => (xDomain[0] === "auto" ? { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) }
+      : makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number])),
     [xDomain],
   );
 
@@ -545,38 +554,19 @@ export default function Page() {
       if (!t) continue;
       const ts = toDateNum(r.bulletin_date);
       const prev = first.get(t);
-      if (Number.isFinite(ts) && (prev === undefined || (ts as number) < prev!)) {
-        first.set(t, ts as number);
-      }
+      if (Number.isFinite(ts) && (prev === undefined || (ts as number) < prev!)) first.set(t, ts as number);
     }
-    return Array.from(first.entries())
-      .sort((a, b) => a[1] - b[1])
-      .map(([t]) => t);
+    return Array.from(first.entries()).sort((a, b) => a[1] - b[1]).map(([t]) => t);
   }, [filteredForChart, selTickers]);
 
   const [yLimit, setYLimit] = useState<number>(10);
-  useEffect(() => {
-    setYLimit((v) => Math.max(v, selTickers.length || 10));
-  }, [selTickers.length]);
-  useEffect(() => {
-    if (tickerOrder.length && yLimit > tickerOrder.length) setYLimit(tickerOrder.length);
-  }, [tickerOrder.length, yLimit]);
+  useEffect(() => { setYLimit((v) => Math.max(v, selTickers.length || 10)); }, [selTickers.length]);
+  useEffect(() => { if (tickerOrder.length && yLimit > tickerOrder.length) setYLimit(tickerOrder.length); }, [tickerOrder.length, yLimit]);
 
-  const visibleTickers = useMemo(
-    () => tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))),
-    [tickerOrder, yLimit],
-  );
-  const chartDataVis = useMemo(
-    () => chartData.filter((d) => d.ticker_root && visibleTickers.includes(d.ticker_root)),
-    [chartData, visibleTickers],
-  );
+  const visibleTickers = useMemo(() => tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))), [tickerOrder, yLimit]);
+  const chartDataVis = useMemo(() => chartData.filter((d) => d.ticker_root && visibleTickers.includes(d.ticker_root)), [chartData, visibleTickers]);
 
-  const chartHeight = useMemo(() => {
-    const base = 260;
-    const perRow = 26;
-    const maxH = 1200;
-    return Math.min(maxH, Math.max(base, 60 + visibleTickers.length * perRow));
-  }, [visibleTickers]);
+  const chartHeight = useMemo(() => Math.min(1200, Math.max(260, 60 + visibleTickers.length * 26)), [visibleTickers]);
 
   const tickerCount = useMemo(() => {
     const m = new Map<string, number>();
@@ -647,13 +637,11 @@ export default function Page() {
     }, 0);
   }
 
-  // helper para exportar .txt unificado
-  const SEP = "\n--------------------------------\n";
+  // Export .txt unificado (apenas body_text)
+  const SEP = "\\n--------------------------------\\n";
   async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
     if (!baseRows.length) return;
-    const missing = Array.from(
-      new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)),
-    );
+    const missing = Array.from(new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)));
     let filled: Row[] = baseRows;
     if (missing.length) {
       const { data } = await supabase
@@ -667,11 +655,7 @@ export default function Page() {
       filled = withBodyTextFilled(baseRows, map);
     }
     const sorted = [...filled].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-    // Exporta SOMENTE o body_text (sem cabeçalho de data/tipo) para não contaminar o conteúdo
-    const story = sorted
-      .map((r) => (r.body_text ?? "").trim())
-      .filter((t) => t.length > 0)
-      .join(SEP);
+    const story = sorted.map((r) => (r.body_text ?? "").trim()).filter((t) => t.length > 0).join(SEP);
     const s = startDate ? startDate.replaceAll("-", "") : "inicio";
     const e = endDate ? endDate.replaceAll("-", "") : "fim";
     const filename = `${filenameBase}_${s}_${e}.txt`;
@@ -684,6 +668,41 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   }
 
+  // ===== NEW: base filtrada por período + Company/Ticker (para o gráfico temático de classe/CPC) =====
+  const baseForThematic = useMemo(() => {
+    const cset = new Set(selCompanies.map((o) => o.value));
+    const tset = new Set(selTickers.map((o) => o.value));
+    return rowsInWindow.filter((r) => {
+      const tRoot = normalizeTicker(r.ticker);
+      if (cset.size && (!r.company || !cset.has(r.company))) return false;
+      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
+      return true;
+    });
+  }, [rowsInWindow, selCompanies, selTickers]);
+
+  const thematicData = useMemo(() => {
+    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+    for (const r of baseForThematic) {
+      const ct = (r.canonical_type ?? "").toUpperCase();
+      const cl = (r.canonical_class ?? "").toLowerCase();
+      if (cl === "unicos") unicos++;
+      if (cl === "mistos") mistos++;
+      if (ct === CPC_CANONICAL) {
+        cpc++;
+        if (cl === "mistos") cpcMisto++;
+      } else {
+        outros++;
+      }
+    }
+    return [
+      { group: "Únicos", count: unicos, label: "Boletins classificados como 'únicos' (pode sobrepor)" },
+      { group: "Mistos", count: mistos, label: "Boletins classificados como 'mistos' (pode sobrepor)" },
+      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
+      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
+      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
+    ];
+  }, [baseForThematic]);
+
 // ================= RENDER =================
   return (
     <div className="p-6 space-y-4">
@@ -691,46 +710,30 @@ export default function Page() {
       <div className="flex items-center gap-4">
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
         <div className="ml-auto flex flex-wrap gap-2">
-          {/* Exportar seleção */}
           <button
             onClick={async () => {
               const base = [...tableRows];
-              if (!base.length) {
-                alert("Nada a exportar. Ajuste os filtros/seleção.");
-                return;
-              }
+              if (!base.length) { alert("Nada a exportar. Ajuste os filtros/seleção."); return; }
               await exportRowsToTxt(base, "cpc_notices_selecao");
             }}
             disabled={!tableRows.length}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-          >
-            📜 Exportar seleção
-          </button>
+          >📜 Exportar seleção</button>
 
-          {/* Exportar período */}
           <button
             onClick={async () => {
               const base = [...rowsInWindow];
-              if (!base.length) {
-                alert("Nenhum boletim no período.");
-                return;
-              }
+              if (!base.length) { alert("Nenhum boletim no período."); return; }
               await exportRowsToTxt(base, "cpc_notices_periodo");
             }}
             disabled={!rowsInWindow.length}
             className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-          >
-            🗂️ Exportar período
-          </button>
+          >🗂️ Exportar período</button>
 
-          {/* Exportar tabela agregada */}
           <button
             onClick={async () => {
               const baseRows = tableRows;
-              if (!baseRows.length) {
-                alert("Tabela vazia. Ajuste os filtros.");
-                return;
-              }
+              if (!baseRows.length) { alert("Tabela vazia. Ajuste os filtros."); return; }
               const groups = new Map<string, Row[]>();
               for (const r of baseRows) {
                 const root = normalizeTicker(r.ticker);
@@ -738,21 +741,19 @@ export default function Page() {
                 if (!groups.has(root)) groups.set(root, []);
                 groups.get(root)!.push(r);
               }
-              const agg = Array.from(groups.entries())
-                .map(([root, arr]) => {
-                  const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-                  const first = ordered[0];
-                  const last = ordered[ordered.length - 1];
-                  return {
-                    ticker_root: root,
-                    company_first: first?.company ?? "",
-                    company_last: last?.company ?? "",
-                    events: ordered.length,
-                    first_date: first?.bulletin_date ?? "",
-                    last_date: last?.bulletin_date ?? "",
-                  };
-                })
-                .sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
+              const agg = Array.from(groups.entries()).map(([root, arr]) => {
+                const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+                const first = ordered[0];
+                const last = ordered[ordered.length - 1];
+                return {
+                  ticker_root: root,
+                  company_first: first?.company ?? "",
+                  company_last: last?.company ?? "",
+                  events: ordered.length,
+                  first_date: first?.bulletin_date ?? "",
+                  last_date: last?.bulletin_date ?? "",
+                };
+              }).sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
 
               const XLSX = await import("xlsx");
               const ws = XLSX.utils.json_to_sheet(agg);
@@ -765,56 +766,28 @@ export default function Page() {
             }}
             disabled={!tableRows.length}
             className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
-          >
-            📊 Exportar tabela agregada (.xlsx)
-          </button>
+          >📊 Exportar tabela agregada (.xlsx)</button>
         </div>
       </div>
 
-      {/* Linha única alinhada: Start | End | ⚡ | 🧹 */}
+      {/* Linha: Start | End | ⚡ | 🧹 */}
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col">
           <label className="block text-sm">Start</label>
-          <input
-            type="date"
-            className="border rounded px-2 h-10"
-            value={startDate}
-            max={endDate || undefined}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
+          <input type="date" className="border rounded px-2 h-10" value={startDate} max={endDate || undefined} onChange={(e) => setStartDate(e.target.value)} />
         </div>
-
         <div className="flex flex-col">
           <label className="block text-sm">End</label>
-          <input
-            type="date"
-            className="border rounded px-2 h-10"
-            value={endDate}
-            min={startDate || undefined}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
+          <input type="date" className="border rounded px-2 h-10" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
         </div>
-
-        {/* botões alinhados ao fundo dos inputs */}
         <div className="flex items-end gap-2 pb-[2px]">
-          <button
-            className="border rounded px-3 h-10 font-semibold flex items-center justify-center"
-            title="Executar busca"
-            aria-label="Executar busca"
-            onClick={() => (useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow())}
-            disabled={loadingTimeline || (!startDate && !endDate && !useAnchor)}
-          >
-            ⚡
-          </button>
-          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">
-            🧹
-          </button>
+          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={() => (useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow())} disabled={loadingTimeline || (!startDate && !endDate && !useAnchor)}>⚡</button>
+          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">🧹</button>
         </div>
       </div>
 
       {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
 
-      {/* "Ancorar dados" logo abaixo */}
       <div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={useAnchor} onChange={(e) => setUseAnchor(e.target.checked)} />
@@ -827,72 +800,71 @@ export default function Page() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
           <label className="block text-sm mb-1">Company</label>
-          <Select
-            isMulti
-            options={companyOpts}
-            value={selCompanies}
-            onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])}
-            classNamePrefix="cpc-select"
-          />
+          <Select isMulti options={companyOpts} value={selCompanies} onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])} classNamePrefix="cpc-select" />
         </div>
         <div>
           <label className="block text-sm mb-1">Ticker</label>
-          <Select
-            isMulti
-            options={tickerOpts}
-            value={selTickers}
-            onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
-            classNamePrefix="cpc-select"
-          />
+          <Select isMulti options={tickerOpts} value={selTickers} onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])} classNamePrefix="cpc-select" />
         </div>
       </div>
 
-      {/* Botões de acordeão */}
+      {/* Acordeões */}
       <div className="flex gap-2 flex-wrap">
-        <button
-          className="border rounded px-3 py-2"
-          onClick={() => setShowChart((v) => !v)}
-          title={showChart ? "Fechar Scatter" : "Abrir Scatter"}
-        >
+        <button className="border rounded px-3 py-2" onClick={() => setShowChart((v) => !v)} title={showChart ? "Fechar Scatter" : "Abrir Scatter"}>
           {showChart ? "Fechar Scatter" : "Abrir Scatter"}
         </button>
-        <button
-          className="border rounded px-3 py-2"
-          onClick={() => setShowStats((v) => !v)}
-          title={showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
-        >
+        <button className="border rounded px-3 py-2" onClick={() => setShowStats((v) => !v)} title={showStats ? "Fechar estatísticas" : "Abrir estatísticas"}>
           {showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
         </button>
       </div>
 
-      {/* Estatísticas (Coluna) */}
+      {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
         <div className="w-full border rounded p-3">
           <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="w-full md:w-1/2">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart
-                data={stats.chartData}
-                margin={{ top: 16, right: 24, bottom: 8, left: 8 }}
-                barCategoryGap="20%"
-                barGap={2}
-              >
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip
-                  formatter={(v: unknown, _n: unknown, p: unknown) => {
-                    const payload = p as { payload?: { label?: string } } | undefined;
-                    const val = typeof v === "number" ? String(v) : String(v);
-                    return [val, payload?.payload?.label ?? ""];
-                  }}
-                  labelFormatter={(l: string) => l}
-                />
-                <Bar dataKey="count">
-                  <LabelList dataKey="count" content={<BarValueLabel />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Esquerda: estatística global por período */}
+            <div>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <Tooltip
+                    formatter={(v: unknown, _n: unknown, p: unknown) => {
+                      const payload = p as { payload?: { label?: string } } | undefined;
+                      return [String(v), payload?.payload?.label ?? ""];
+                    }}
+                    labelFormatter={(l: string) => l}
+                  />
+                  <Bar dataKey="count">
+                    <LabelList dataKey="count" content={<BarValueLabel />} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
+            <div>
+              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <Tooltip
+                    formatter={(v: unknown, _n: unknown, p: unknown) => {
+                      const payload = p as { payload?: { label?: string } } | undefined;
+                      return [String(v), payload?.payload?.label ?? ""];
+                    }}
+                    labelFormatter={(l: string) => l}
+                  />
+                  <Bar dataKey="count">
+                    <LabelList dataKey="count" content={<BarValueLabel />} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
       )}
@@ -902,47 +874,19 @@ export default function Page() {
         <div className="w-full border rounded overflow-hidden">
           <div className="px-2 py-2 border-b flex flex-wrap items-center gap-3 text-sm">
             <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={onlySingle}
-                onChange={(e) => {
-                  setOnlySingle(e.target.checked);
-                  if (e.target.checked) setOnlyMulti(false);
-                }}
-              />
+              <input type="checkbox" checked={onlySingle} onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }} />
               =1 Boletim
             </label>
             <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={onlyMulti}
-                onChange={(e) => {
-                  setOnlyMulti(e.target.checked);
-                  if (e.target.checked) setOnlySingle(false);
-                }}
-              />
+              <input type="checkbox" checked={onlyMulti} onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }} />
               ≥2 Boletins
             </label>
             <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={onlyFirst}
-                onChange={(e) => {
-                  setOnlyFirst(e.target.checked);
-                  if (e.target.checked) setOnlyLast(false);
-                }}
-              />
+              <input type="checkbox" checked={onlyFirst} onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }} />
               Apenas primeiro
             </label>
             <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={onlyLast}
-                onChange={(e) => {
-                  setOnlyLast(e.target.checked);
-                  if (e.target.checked) setOnlyFirst(false);
-                }}
-              />
+              <input type="checkbox" checked={onlyLast} onChange={(e) => { setOnlyLast(e.target.checked); if (e.target.checked) setOnlyFirst(false); }} />
               Apenas último
             </label>
             <label className="flex items-center gap-1">
@@ -951,27 +895,9 @@ export default function Page() {
             </label>
 
             <div className="ml-auto flex items-center gap-2">
-              <button
-                className="border rounded px-2 h-10"
-                onClick={() => setYLimit((v) => Math.max(10, v - 10))}
-                title="-10 linhas do eixo Y"
-              >
-                −10
-              </button>
-              <button
-                className="border rounded px-2 h-10"
-                onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
-                title="+10 linhas do eixo Y"
-              >
-                +10
-              </button>
-              <button
-                className="border rounded px-2 h-10"
-                onClick={() => setYLimit(tickerOrder.length || 10)}
-                title="Mostrar todas as linhas do eixo Y"
-              >
-                Todos
-              </button>
+              <button className="border rounded px-2 h-10" onClick={() => setYLimit((v) => Math.max(10, v - 10))} title="-10 linhas do eixo Y">−10</button>
+              <button className="border rounded px-2 h-10" onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))} title="+10 linhas do eixo Y">+10</button>
+              <button className="border rounded px-2 h-10" onClick={() => setYLimit(tickerOrder.length || 10)} title="Mostrar todas as linhas do eixo Y">Todos</button>
             </div>
           </div>
 
@@ -1014,9 +940,7 @@ export default function Page() {
                         <div><strong>Empresa:</strong> {d.company || "—"}</div>
                         <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
                         <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
-                        <div className="mt-1 text-xs text-gray-600">
-                          Clique: filtra empresa | Shift+Clique: isola este boletim
-                        </div>
+                        <div className="mt-1 text-xs text-gray-600">Clique: filtra empresa | Shift+Clique: isola este boletim</div>
                       </div>
                     );
                   }}
@@ -1024,7 +948,6 @@ export default function Page() {
                 <Scatter data={chartDataVis} onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)} />
               </ScatterChart>
             </ResponsiveContainer>
-
             {selTickers.length > 0 && chartDataVis.length === 0 && (
               <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
             )}
@@ -1040,33 +963,23 @@ export default function Page() {
             <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
                 <th className="p-2" aria-sort={sortKey === "company" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>
-                    Empresa {sortIndicator("company")}
-                  </button>
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>Empresa {sortIndicator("company")}</button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fCompany} onChange={(e) => setFCompany(e.target.value)} />
                 </th>
                 <th className="p-2" aria-sort={sortKey === "ticker" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>
-                    Ticker {sortIndicator("ticker")}
-                  </button>
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>Ticker {sortIndicator("ticker")}</button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
                 </th>
                 <th className="p-2" aria-sort={sortKey === "composite_key" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>
-                    Composite Key {sortIndicator("composite_key")}
-                  </button>
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>Composite Key {sortIndicator("composite_key")}</button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fKey} onChange={(e) => setFKey(e.target.value)} />
                 </th>
                 <th className="p-2" aria-sort={sortKey === "bulletin_date" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>
-                    Data {sortIndicator("bulletin_date")}
-                  </button>
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>Data {sortIndicator("bulletin_date")}</button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD" value={fDate} onChange={(e) => setFDate(e.target.value)} />
                 </th>
                 <th className="p-2" aria-sort={sortKey === "canonical_type" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>
-                    Tipo de Boletim {sortIndicator("canonical_type")}
-                  </button>
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>Tipo de Boletim {sortIndicator("canonical_type")}</button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fType} onChange={(e) => setFType(e.target.value)} />
                 </th>
               </tr>
@@ -1084,9 +997,7 @@ export default function Page() {
                         <button type="button" onClick={() => openBulletinModal(row)} className="text-blue-600 hover:underline" title="Abrir boletim completo">
                           {compositeKey}
                         </button>
-                      ) : (
-                        compositeKey
-                      )}
+                      ) : (compositeKey)}
                     </td>
                     <td className="p-2">{row.bulletin_date}</td>
                     <td className="p-2">{row.canonical_type ?? row.bulletin_type ?? "—"}</td>
@@ -1094,35 +1005,18 @@ export default function Page() {
                 );
               })}
               {tableRowsPage.length === 0 && (
-                <tr>
-                  <td className="p-2 text-gray-600" colSpan={5}>Nenhum registro encontrado.</td>
-                </tr>
+                <tr><td className="p-2 text-gray-600" colSpan={5}>Nenhum registro encontrado.</td></tr>
               )}
             </tbody>
-          
-</table>
+          </table>
         </div>
+
         <div className="flex items-center gap-2 mt-2">
           <div className="text-sm text-gray-600">Exibindo {tableRowsPage.length} de {tableRows.length} registros</div>
-          <button
-            className="border rounded px-3 py-1"
-            onClick={() => setTableLimit((v) => Math.min(tableRows.length, v + 50))}
-            disabled={tableRowsPage.length >= tableRows.length}
-            title="Mostrar mais 50 linhas"
-          >
-            Mostrar +50
-          </button>
-          <button
-            className="border rounded px-3 py-1"
-            onClick={() => setTableLimit(tableRows.length)}
-            disabled={tableRowsPage.length >= tableRows.length}
-            title="Mostrar todas as linhas"
-          >
-            Mostrar todos
-          </button>
+          <button className="border rounded px-3 py-1" onClick={() => setTableLimit((v) => Math.min(tableRows.length, v + 50))} disabled={tableRowsPage.length >= tableRows.length} title="Mostrar mais 50 linhas">Mostrar +50</button>
+          <button className="border rounded px-3 py-1" onClick={() => setTableLimit(tableRows.length)} disabled={tableRowsPage.length >= tableRows.length} title="Mostrar todas as linhas">Mostrar todos</button>
         </div>
       </div>
-
 
       {/* Modal */}
       {selectedBulletin && (
