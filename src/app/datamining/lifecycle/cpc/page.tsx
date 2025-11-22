@@ -77,12 +77,14 @@ function normalizeTicker(t?: string | null) {
 function keyCT(company?: string | null, ticker?: string | null) {
   return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
 }
+
 function startOfDayUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 function startOfMonthUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
 function startOfQuarterUTC(ts: number) { const d = new Date(ts); const q0 = Math.floor(d.getUTCMonth() / 3) * 3; return Date.UTC(d.getUTCFullYear(), q0, 1); }
 function startOfYearUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), 0, 1); }
 function addDaysUTC(ts: number, n: number) { return ts + n * DAY; }
 function addMonthsUTC(ts: number, n: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1); }
+
 function makeTicksAdaptive(domain: [number, number]) {
   const [min, max] = domain;
   if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) };
@@ -98,11 +100,27 @@ function makeTicksAdaptive(domain: [number, number]) {
   if (span >= 14 * DAY) { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 7); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
   { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 1); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
 }
-function chunk<T>(arr: T[], size: number): T[][] { const out: T[][] = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 function errMessage(e: unknown): string {
   if (typeof e === "string") return e;
-  if (e && typeof e === "object" && "message" in e) { const m = (e as { message?: unknown }).message; return typeof m === "string" ? m : "Erro desconhecido"; }
+  if (e && typeof e === "object" && "message" in e) {
+    const m = (e as { message?: unknown }).message;
+    return typeof m === "string" ? m : "Erro desconhecido";
+  }
   return "Erro desconhecido";
+}
+
+function computeAnchorRange(map: Map<string, string>): { min: string; max: string } | null {
+  const dates = Array.from(map.values()).filter(Boolean);
+  if (!dates.length) return null;
+  const min = dates.reduce((a, b) => (a < b ? a : b));
+  const max = dates.reduce((a, b) => (a > b ? a : b));
+  return { min, max };
 }
 
 // =========================================================
@@ -149,6 +167,7 @@ export default function Page() {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 
+  // acordeões
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
@@ -159,20 +178,24 @@ export default function Page() {
   // fetch âncoras
   useEffect(() => {
     (async () => {
-      setLoadingAnchors(true); setErrorMsg(null);
+      setLoadingAnchors(true);
+      setErrorMsg(null);
       try {
         const { data, error } = await supabase
           .from("vw_bulletins_with_canonical")
           .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
           .or(`canonical_type.eq.${CPC_CANONICAL},bulletin_type.ilike.%${CPC_CANONICAL}%`);
         if (error) throw error;
+
         const map = new Map<string, string>();
         const companies = new Set<string>();
         for (const r of (data || []) as Row[]) {
           const key = keyCT(r.company, r.ticker);
           const d = r.bulletin_date || "";
           if (!d) continue;
-          const hasCpc = r.canonical_type === CPC_CANONICAL || (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
+          const hasCpc =
+            r.canonical_type === CPC_CANONICAL ||
+            (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
           if (!hasCpc) continue;
           if (!map.has(key) || d < (map.get(key) as string)) map.set(key, d);
           if (r.company) companies.add(r.company);
@@ -181,13 +204,25 @@ export default function Page() {
         setAnchorCompanies(Array.from(companies).sort());
       } catch (e) {
         setErrorMsg(errMessage(e));
-      } finally { setLoadingAnchors(false); }
+      } finally {
+        setLoadingAnchors(false);
+      }
     })();
   }, []);
 
+  // 3) ao ligar "ancorar dados", preencher Start/End com o range CPC
+  useEffect(() => {
+    if (!useAnchor) return;
+    const r = computeAnchorRange(anchors);
+    if (!r) return;
+    if (!startDate) setStartDate(r.min);
+    if (!endDate) setEndDate(r.max);
+  }, [useAnchor, anchors, startDate, endDate]);
+
   // dataset simples (GO sem âncora)
   async function fetchSimpleWindow() {
-    setLoadingTimeline(true); setErrorMsg(null);
+    setLoadingTimeline(true);
+    setErrorMsg(null);
     try {
       const q = supabase
         .from("vw_bulletins_with_canonical")
@@ -200,7 +235,9 @@ export default function Page() {
       setRows((data || []) as Row[]);
     } catch (e) {
       setErrorMsg(errMessage(e));
-    } finally { setLoadingTimeline(false); }
+    } finally {
+      setLoadingTimeline(false);
+    }
   }
 
   // timeline pós-âncora (GO com âncora)
@@ -214,12 +251,13 @@ export default function Page() {
     }
     return perCompany;
   }
-  function chunk<T>(arr: T[], size: number): T[][] { const out: T[][] = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
-
   async function fetchTimelineAfterAnchor() {
-    if (!useAnchor) return;
-    if (!anchors.size || !anchorCompanies.length) { setErrorMsg("Âncoras indisponíveis."); return; }
-    setLoadingTimeline(true); setErrorMsg(null);
+    if (!anchors.size || !anchorCompanies.length) {
+      setErrorMsg("Âncoras indisponíveis.");
+      return;
+    }
+    setLoadingTimeline(true);
+    setErrorMsg(null);
     try {
       const perCompanyMin = computeMinAnchorByCompany(anchors);
       const chunks = chunk(anchorCompanies, 100);
@@ -227,7 +265,10 @@ export default function Page() {
       const all: Row[] = [];
       for (const companies of chunks) {
         let chunkMin = "9999-12-31";
-        for (const c of companies) { const d = perCompanyMin.get(c)!; if (d < chunkMin) chunkMin = d; }
+        for (const c of companies) {
+          const d = perCompanyMin.get(c)!;
+          if (d < chunkMin) chunkMin = d;
+        }
         const query = supabase
           .from("vw_bulletins_with_canonical")
           .select("id, source_file, company, ticker, bulletin_type, canonical_type, bulletin_date, composite_key")
@@ -248,13 +289,17 @@ export default function Page() {
       setRows(all);
     } catch (e) {
       setErrorMsg(errMessage(e));
-    } finally { setLoadingTimeline(false); }
+    } finally {
+      setLoadingTimeline(false);
+    }
   }
 
   // sanity de datas
-  useEffect(() => { if (startDate && endDate && startDate > endDate) setEndDate(startDate); }, [startDate, endDate]);
+  useEffect(() => {
+    if (startDate && endDate && startDate > endDate) setEndDate(startDate);
+  }, [startDate, endDate]);
 
-  // URL
+  // URL (não dispara buscas)
   useEffect(() => {
     const p = new URLSearchParams();
     if (startDate) p.set("s", startDate);
@@ -343,7 +388,8 @@ export default function Page() {
       return k;
     });
   }
-  const sortIndicator = (k: SortKey) => (sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null);
+  const sortIndicator = (k: SortKey) =>
+    sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null;
 
   const tableRows = useMemo(() => {
     const getVal = (r: Row, k: SortKey) =>
@@ -370,7 +416,6 @@ export default function Page() {
   const stats = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
-
     const base = rowsInWindow.filter((r) => {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
@@ -380,19 +425,22 @@ export default function Page() {
 
     const totalBulletins = base.length;
     const perCompany = new Map<string, number>();
-    for (const r of base) { if (!r.company) continue; perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1); }
+    for (const r of base) {
+      if (!r.company) continue;
+      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
+    }
     const totalCompanies = perCompany.size;
     let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) { if (cnt === 1) eq1++; else if (cnt >= 2) ge2++; }
-
+    for (const cnt of perCompany.values()) {
+      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
+    }
     const chartData = [
       { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
       { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
       { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
       { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
     ];
-
-    return { totalBulletins, totalCompanies, eq1, ge2, chartData };
+    return { chartData };
   }, [rowsInWindow, selCompanies, selTickers]);
 
   // -------- Scatter (usa flags) --------
@@ -406,17 +454,27 @@ export default function Page() {
       return true;
     });
     const counts = new Map<string, number>();
-    for (const r of data) { const root = normalizeTicker(r.ticker); if (!root) continue; counts.set(root, (counts.get(root) ?? 0) + 1); }
+    for (const r of data) {
+      const root = normalizeTicker(r.ticker);
+      if (!root) continue;
+      counts.set(root, (counts.get(root) ?? 0) + 1);
+    }
     if (onlySingle) data = data.filter((r) => counts.get(normalizeTicker(r.ticker)) === 1);
-    if (onlyMulti)  data = data.filter((r) => (counts.get(normalizeTicker(r.ticker)) ?? 0) >= 2);
+    if (onlyMulti) data = data.filter((r) => (counts.get(normalizeTicker(r.ticker)) ?? 0) >= 2);
     if (onlyFirst || onlyLast) {
       const byRoot = new Map<string, Row[]>();
-      for (const r of data) { const root = normalizeTicker(r.ticker); if (!root) continue; const arr = byRoot.get(root) || []; arr.push(r); byRoot.set(root, arr); }
+      for (const r of data) {
+        const root = normalizeTicker(r.ticker);
+        if (!root) continue;
+        const arr = byRoot.get(root) || [];
+        arr.push(r);
+        byRoot.set(root, arr);
+      }
       const picked: Row[] = [];
       for (const arr of byRoot.values()) {
         arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
         if (onlyFirst) picked.push(arr[0]);
-        if (onlyLast)  picked.push(arr[arr.length - 1]);
+        if (onlyLast) picked.push(arr[arr.length - 1]);
       }
       data = picked;
     }
@@ -424,22 +482,33 @@ export default function Page() {
   }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
 
   const chartData = useMemo(
-    () => filteredForChart.map((r) => ({
-      company: r.company ?? "",
-      ticker: r.ticker ?? "",
-      ticker_root: normalizeTicker(r.ticker),
-      dateNum: toDateNum(r.bulletin_date),
-      canonical_type: r.canonical_type ?? "",
-      type_display: r.canonical_type ?? r.bulletin_type ?? "",
-      dateISO: r.bulletin_date ?? "",
-      composite_key: r.composite_key ?? undefined,
-    })),
+    () =>
+      filteredForChart.map((r) => ({
+        company: r.company ?? "",
+        ticker: r.ticker ?? "",
+        ticker_root: normalizeTicker(r.ticker),
+        dateNum: toDateNum(r.bulletin_date),
+        canonical_type: r.canonical_type ?? "",
+        type_display: r.canonical_type ?? r.bulletin_type ?? "",
+        dateISO: r.bulletin_date ?? "",
+        composite_key: r.composite_key ?? undefined,
+      })),
     [filteredForChart],
   ) as ScatterDatum[];
 
-  const times = filteredForChart.map((r) => toDateNum(r.bulletin_date)).filter((v) => Number.isFinite(v)) as number[];
-  const xDomain: [number | "auto", number | "auto"] = times.length ? [Math.min(...times) - 5 * DAY, Math.max(...times) + 5 * DAY] : ["auto", "auto"];
-  const xTicksMemo = useMemo(() => (xDomain[0] === "auto" ? { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) } : makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number])), [xDomain]);
+  const times = filteredForChart
+    .map((r) => toDateNum(r.bulletin_date))
+    .filter((v) => Number.isFinite(v)) as number[];
+  const xDomain: [number | "auto", number | "auto"] = times.length
+    ? [Math.min(...times) - 5 * DAY, Math.max(...times) + 5 * DAY]
+    : ["auto", "auto"];
+  const xTicksMemo = useMemo(
+    () =>
+      xDomain[0] === "auto"
+        ? { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) }
+        : makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number]),
+    [xDomain],
+  );
 
   const tickerOrder = useMemo<string[]>(() => {
     if (selTickers.length) return selTickers.map((o) => o.value);
@@ -449,36 +518,70 @@ export default function Page() {
       if (!t) continue;
       const ts = toDateNum(r.bulletin_date);
       const prev = first.get(t);
-      if (Number.isFinite(ts) && (prev === undefined || (ts as number) < prev!)) first.set(t, ts as number);
+      if (Number.isFinite(ts) && (prev === undefined || (ts as number) < prev!)) {
+        first.set(t, ts as number);
+      }
     }
-    return Array.from(first.entries()).sort((a, b) => a[1] - b[1]).map(([t]) => t);
+    return Array.from(first.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([t]) => t);
   }, [filteredForChart, selTickers]);
 
   const [yLimit, setYLimit] = useState<number>(10);
-  useEffect(() => { setYLimit((v) => Math.max(v, selTickers.length || 10)); }, [selTickers.length]);
-  useEffect(() => { if (tickerOrder.length && yLimit > tickerOrder.length) setYLimit(tickerOrder.length); }, [tickerOrder.length, yLimit]);
+  useEffect(() => {
+    setYLimit((v) => Math.max(v, selTickers.length || 10));
+  }, [selTickers.length]);
+  useEffect(() => {
+    if (tickerOrder.length && yLimit > tickerOrder.length) setYLimit(tickerOrder.length);
+  }, [tickerOrder.length, yLimit]);
 
-  const visibleTickers = useMemo(() => tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))), [tickerOrder, yLimit]);
-  const chartDataVis = useMemo(() => chartData.filter((d) => d.ticker_root && visibleTickers.includes(d.ticker_root)), [chartData, visibleTickers]);
+  const visibleTickers = useMemo(
+    () => tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))),
+    [tickerOrder, yLimit],
+  );
+  const chartDataVis = useMemo(
+    () => chartData.filter((d) => d.ticker_root && visibleTickers.includes(d.ticker_root)),
+    [chartData, visibleTickers],
+  );
 
-  const chartHeight = useMemo(() => { const base = 260, perRow = 26, maxH = 1200; return Math.min(maxH, Math.max(base, 60 + visibleTickers.length * perRow)); }, [visibleTickers]);
+  const chartHeight = useMemo(() => {
+    const base = 260;
+    const perRow = 26;
+    const maxH = 1200;
+    return Math.min(maxH, Math.max(base, 60 + visibleTickers.length * perRow));
+  }, [visibleTickers]);
 
   const tickerCount = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of rowsInWindow) { const t = normalizeTicker(r.ticker); if (!t) continue; m.set(t, (m.get(t) ?? 0) + 1); }
+    for (const r of rowsInWindow) {
+      const t = normalizeTicker(r.ticker);
+      if (!t) continue;
+      m.set(t, (m.get(t) ?? 0) + 1);
+    }
     return m;
   }, [rowsInWindow]);
 
   // Reset
   const handleReset = () => {
-    setSelCompanies([]); setSelTickers([]);
-    setOnlyMulti(false); setOnlySingle(false); setOnlyFirst(false); setOnlyLast(false);
+    setSelCompanies([]);
+    setSelTickers([]);
+    setOnlyMulti(false);
+    setOnlySingle(false);
+    setOnlyFirst(false);
+    setOnlyLast(false);
     setShowTickerAxis(true);
-    setSortKey("bulletin_date"); setSortDir("asc");
-    setFCompany(""); setFTicker(""); setFKey(""); setFDate(""); setFType("");
+    setSortKey("bulletin_date");
+    setSortDir("asc");
+    setFCompany("");
+    setFTicker("");
+    setFKey("");
+    setFDate("");
+    setFType("");
     setTableLimit(PAGE);
-    setShowChart(true); setShowStats(true);
-    setStartDate(""); setEndDate("");
+    setShowChart(true);
+    setShowStats(true);
+    setStartDate("");
+    setEndDate("");
     setRows([]);
   };
 
@@ -492,16 +595,29 @@ export default function Page() {
       .select("body_text")
       .eq("composite_key", row.composite_key)
       .single();
-    if (data) setSelectedBulletin((prev) => (prev ? { ...prev, body_text: (data as { body_text?: string | null }).body_text ?? null } : prev));
+    if (data) {
+      setSelectedBulletin((prev) =>
+        prev ? { ...prev, body_text: (data as { body_text?: string | null }).body_text ?? null } : prev,
+      );
+    }
   };
   const closeBulletinModal = () => setSelectedBulletin(null);
 
   function onPointClick(payload: ScatterDatum, _index: number, ...rest: unknown[]) {
     const evtLike = rest[0] as { shiftKey?: boolean } | undefined;
     const isShift = Boolean(evtLike && evtLike.shiftKey);
-    if (isShift && payload.composite_key) { setFKey(payload.composite_key); setFCompany(""); }
-    else { setFCompany(payload.company || ""); setFKey(""); }
-    setTimeout(() => { tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); firstRowRef.current?.classList.add("bg-yellow-50"); setTimeout(() => firstRowRef.current?.classList.remove("bg-yellow-50"), 1800); }, 0);
+    if (isShift && payload.composite_key) {
+      setFKey(payload.composite_key);
+      setFCompany("");
+    } else {
+      setFCompany(payload.company || "");
+      setFKey("");
+    }
+    setTimeout(() => {
+      tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      firstRowRef.current?.classList.add("bg-yellow-50");
+      setTimeout(() => firstRowRef.current?.classList.remove("bg-yellow-50"), 1800);
+    }, 0);
   }
 
   // ================= RENDER =================
@@ -515,8 +631,13 @@ export default function Page() {
           <button
             onClick={async () => {
               const base = tableRows;
-              if (!base.length) { alert("Nada a exportar. Ajuste os filtros/seleção."); return; }
-              const missing = Array.from(new Set(base.filter(r => !r.body_text && r.composite_key).map(r => r.composite_key as string)));
+              if (!base.length) {
+                alert("Nada a exportar. Ajuste os filtros/seleção.");
+                return;
+              }
+              const missing = Array.from(
+                new Set(base.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)),
+              );
               if (missing.length) {
                 const { data } = await supabase
                   .from("vw_bulletins_with_canonical")
@@ -526,16 +647,23 @@ export default function Page() {
                 for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
                   if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
                 }
-                base.forEach(r => { if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? ""; });
+                base.forEach((r) => {
+                  if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? "";
+                });
               }
               const sorted = [...base].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-              const story = sorted.map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`).join("\n--------------------------------\n");
+              const story = sorted
+                .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
+                .join("\n--------------------------------\n");
               const s = startDate ? startDate.replaceAll("-", "") : "inicio";
               const e = endDate ? endDate.replaceAll("-", "") : "fim";
               const filename = `cpc_notices_selecao_${s}_${e}.txt`;
               const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
               const url = window.URL.createObjectURL(blob);
-              const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = filename;
+              a.click();
               window.URL.revokeObjectURL(url);
             }}
             disabled={!tableRows.length}
@@ -548,8 +676,13 @@ export default function Page() {
           <button
             onClick={async () => {
               const base = [...rowsInWindow].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-              if (!base.length) { alert("Nenhum boletim no período."); return; }
-              const missing = Array.from(new Set(base.filter(r => !r.body_text && r.composite_key).map(r => r.composite_key as string)));
+              if (!base.length) {
+                alert("Nenhum boletim no período.");
+                return;
+              }
+              const missing = Array.from(
+                new Set(base.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)),
+              );
               if (missing.length) {
                 const { data } = await supabase
                   .from("vw_bulletins_with_canonical")
@@ -559,15 +692,22 @@ export default function Page() {
                 for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
                   if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
                 }
-                base.forEach(r => { if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? ""; });
+                base.forEach((r) => {
+                  if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? "";
+                });
               }
-              const story = base.map((r) => `${r.bulletin_date ?? ""} — ${(r.bulletin_type ?? "")}\n${r.body_text ?? ""}\n`).join("\n--------------------------------\n");
+              const story = base
+                .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
+                .join("\n--------------------------------\n");
               const s = startDate ? startDate.replaceAll("-", "") : "inicio";
               const e = endDate ? endDate.replaceAll("-", "") : "fim";
               const filename = `cpc_notices_periodo_${s}_${e}.txt`;
               const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
               const url = window.URL.createObjectURL(blob);
-              const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = filename;
+              a.click();
               window.URL.revokeObjectURL(url);
             }}
             disabled={!rowsInWindow.length}
@@ -580,7 +720,10 @@ export default function Page() {
           <button
             onClick={async () => {
               const baseRows = tableRows;
-              if (!baseRows.length) { alert("Tabela vazia. Ajuste os filtros."); return; }
+              if (!baseRows.length) {
+                alert("Tabela vazia. Ajuste os filtros.");
+                return;
+              }
               const groups = new Map<string, Row[]>();
               for (const r of baseRows) {
                 const root = normalizeTicker(r.ticker);
@@ -588,19 +731,21 @@ export default function Page() {
                 if (!groups.has(root)) groups.set(root, []);
                 groups.get(root)!.push(r);
               }
-              const agg = Array.from(groups.entries()).map(([root, arr]) => {
-                const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-                const first = ordered[0];
-                const last = ordered[ordered.length - 1];
-                return {
-                  ticker_root: root,
-                  company_first: first?.company ?? "",
-                  company_last: last?.company ?? "",
-                  events: ordered.length,
-                  first_date: first?.bulletin_date ?? "",
-                  last_date: last?.bulletin_date ?? "",
-                };
-              }).sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
+              const agg = Array.from(groups.entries())
+                .map(([root, arr]) => {
+                  const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+                  const first = ordered[0];
+                  const last = ordered[ordered.length - 1];
+                  return {
+                    ticker_root: root,
+                    company_first: first?.company ?? "",
+                    company_last: last?.company ?? "",
+                    events: ordered.length,
+                    first_date: first?.bulletin_date ?? "",
+                    last_date: last?.bulletin_date ?? "",
+                  };
+                })
+                .sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
 
               const XLSX = await import("xlsx");
               const ws = XLSX.utils.json_to_sheet(agg);
@@ -619,36 +764,54 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Linha única: Start | End | GO | 🧹 */}
+      {/* Linha única alinhada: Start | End | GO | 🧹 */}
       <div className="flex flex-wrap items-end gap-2">
-        <div>
+        <div className="flex flex-col">
           <label className="block text-sm">Start</label>
-          <input type="date" className="border rounded px-2 py-1" value={startDate} max={endDate || undefined} onChange={(e) => setStartDate(e.target.value)} />
+          <input
+            type="date"
+            className="border rounded px-2 py-1"
+            value={startDate}
+            max={endDate || undefined}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
         </div>
-        <div>
+
+        <div className="flex flex-col">
           <label className="block text-sm">End</label>
-          <input type="date" className="border rounded px-2 py-1" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
+          <input
+            type="date"
+            className="border rounded px-2 py-1"
+            value={endDate}
+            min={startDate || undefined}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
         </div>
-        <div className="pb-1">
+
+        {/* botões alinhados ao fundo dos inputs */}
+        <div className="flex items-end gap-2 pb-[2px]">
           <button
-            className="border rounded px-3 py-2 font-semibold mt-6"
+            className="border rounded px-3 py-2 font-semibold"
             title="GO"
-            onClick={() => { useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow(); }}
+            onClick={() => (useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow())}
             disabled={loadingTimeline || (!startDate && !endDate && !useAnchor)}
           >
             GO
           </button>
-        </div>
-        <div className="pb-1">
-          <button className="border rounded px-2 py-2 mt-6" onClick={handleReset} title="Limpar">🧹</button>
+          <button className="border rounded px-2 py-2" onClick={handleReset} title="Limpar">
+            🧹
+          </button>
         </div>
       </div>
+
+      {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
 
       {/* "Ancorar dados" logo abaixo */}
       <div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={useAnchor} onChange={(e) => setUseAnchor(e.target.checked)} />
           Ancorar dados
+          {loadingAnchors && <span className="text-xs text-gray-500">(carregando âncoras...)</span>}
         </label>
       </div>
 
@@ -656,126 +819,210 @@ export default function Page() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
           <label className="block text-sm mb-1">Company</label>
-          <Select isMulti options={companyOpts} value={selCompanies} onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])} classNamePrefix="cpc-select" />
+          <Select
+            isMulti
+            options={companyOpts}
+            value={selCompanies}
+            onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])}
+            classNamePrefix="cpc-select"
+          />
         </div>
         <div>
           <label className="block text-sm mb-1">Ticker</label>
-          <Select isMulti options={tickerOpts} value={selTickers} onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])} classNamePrefix="cpc-select" />
+          <Select
+            isMulti
+            options={tickerOpts}
+            value={selTickers}
+            onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
+            classNamePrefix="cpc-select"
+          />
         </div>
       </div>
 
-      {/* Estatísticas (antes do Scatter) */}
-      <div className="w-full border rounded p-3">
-        <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-        <div className="w-full md:w-1/2">
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-              <Tooltip
-                formatter={(v: unknown, _n: unknown, p: unknown) => {
-                  const payload = p as { payload?: { label?: string } } | undefined;
-                  const val = typeof v === "number" ? String(v) : String(v);
-                  return [val, payload?.payload?.label ?? ""];
-                }}
-                labelFormatter={(l: string) => l}
-              />
-              <Bar dataKey="count">
-                <LabelList dataKey="count" position="top" />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      {/* Botões de acordeão */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          className="border rounded px-3 py-2"
+          onClick={() => setShowChart((v) => !v)}
+          title={showChart ? "Fechar Scatter" : "Abrir Scatter"}
+        >
+          {showChart ? "Fechar Scatter" : "Abrir Scatter"}
+        </button>
+        <button
+          className="border rounded px-3 py-2"
+          onClick={() => setShowStats((v) => !v)}
+          title={showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
+        >
+          {showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
+        </button>
       </div>
 
-      {/* Scatter */}
-      <div className="w-full border rounded overflow-hidden">
-        {/* Cabeçalho do Scatter com FLAGS + controles de densidade Y */}
-        <div className="px-2 py-2 border-b flex flex-wrap items-center gap-3 text-sm">
-          <label className="flex items-center gap-1">
-            <input type="checkbox" checked={onlySingle} onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }} />
-            =1 Boletim
-          </label>
-          <label className="flex items-center gap-1">
-            <input type="checkbox" checked={onlyMulti} onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }} />
-            ≥2 Boletins
-          </label>
-          <label className="flex items-center gap-1">
-            <input type="checkbox" checked={onlyFirst} onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }} />
-            Apenas primeiro
-          </label>
-          <label className="flex items-center gap-1">
-            <input type="checkbox" checked={onlyLast} onChange={(e) => { setOnlyLast(e.target.checked); if (e.target.checked) setOnlyFirst(false); }} />
-            Apenas último
-          </label>
-          <label className="flex items-center gap-1">
-            <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
-            Mostrar tickers no eixo Y
-          </label>
-
-          {/* Controles de densidade Y movidos para o acordeão */}
-          <div className="ml-auto flex items-center gap-2">
-            <button className="border rounded px-2 py-1" onClick={() => setYLimit((v) => Math.max(10, v - 10))} title="-10 linhas do eixo Y">−10</button>
-            <button className="border rounded px-2 py-1" onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))} title="+10 linhas do eixo Y">+10</button>
-            <button className="border rounded px-2 py-1" onClick={() => setYLimit(tickerOrder.length || 10)} title="Mostrar todas as linhas do eixo Y">Todos</button>
+      {/* Estatísticas (Coluna) */}
+      {showStats && (
+        <div className="w-full border rounded p-3">
+          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
+          <div className="w-full md:w-1/2">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart
+                data={stats.chartData}
+                margin={{ top: 16, right: 24, bottom: 8, left: 8 }}
+                barCategoryGap="20%"
+                barGap={2}
+              >
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="group" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <Tooltip
+                  formatter={(v: unknown, _n: unknown, p: unknown) => {
+                    const payload = p as { payload?: { label?: string } } | undefined;
+                    const val = typeof v === "number" ? String(v) : String(v);
+                    return [val, payload?.payload?.label ?? ""];
+                  }}
+                  labelFormatter={(l: string) => l}
+                />
+                <Bar dataKey="count">
+                  <LabelList dataKey="count" position="top" />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
+      )}
 
-        <div className="p-2" style={{ height: chartHeight }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart>
-              <CartesianGrid />
-              <XAxis
-                dataKey="dateNum"
-                type="number"
-                domain={xDomain}
-                ticks={xTicksMemo.ticks}
-                tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
-                name="Data (UTC)"
-                tick={{ fontSize: 11 }}
-                allowDecimals={false}
-              />
-              <YAxis
-                type="category"
-                dataKey="ticker_root"
-                name="Ticker"
-                ticks={visibleTickers}
-                interval={0}
-                tickLine={false}
-                width={showTickerAxis ? 90 : 0}
-                tick={showTickerAxis ? { fontSize: 12 } : undefined}
-                allowDuplicatedCategory={false}
-                tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
-                hide={!showTickerAxis}
-              />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload || payload.length === 0) return null;
-                  const d = payload[0]?.payload as ScatterDatum | undefined;
-                  if (!d) return null;
-                  const date = d.dateISO || fmtUTC(d.dateNum);
-                  return (
-                    <div className="bg-white p-2 border rounded shadow text-sm">
-                      <div><strong>Data:</strong> {date}</div>
-                      <div><strong>Empresa:</strong> {d.company || "—"}</div>
-                      <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
-                      <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
-                      <div className="mt-1 text-xs text-gray-600">
-                        Clique: filtra empresa | Shift+Clique: isola este boletim
-                      </div>
-                    </div>
-                  );
+      {/* Scatter */}
+      {showChart && (
+        <div className="w-full border rounded overflow-hidden">
+          <div className="px-2 py-2 border-b flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={onlySingle}
+                onChange={(e) => {
+                  setOnlySingle(e.target.checked);
+                  if (e.target.checked) setOnlyMulti(false);
                 }}
               />
-              <Scatter data={chartDataVis} onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)} />
-            </ScatterChart>
-          </ResponsiveContainer>
-          {selTickers.length > 0 && chartDataVis.length === 0 && (
-            <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
-          )}
+              =1 Boletim
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={onlyMulti}
+                onChange={(e) => {
+                  setOnlyMulti(e.target.checked);
+                  if (e.target.checked) setOnlySingle(false);
+                }}
+              />
+              ≥2 Boletins
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={onlyFirst}
+                onChange={(e) => {
+                  setOnlyFirst(e.target.checked);
+                  if (e.target.checked) setOnlyLast(false);
+                }}
+              />
+              Apenas primeiro
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={onlyLast}
+                onChange={(e) => {
+                  setOnlyLast(e.target.checked);
+                  if (e.target.checked) setOnlyFirst(false);
+                }}
+              />
+              Apenas último
+            </label>
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
+              Mostrar tickers no eixo Y
+            </label>
+
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYLimit((v) => Math.max(10, v - 10))}
+                title="-10 linhas do eixo Y"
+              >
+                −10
+              </button>
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
+                title="+10 linhas do eixo Y"
+              >
+                +10
+              </button>
+              <button
+                className="border rounded px-2 py-1"
+                onClick={() => setYLimit(tickerOrder.length || 10)}
+                title="Mostrar todas as linhas do eixo Y"
+              >
+                Todos
+              </button>
+            </div>
+          </div>
+
+          <div className="p-2" style={{ height: chartHeight }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ScatterChart>
+                <CartesianGrid />
+                <XAxis
+                  dataKey="dateNum"
+                  type="number"
+                  domain={xDomain}
+                  ticks={xTicksMemo.ticks}
+                  tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
+                  name="Data (UTC)"
+                  tick={{ fontSize: 11 }}
+                  allowDecimals={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker_root"
+                  name="Ticker"
+                  ticks={visibleTickers}
+                  interval={0}
+                  tickLine={false}
+                  width={showTickerAxis ? 90 : 0}
+                  tick={showTickerAxis ? { fontSize: 12 } : undefined}
+                  allowDuplicatedCategory={false}
+                  tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
+                  hide={!showTickerAxis}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload || payload.length === 0) return null;
+                    const d = payload[0]?.payload as ScatterDatum | undefined;
+                    if (!d) return null;
+                    const date = d.dateISO || fmtUTC(d.dateNum);
+                    return (
+                      <div className="bg-white p-2 border rounded shadow text-sm">
+                        <div><strong>Data:</strong> {date}</div>
+                        <div><strong>Empresa:</strong> {d.company || "—"}</div>
+                        <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
+                        <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
+                        <div className="mt-1 text-xs text-gray-600">
+                          Clique: filtra empresa | Shift+Clique: isola este boletim
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                <Scatter data={chartDataVis} onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)} />
+              </ScatterChart>
+            </ResponsiveContainer>
+
+            {selTickers.length > 0 && chartDataVis.length === 0 && (
+              <div className="text-xs text-gray-600 mt-1">Sem eventos para a seleção no período.</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tabela */}
       <div className="space-y-2" ref={tableRef}>
@@ -784,31 +1031,31 @@ export default function Page() {
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
-                <th className="p-2" aria-sort={sortKey==="company" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
+                <th className="p-2" aria-sort={sortKey === "company" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>
                     Empresa {sortIndicator("company")}
                   </button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fCompany} onChange={(e) => setFCompany(e.target.value)} />
                 </th>
-                <th className="p-2" aria-sort={sortKey==="ticker" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
+                <th className="p-2" aria-sort={sortKey === "ticker" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>
                     Ticker {sortIndicator("ticker")}
                   </button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
                 </th>
-                <th className="p-2" aria-sort={sortKey==="composite_key" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
+                <th className="p-2" aria-sort={sortKey === "composite_key" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>
                     Composite Key {sortIndicator("composite_key")}
                   </button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fKey} onChange={(e) => setFKey(e.target.value)} />
                 </th>
-                <th className="p-2" aria-sort={sortKey==="bulletin_date" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
+                <th className="p-2" aria-sort={sortKey === "bulletin_date" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>
                     Data {sortIndicator("bulletin_date")}
                   </button>
                   <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD" value={fDate} onChange={(e) => setFDate(e.target.value)} />
                 </th>
-                <th className="p-2" aria-sort={sortKey==="canonical_type" ? (sortDir==="asc"?"ascending":"descending") : "none"}>
+                <th className="p-2" aria-sort={sortKey === "canonical_type" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                   <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>
                     Tipo de Boletim {sortIndicator("canonical_type")}
                   </button>
@@ -826,12 +1073,7 @@ export default function Page() {
                     <td className="p-2">{row.ticker}</td>
                     <td className="p-2">
                       {row.composite_key ? (
-                        <button
-                          type="button"
-                          onClick={() => openBulletinModal(row)}
-                          className="text-blue-600 hover:underline"
-                          title="Abrir boletim completo"
-                        >
+                        <button type="button" onClick={() => openBulletinModal(row)} className="text-blue-600 hover:underline" title="Abrir boletim completo">
                           {compositeKey}
                         </button>
                       ) : (
@@ -852,6 +1094,28 @@ export default function Page() {
           </table>
         </div>
       </div>
+
+      {/* Modal */}
+      {selectedBulletin && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={closeBulletinModal}>
+          <div className="bg-white max-w-3xl w-full rounded shadow p-4 space-y-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center">
+              <h3 className="font-semibold text-lg">Boletim</h3>
+              <button className="border rounded px-2 py-1" onClick={closeBulletinModal}>Fechar</button>
+            </div>
+            <div className="text-sm text-gray-700">
+              <div><strong>Empresa:</strong> {selectedBulletin.company || "—"}</div>
+              <div><strong>Ticker:</strong> {selectedBulletin.ticker || "—"}</div>
+              <div><strong>Data:</strong> {selectedBulletin.bulletin_date || "—"}</div>
+              <div><strong>Tipo:</strong> {selectedBulletin.canonical_type ?? selectedBulletin.bulletin_type ?? "—"}</div>
+              <div><strong>Composite Key:</strong> {selectedBulletin.composite_key ?? "—"}</div>
+            </div>
+            <pre className="whitespace-pre-wrap text-sm border rounded p-2 max-h-[60vh] overflow-auto">
+              {selectedBulletin.body_text || "—"}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
