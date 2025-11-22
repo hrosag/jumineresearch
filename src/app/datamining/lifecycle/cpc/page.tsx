@@ -74,6 +74,13 @@ function fmtDayMonth(ts: number): string {
 function normalizeTicker(t?: string | null) {
   return (t ?? "").trim().toUpperCase().replace(/\.P$/, "");
 }
+
+function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
+  return rows.map(r => {
+    if (r.body_text || !r.composite_key) return r;
+    return { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" };
+  });
+}
 function keyCT(company?: string | null, ticker?: string | null) {
   return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
 }
@@ -620,7 +627,19 @@ export default function Page() {
     }, 0);
   }
 
-  // ================= RENDER =================
+  
+// Custom label for BarChart values (consistent size/position)
+function BarValueLabel(props: any) {
+  const { x, y, width, value } = props;
+  const cx = x + (width || 0) / 2;
+  const vy = (y || 0) - 6;
+  return (
+    <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>
+      {value}
+    </text>
+  );
+}
+// ================= RENDER =================
   return (
     <div className="p-6 space-y-4">
       {/* Título + EXPORTS */}
@@ -647,11 +666,10 @@ export default function Page() {
                 for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
                   if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
                 }
-                base.forEach((r) => {
-                  if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? "";
-                });
+                const filledArr = withBodyTextFilled(base, map);
+              
               }
-              const sorted = [...base].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+              const sorted = (typeof filledArr !== "undefined" ? filledArr : withBodyTextFilled(base, new Map())).sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
               const story = sorted
                 .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
                 .join("\n--------------------------------\n");
@@ -692,11 +710,11 @@ export default function Page() {
                 for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
                   if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
                 }
-                base.forEach((r) => {
-                  if (!r.body_text && r.composite_key) r.body_text = map.get(r.composite_key) ?? r.body_text ?? "";
-                });
+                const filledArr = withBodyTextFilled(base, map);
+              
               }
-              const story = base
+              const __arr = (typeof filledArr !== "undefined" ? filledArr : base);
+              const story = __arr
                 .map((r) => `${r.bulletin_date ?? ""} — ${r.bulletin_type ?? ""}\n${r.body_text ?? ""}\n`)
                 .join("\n--------------------------------\n");
               const s = startDate ? startDate.replaceAll("-", "") : "inicio";
@@ -770,7 +788,7 @@ export default function Page() {
           <label className="block text-sm">Start</label>
           <input
             type="date"
-            className="border rounded px-2 py-1"
+            className="border rounded px-2 h-10"
             value={startDate}
             max={endDate || undefined}
             onChange={(e) => setStartDate(e.target.value)}
@@ -781,7 +799,7 @@ export default function Page() {
           <label className="block text-sm">End</label>
           <input
             type="date"
-            className="border rounded px-2 py-1"
+            className="border rounded px-2 h-10"
             value={endDate}
             min={startDate || undefined}
             onChange={(e) => setEndDate(e.target.value)}
@@ -791,14 +809,14 @@ export default function Page() {
         {/* botões alinhados ao fundo dos inputs */}
         <div className="flex items-end gap-2 pb-[2px]">
           <button
-            className="border rounded px-3 py-2 font-semibold"
-            title="GO"
+            className="border rounded px-3 h-10 font-semibold flex items-center justify-center"
+            title="Executar busca"
             onClick={() => (useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow())}
             disabled={loadingTimeline || (!startDate && !endDate && !useAnchor)}
           >
-            GO
+            ⚡
           </button>
-          <button className="border rounded px-2 py-2" onClick={handleReset} title="Limpar">
+          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar">
             🧹
           </button>
         </div>
@@ -881,7 +899,7 @@ export default function Page() {
                   labelFormatter={(l: string) => l}
                 />
                 <Bar dataKey="count">
-                  <LabelList dataKey="count" position="top" />
+                  <LabelList dataKey="count" content={<BarValueLabel />} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -944,21 +962,21 @@ export default function Page() {
 
             <div className="ml-auto flex items-center gap-2">
               <button
-                className="border rounded px-2 py-1"
+                className="border rounded px-2 h-10"
                 onClick={() => setYLimit((v) => Math.max(10, v - 10))}
                 title="-10 linhas do eixo Y"
               >
                 −10
               </button>
               <button
-                className="border rounded px-2 py-1"
+                className="border rounded px-2 h-10"
                 onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
                 title="+10 linhas do eixo Y"
               >
                 +10
               </button>
               <button
-                className="border rounded px-2 py-1"
+                className="border rounded px-2 h-10"
                 onClick={() => setYLimit(tickerOrder.length || 10)}
                 title="Mostrar todas as linhas do eixo Y"
               >
@@ -1101,7 +1119,7 @@ export default function Page() {
           <div className="bg-white max-w-3xl w-full rounded shadow p-4 space-y-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center">
               <h3 className="font-semibold text-lg">Boletim</h3>
-              <button className="border rounded px-2 py-1" onClick={closeBulletinModal}>Fechar</button>
+              <button className="border rounded px-2 h-10" onClick={closeBulletinModal}>Fechar</button>
             </div>
             <div className="text-sm text-gray-700">
               <div><strong>Empresa:</strong> {selectedBulletin.company || "—"}</div>
