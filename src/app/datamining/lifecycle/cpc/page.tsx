@@ -28,7 +28,7 @@ type Row = {
   ticker: string | null;
   bulletin_type: string | null;
   canonical_type: string | null;
-  canonical_class?: string | null; // NEW: 'unicos' | 'mistos'
+  canonical_class?: string | null;
   bulletin_date: string | null;
   composite_key?: string | null;
   body_text: string | null;
@@ -73,7 +73,7 @@ function fmtDayMonth(ts: number): string {
   return `${dd}/${mm}`;
 }
 function normalizeTicker(t?: string | null) {
-  return (t ?? "").trim().toUpperCase().split(".")[0]; // raiz do ticker
+  return (t ?? "").trim().toUpperCase().split(".")[0];
 }
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map(r => {
@@ -118,13 +118,6 @@ function errMessage(e: unknown): string {
   }
   return "Erro desconhecido";
 }
-function computeAnchorRange(map: Map<string, string>): { min: string; max: string } | null {
-  const dates = Array.from(map.values()).filter(Boolean);
-  if (!dates.length) return null;
-  const min = dates.reduce((a, b) => (a < b ? a : b));
-  const max = dates.reduce((a, b) => (a > b ? a : b));
-  return { min, max };
-}
 
 // Tipagem explícita para evitar "any" no LabelList custom
 type BarLabelProps = {
@@ -147,7 +140,6 @@ export default function Page() {
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [useAnchor, setUseAnchor] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
 
   const [startDate, setStartDate] = useState<string>("");
@@ -186,10 +178,14 @@ export default function Page() {
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
+  // Âncoras (primeiro CPC por (company|ticker_root))
   const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
   const [anchorCompanies, setAnchorCompanies] = useState<string[]>([]);
 
-  // fetch âncoras
+  // Auto-período (min→max) de toda a view
+  const [autoPeriod, setAutoPeriod] = useState(true);
+
+  // Pré-busca: carregar mapa de âncoras (CPC inicial por (company|ticker_root))
   useEffect(() => {
     (async () => {
       setLoadingAnchors(true);
@@ -224,87 +220,33 @@ export default function Page() {
     })();
   }, []);
 
-  // ancorar datas com base nas âncoras
+  // Auto-período (min→max) quando habilitado ou ao montar
   useEffect(() => {
-    if (!useAnchor) return;
-    const r = computeAnchorRange(anchors);
-    if (!r) return;
-    if (!startDate) setStartDate(r.min);
-    if (!endDate) setEndDate(r.max);
-  }, [useAnchor, anchors, startDate, endDate]);
-
-  // buscas
-  async function fetchSimpleWindow() {
-    setLoadingTimeline(true);
-    setErrorMsg(null);
-    try {
-      const q = supabase
-        .from("vw_bulletins_with_canonical")
-        .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
-        .order("bulletin_date", { ascending: true });
-      if (startDate) q.gte("bulletin_date", startDate);
-      if (endDate) q.lte("bulletin_date", endDate);
-      const { data, error } = await q;
-      if (error) throw error;
-      setRows((data || []) as Row[]);
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setLoadingTimeline(false);
-    }
-  }
-  function computeMinAnchorByCompany(map: Map<string, string>) {
-    const perCompany = new Map<string, string>();
-    for (const k of map.keys()) {
-      const [company] = k.split("|");
-      const d = map.get(k)!;
-      const prev = perCompany.get(company);
-      if (!prev || d < prev) perCompany.set(company, d);
-    }
-    return perCompany;
-  }
-  async function fetchTimelineAfterAnchor() {
-    if (!anchors.size || !anchorCompanies.length) {
-      setErrorMsg("Âncoras indisponíveis.");
-      return;
-    }
-    setLoadingTimeline(true);
-    setErrorMsg(null);
-    try {
-      const perCompanyMin = computeMinAnchorByCompany(anchors);
-      const chunks = chunk(anchorCompanies, 100);
-      const allowedKeys = new Set(anchors.keys());
-      const all: Row[] = [];
-      for (const companies of chunks) {
-        let chunkMin = "9999-12-31";
-        for (const c of companies) {
-          const d = perCompanyMin.get(c)!;
-          if (d < chunkMin) chunkMin = d;
-        }
-        const query = supabase
+    (async () => {
+      if (!autoPeriod) return;
+      try {
+        const { data, error } = await supabase
           .from("vw_bulletins_with_canonical")
-          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
-          .in("company", companies)
-          .gte("bulletin_date", chunkMin)
-          .order("bulletin_date", { ascending: true });
-        if (endDate) query.lte("bulletin_date", endDate);
-        const { data, error } = await query;
+          .select("bulletin_date")
+          .order("bulletin_date", { ascending: true })
+          .limit(1);
         if (error) throw error;
-        for (const r of (data || []) as Row[]) {
-          const key = keyCT(r.company, r.ticker);
-          if (!allowedKeys.has(key)) continue;
-          const anchor = anchors.get(key);
-          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
-          all.push(r);
-        }
+        const minDate = (data && (data as any[])[0]?.bulletin_date) || "";
+        const { data: dataMax, error: error2 } = await supabase
+          .from("vw_bulletins_with_canonical")
+          .select("bulletin_date")
+          .order("bulletin_date", { ascending: false })
+          .limit(1);
+        if (error2) throw error2;
+        const maxDate = (dataMax && (dataMax as any[])[0]?.bulletin_date) || "";
+        if (minDate && (!startDate || autoPeriod)) setStartDate(minDate);
+        if (maxDate && (!endDate || autoPeriod)) setEndDate(maxDate);
+      } catch (e) {
+        console.warn("autoPeriod preset failed:", e);
       }
-      setRows(all);
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setLoadingTimeline(false);
-    }
-  }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPeriod]);
 
   // sanity de datas
   useEffect(() => {
@@ -322,7 +264,7 @@ export default function Page() {
     history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
   }, [startDate, endDate, selTickers, selCompanies]);
 
-  // janela por período
+  // Janela básica por período (para filtros/contagens)
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -454,9 +396,10 @@ export default function Page() {
   }, [tableRowsBase, sortKey, sortDir]);
 
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
+  // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-  // -------- Estatísticas (esquerda) --------
+  // -------- Estatísticas (esquerda, date_range only) --------
   const stats = useMemo(() => {
     const totalBulletins = rowsInWindow.length;
     const perCompany = new Map<string, number>();
@@ -597,9 +540,7 @@ export default function Page() {
     setTableLimit(PAGE);
     setShowChart(true);
     setShowStats(true);
-    setStartDate("");
-    setEndDate("");
-    setRows([]);
+    // mantém datas; o usuário pode usar Auto-período (min→max) para repopular
   };
 
   // modal
@@ -668,7 +609,7 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   }
 
-  // ===== NEW: base filtrada por período + Company/Ticker (para o gráfico temático de classe/CPC) =====
+  // ===== base para o novo gráfico temático (segue date_range + Company/Ticker) =====
   const baseForThematic = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
@@ -695,13 +636,75 @@ export default function Page() {
       }
     }
     return [
-      { group: "Únicos", count: unicos, label: "Boletins classificados como 'únicos' (pode sobrepor)" },
-      { group: "Mistos", count: mistos, label: "Boletins classificados como 'mistos' (pode sobrepor)" },
+      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
+      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
       { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
       { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
       { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
     ];
   }, [baseForThematic]);
+
+  // ================== FETCH (ÂNCORA COMO PADRÃO) ==================
+  function toDateNum(iso: string | null | undefined): number {
+    if (!iso) return Number.NaN;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso || "").trim());
+    if (!m) return Number.NaN;
+    const y = Number(m[1]); const mo = Number(m[2]) - 1; const d = Number(m[3]);
+    return Date.UTC(y, mo, d, 12, 0, 0);
+  }
+  function computeMinAnchorByCompany(map: Map<string, string>) {
+    const perCompany = new Map<string, string>();
+    for (const k of map.keys()) {
+      const [company] = k.split("|");
+      const d = map.get(k)!;
+      const prev = perCompany.get(company);
+      if (!prev || d < prev) perCompany.set(company, d);
+    }
+    return perCompany;
+  }
+
+  async function fetchAnchoredTimeline() {
+    if (!anchors.size || !anchorCompanies.length) {
+      setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado).");
+      return;
+    }
+    setLoadingTimeline(true);
+    setErrorMsg(null);
+    try {
+      const perCompanyMin = computeMinAnchorByCompany(anchors);
+      const chunks = chunk(anchorCompanies, 100);
+      const allowedKeys = new Set(anchors.keys());
+      const all: Row[] = [];
+      for (const companies of chunks) {
+        let chunkMin = "9999-12-31";
+        for (const c of companies) {
+          const d = perCompanyMin.get(c)!;
+          if (d < chunkMin) chunkMin = d;
+        }
+        const query = supabase
+          .from("vw_bulletins_with_canonical")
+          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
+          .in("company", companies)
+          .gte("bulletin_date", chunkMin)
+          .order("bulletin_date", { ascending: true });
+        if (endDate) query.lte("bulletin_date", endDate);
+        const { data, error } = await query;
+        if (error) throw error;
+        for (const r of (data || []) as Row[]) {
+          const key = keyCT(r.company, r.ticker);
+          if (!allowedKeys.has(key)) continue;
+          const anchor = anchors.get(key);
+          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
+          all.push(r);
+        }
+      }
+      setRows(all);
+    } catch (e) {
+      setErrorMsg(errMessage(e));
+    } finally {
+      setLoadingTimeline(false);
+    }
+  }
 
 // ================= RENDER =================
   return (
@@ -781,18 +784,18 @@ export default function Page() {
           <input type="date" className="border rounded px-2 h-10" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
         </div>
         <div className="flex items-end gap-2 pb-[2px]">
-          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={() => (useAnchor ? fetchTimelineAfterAnchor() : fetchSimpleWindow())} disabled={loadingTimeline || (!startDate && !endDate && !useAnchor)}>⚡</button>
+          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={fetchAnchoredTimeline} disabled={loadingTimeline || (!startDate && !endDate)}>⚡</button>
           <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">🧹</button>
         </div>
       </div>
 
       {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
 
+      {/* Auto-período (min→max) */}
       <div>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={useAnchor} onChange={(e) => setUseAnchor(e.target.checked)} />
-          Ancorar dados
-          {loadingAnchors && <span className="text-xs text-gray-500">(carregando âncoras...)</span>}
+          <input type="checkbox" checked={autoPeriod} onChange={(e) => setAutoPeriod(e.target.checked)} />
+          Auto-período (min→max) na view
         </label>
       </div>
 
@@ -989,7 +992,7 @@ export default function Page() {
                 const compositeKey = row.composite_key ?? "—";
                 const refAttr = i === 0 ? { ref: firstRowRef } : {};
                 return (
-                  <tr key={row.id} className="border-b hover:bg-gray-50" {...refAttr}>
+                  <tr key={row.id} className="border-b hover:bg-gray-50" {...(refAttr as any)}>
                     <td className="p-2">{row.company}</td>
                     <td className="p-2">{row.ticker}</td>
                     <td className="p-2">
