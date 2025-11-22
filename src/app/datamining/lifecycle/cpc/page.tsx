@@ -372,15 +372,19 @@ export default function Page() {
 
   // -------- Tabela --------
   const filteredBaseForTable = useMemo(() => {
+    // Se flags internas do Scatter estiverem ativas, a TABELA segue o mesmo recorte do Scatter
+    const flagsActive = onlySingle || onlyMulti || onlyFirst || onlyLast;
+    const base = flagsActive ? filteredForChart : rowsInWindow;
+
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
-    return rowsInWindow.filter((r) => {
+    return base.filter((r) => {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
       return true;
     });
-  }, [rowsInWindow, selCompanies, selTickers]);
+  }, [rowsInWindow, filteredForChart, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
 
   const tC = useDeferredValue(dfCompany);
   const tT = useDeferredValue(dfTicker);
@@ -947,7 +951,7 @@ export default function Page() {
             </label>
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
-              Mostrar tickers no eixo Y
+              Exibir tickers
             </label>
 
             <div className="ml-auto flex items-center gap-2">
