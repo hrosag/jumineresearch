@@ -133,6 +133,17 @@ function BarValueLabel(props: BarLabelProps) {
   return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
 }
 
+// Pequeno componente visual para KPIs
+function KpiCard({ k, label, value }: { k: string; label: string; value: number | string }) {
+  return (
+    <div className="border rounded p-3 bg-white">
+      <div className="text-xs text-gray-500 mb-1">{k}</div>
+      <div className="text-2xl font-bold leading-tight">{value}</div>
+      <div className="text-sm text-gray-700">{label}</div>
+    </div>
+  );
+}
+
 // =========================================================
 
 export default function Page() {
@@ -398,26 +409,58 @@ export default function Page() {
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
+  // -------- KPIs (substituem a barra de "Estatísticas") — date_range only --------
+  const kpis = useMemo(() => {
+    const a_total = rowsInWindow.length;
+
+    // classe
+    let b_unico = 0, b_misto = 0;
     for (const r of rowsInWindow) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
+      const cl = (r.canonical_class ?? "").toLowerCase();
+      if (cl === "unico" || cl === "único") b_unico++;
+      else if (cl === "misto" || cl === "mistos" || cl === "mixed") b_misto++;
     }
-    const totalCompanies = perCompany.size;
-    let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
+
+    // primeiros por ticker_root
+    const byRoot = new Map<string, Row[]>();
+    for (const r of rowsInWindow) {
+      const root = normalizeTicker(r.ticker);
+      if (!root || !r.bulletin_date) continue;
+      const arr = byRoot.get(root) || [];
+      arr.push(r);
+      byRoot.set(root, arr);
     }
-    const chartData = [
-      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
-      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
-      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
-      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
-    ];
-    return { chartData };
+    let c_primeiros = 0;
+    let e_primeiro_padrao = 0;
+    for (const arr of byRoot.values()) {
+      arr.sort((a, b) => {
+        const da = toDateNum(a.bulletin_date);
+        const db = toDateNum(b.bulletin_date);
+        if (da !== db) return da - db;
+        const ka = (a.composite_key ?? "");
+        const kb = (b.composite_key ?? "");
+        return ka.localeCompare(kb);
+      });
+      const first = arr[0];
+      c_primeiros++;
+      const typeUp = ((first.canonical_type ?? first.bulletin_type ?? "")).toUpperCase();
+      // "padrão" = match exato ao canônico (sem vírgula/sufixos)
+      if (typeUp === CPC_CANONICAL) e_primeiro_padrao++;
+    }
+    const d_nao_primeiros = a_total - c_primeiros;
+    const f_primeiro_fora = c_primeiros - e_primeiro_padrao;
+    const g_demais = a_total - (e_primeiro_padrao + f_primeiro_fora);
+
+    return {
+      a_total,
+      b_unico,
+      b_misto,
+      c_primeiros,
+      d_nao_primeiros,
+      e_primeiro_padrao,
+      f_primeiro_fora,
+      g_demais,
+    };
   }, [rowsInWindow]);
 
   // -------- Scatter --------
@@ -539,7 +582,6 @@ export default function Page() {
     setTableLimit(PAGE);
     setShowChart(true);
     setShowStats(true);
-    // mantém datas; o usuário pode usar Auto-período (min→max) para repopular
   };
 
   // modal
@@ -627,7 +669,7 @@ export default function Page() {
     XLSX.utils.book_append_sheet(wb, ws, "Tabela");
     const s = startDate ? startDate.replaceAll("-", "") : "inicio";
     const e = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `${filenameBase}_${s}_${e}.xlsx`;
+    const filename = `${filenameBase}_${s}_${e}.xlsx";
     XLSX.writeFile(wb, filename);
   }
 
@@ -648,11 +690,11 @@ export default function Page() {
     for (const r of baseForThematic) {
       const ct = (r.canonical_type ?? "").toUpperCase();
       const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") unicos++;
-      if (cl === "mistos") mistos++;
-      if (ct === CPC_CANONICAL) {
+      if (cl === "unico" || cl === "único") unicos++;
+      if (cl === "misto" || cl === "mistos" || cl === "mixed") mistos++;
+      if (ct.includes(CPC_CANONICAL)) {
         cpc++;
-        if (cl === "mistos") cpcMisto++;
+        if (cl === "misto" || cl === "mistos" || cl === "mixed") cpcMisto++;
       } else {
         outros++;
       }
@@ -660,8 +702,8 @@ export default function Page() {
     return [
       { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
       { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
-      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
-      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
+      { group: "CPC (contains)", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
+      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='misto' (subset de CPC)" },
       { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
     ];
   }, [baseForThematic]);
@@ -749,7 +791,6 @@ export default function Page() {
 
           <button
             onClick={async () => {
-              // Exporta exatamente o que a tabela está mostrando (sem agregação)
               await exportRowsToXlsxTable(tableRows, "cpc_tabela");
             }}
             disabled={!tableRows.length}
@@ -806,53 +847,19 @@ export default function Page() {
         </button>
       </div>
 
-      {/* Estatísticas + Novo Gráfico (lado a lado) */}
+      {/* KPIs (substitui o gráfico de barras) */}
       {showStats && (
         <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período */}
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="text-sm text-gray-700 mb-2">Foto global no período selecionado (date_range).</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard k="a" label="Total de boletins" value={kpis.a_total} />
+            <KpiCard k="b" label="Classe: Único" value={kpis.b_unico} />
+            <KpiCard k="b" label="Classe: Misto" value={kpis.b_misto} />
+            <KpiCard k="c" label="‘Primeiro boletim’ (1º por ticker)" value={kpis.c_primeiros} />
+            <KpiCard k="d" label="Não ‘primeiro boletim’" value={kpis.d_nao_primeiros} />
+            <KpiCard k="e" label="1º boletim ‘padrão’ (CPC exato)" value={kpis.e_primeiro_padrao} />
+            <KpiCard k="f" label="1º boletim fora do padrão" value={kpis.f_primeiro_fora} />
+            <KpiCard k="g" label="‘Demais boletins’ = a − (e + f)" value={kpis.g_demais} />
           </div>
         </div>
       )}
@@ -951,25 +958,27 @@ export default function Page() {
             <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
                 <th className="p-2" aria-sort={sortKey === "company" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>Empresa {sortIndicator("company")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fCompany} onChange={(e) => setFCompany(e.target.value)} />
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>Empresa </button>
                 </th>
                 <th className="p-2" aria-sort={sortKey === "ticker" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>Ticker {sortIndicator("ticker")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>Ticker </button>
                 </th>
                 <th className="p-2" aria-sort={sortKey === "composite_key" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>Composite Key {sortIndicator("composite_key")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fKey} onChange={(e) => setFKey(e.target.value)} />
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>Composite Key </button>
                 </th>
                 <th className="p-2" aria-sort={sortKey === "bulletin_date" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>Data {sortIndicator("bulletin_date")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD" value={fDate} onChange={(e) => setFDate(e.target.value)} />
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>Data </button>
                 </th>
                 <th className="p-2" aria-sort={sortKey === "canonical_type" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>Tipo de Boletim {sortIndicator("canonical_type")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fType} onChange={(e) => setFType(e.target.value)} />
+                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>Tipo de Boletim </button>
                 </th>
+              </tr>
+              <tr className="text-left align-top">
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fCompany} onChange={(e) => setFCompany(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fTicker} onChange={(e) => setFTicker(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fKey} onChange={(e) => setFKey(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD" value={fDate} onChange={(e) => setFDate(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fType} onChange={(e) => setFType(e.target.value)} /></th>
               </tr>
             </thead>
             <tbody>
