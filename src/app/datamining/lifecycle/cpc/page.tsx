@@ -245,8 +245,7 @@ export default function Page() {
         console.warn("autoPeriod preset failed:", e);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoPeriod]);
+  }, [autoPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // sanity de datas
   useEffect(() => {
@@ -609,6 +608,29 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   }
 
+  // Export .xlsx de TABELA (sem agregação) — exatamente as linhas mostradas (respeita filtros e flags)
+  async function exportRowsToXlsxTable(baseRows: Row[], filenameBase: string) {
+    if (!baseRows.length) { alert("Nada a exportar."); return; }
+    const rowsPlain = baseRows.map(r => ({
+      id: r.id,
+      company: r.company ?? "",
+      ticker: r.ticker ?? "",
+      composite_key: r.composite_key ?? "",
+      bulletin_date: r.bulletin_date ?? "",
+      canonical_type: r.canonical_type ?? r.bulletin_type ?? "",
+      canonical_class: r.canonical_class ?? "",
+      source_file: r.source_file ?? ""
+    }));
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.json_to_sheet(rowsPlain);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tabela");
+    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
+    const e = endDate ? endDate.replaceAll("-", "") : "fim";
+    const filename = `${filenameBase}_${s}_${e}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
+
   // ===== base para o novo gráfico temático (segue date_range + Company/Ticker) =====
   const baseForThematic = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
@@ -644,7 +666,6 @@ export default function Page() {
     ];
   }, [baseForThematic]);
 
-  // ================== FETCH (ÂNCORA COMO PADRÃO) ==================
   function computeMinAnchorByCompany(map: Map<string, string>) {
     const perCompany = new Map<string, string>();
     for (const k of map.keys()) {
@@ -699,7 +720,6 @@ export default function Page() {
     }
   }
 
-// ================= RENDER =================
   return (
     <div className="p-6 space-y-4">
       {/* Título + EXPORTS */}
@@ -715,7 +735,7 @@ export default function Page() {
             }}
             disabled={!tableRows.length}
             className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-          >📜 Exportar seleção</button>
+          >📜 Exportar seleção (.txt)</button>
 
           <button
             onClick={async () => {
@@ -725,45 +745,16 @@ export default function Page() {
             }}
             disabled={!rowsInWindow.length}
             className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-          >🗂️ Exportar período</button>
+          >🗂️ Exportar período (.txt)</button>
 
           <button
             onClick={async () => {
-              const baseRows = tableRows;
-              if (!baseRows.length) { alert("Tabela vazia. Ajuste os filtros."); return; }
-              const groups = new Map<string, Row[]>();
-              for (const r of baseRows) {
-                const root = normalizeTicker(r.ticker);
-                if (!root) continue;
-                if (!groups.has(root)) groups.set(root, []);
-                groups.get(root)!.push(r);
-              }
-              const agg = Array.from(groups.entries()).map(([root, arr]) => {
-                const ordered = [...arr].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-                const first = ordered[0];
-                const last = ordered[ordered.length - 1];
-                return {
-                  ticker_root: root,
-                  company_first: first?.company ?? "",
-                  company_last: last?.company ?? "",
-                  events: ordered.length,
-                  first_date: first?.bulletin_date ?? "",
-                  last_date: last?.bulletin_date ?? "",
-                };
-              }).sort((a, b) => a.first_date.localeCompare(b.first_date) || a.ticker_root.localeCompare(b.ticker_root));
-
-              const XLSX = await import("xlsx");
-              const ws = XLSX.utils.json_to_sheet(agg);
-              const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, ws, "CPC_TabelaAgregada");
-              const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-              const e = endDate ? endDate.replaceAll("-", "") : "fim";
-              const filename = `cpc_tabela_agregada_${s}_${e}.xlsx`;
-              XLSX.writeFile(wb, filename);
+              // Exporta exatamente o que a tabela está mostrando (sem agregação)
+              await exportRowsToXlsxTable(tableRows, "cpc_tabela");
             }}
             disabled={!tableRows.length}
             className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
-          >📊 Exportar tabela agregada (.xlsx)</button>
+          >📄 Exportar tabela (.xlsx)</button>
         </div>
       </div>
 
