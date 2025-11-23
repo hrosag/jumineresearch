@@ -11,9 +11,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
-  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -117,20 +114,6 @@ function errMessage(e: unknown): string {
     return typeof m === "string" ? m : "Erro desconhecido";
   }
   return "Erro desconhecido";
-}
-
-// Tipagem explícita para evitar "any" no LabelList custom
-type BarLabelProps = {
-  x?: number;
-  y?: number;
-  width?: number;
-  value?: number | string;
-};
-function BarValueLabel(props: BarLabelProps) {
-  const { x, y, width, value } = props;
-  const cx = (x ?? 0) + (width ?? 0) / 2;
-  const vy = (y ?? 0) - 6;
-  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
 }
 
 // =========================================================
@@ -398,29 +381,7 @@ export default function Page() {
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
-    for (const r of rowsInWindow) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
-    }
-    const totalCompanies = perCompany.size;
-    let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
-    }
-    const chartData = [
-      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
-      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
-      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
-      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
-    ];
-    return { chartData };
-  }, [rowsInWindow]);
-
-  // -------- Scatter --------
+    // -------- Scatter --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
@@ -643,28 +604,55 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers]);
 
-  const thematicData = useMemo(() => {
-    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+  // ===== Painel de cartões (base: date_range + Company/Ticker) =====
+  const cardsStats = useMemo(() => {
+    const total = baseForThematic.length;
+
+    // primeiro boletim por ticker_root dentro da base atual
+    const byRoot = new Map<string, Row[]>();
     for (const r of baseForThematic) {
-      const ct = (r.canonical_type ?? "").toUpperCase();
-      const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") unicos++;
-      if (cl === "mistos") mistos++;
-      if (ct === CPC_CANONICAL) {
-        cpc++;
-        if (cl === "mistos") cpcMisto++;
-      } else {
-        outros++;
-      }
+      const root = normalizeTicker(r.ticker);
+      if (!root) continue;
+      const arr = byRoot.get(root) || [];
+      arr.push(r);
+      byRoot.set(root, arr);
     }
-    return [
-      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
-      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
-      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
-      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
-      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
-    ];
+
+    let firstCount = 0;
+    let firstCpc = 0;
+    for (const arr of byRoot.values()) {
+      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      const first = arr[0];
+      if (!first) continue;
+      firstCount++;
+      const ct = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+      if (ct.includes(CPC_CANONICAL)) firstCpc++;
+    }
+    const firstOther = firstCount - firstCpc;
+    const demais = total - firstCount;
+
+    let uniqueCount = 0;
+    let mixedCount = 0;
+    for (const r of baseForThematic) {
+      const cl = (r.canonical_class ?? "").toLowerCase();
+      if (cl === "unicos") uniqueCount++;
+      if (cl === "mistos") mixedCount++;
+    }
+
+    return { total, firstCount, firstCpc, firstOther, demais, uniqueCount, mixedCount };
   }, [baseForThematic]);
+
+  function CardStat({ value, label, sublabel }: { value: any; label: string; sublabel?: string }) {
+    return (
+      <div className="p-4 border rounded shadow-sm bg-white flex flex-col">
+        <div className="text-3xl font-bold text-gray-800">{value}</div>
+        <div className="text-sm text-gray-600 mt-1">{label}</div>
+        {sublabel && <div className="text-xs text-gray-500 mt-0.5">{sublabel}</div>}
+      </div>
+    );
+  }
+
+
 
   function computeMinAnchorByCompany(map: Map<string, string>) {
     const perCompany = new Map<string, string>();
@@ -808,51 +796,19 @@ export default function Page() {
 
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
-        <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período */}
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        <div className="w-full border rounded p-4 space-y-4 bg-white">
+          <div className="text-sm text-gray-700 mb-2">
+            Distribuição dos boletins no período/seleção atual.
+          </div>
 
-            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            <CardStat value={cardsStats.total} label="Total de boletins" />
+            <CardStat value={cardsStats.firstCount} label="Primeiros boletins" sublabel="1º por ticker" />
+            <CardStat value={cardsStats.firstCpc} label="CPC (primeiro)" sublabel="NEW LISTING-CPC-SHARES" />
+            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" />
+            <CardStat value={cardsStats.demais} label="Demais boletins" sublabel="Total − primeiros" />
+            <CardStat value={cardsStats.uniqueCount} label="Classe: Únicos" />
+            <CardStat value={cardsStats.mixedCount} label="Classe: Mistos" />
           </div>
         </div>
       )}
