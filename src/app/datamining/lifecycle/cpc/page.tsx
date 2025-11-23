@@ -78,9 +78,6 @@ function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
     return { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" };
   });
 }
-function keyCT(company?: string | null, ticker?: string | null) {
-  return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
-}
 
 function startOfDayUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 function startOfMonthUTC(ts: number) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1); }
@@ -102,27 +99,29 @@ function makeTicksAdaptive(domain: [number, number]) {
   { let t = startOfDayUTC(min); const ticks: number[] = []; while (t <= max) { ticks.push(t); t = addDaysUTC(t, 15); } return { ticks, formatter: (v: number) => fDayMon.format(v) }; }
 }
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+// ----- KPI card -----
+function KpiCard({ k, label, value }: { k: string; label: string; value: number | string }) {
+  return (
+    <div className="border rounded p-3 bg-white">
+      <div className="text-xs text-gray-500 mb-1">{k}</div>
+      <div className="text-2xl font-bold leading-tight">{value}</div>
+      <div className="text-sm text-gray-700">{label}</div>
+    </div>
+  );
 }
-function errMessage(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e && typeof e === "object" && "message" in e) {
-    const m = (e as { message?: unknown }).message;
-    return typeof m === "string" ? m : "Erro desconhecido";
-  }
-  return "Erro desconhecido";
+
+// Small badge
+function Badge({ text }: { text: string }) {
+  return (
+    <span className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
+      {text}
+    </span>
+  );
 }
 
 // =========================================================
 
 export default function Page() {
-  const [loadingAnchors, setLoadingAnchors] = useState(false);
-  const [loadingTimeline, setLoadingTimeline] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
   const [rows, setRows] = useState<Row[]>([]);
 
   const [startDate, setStartDate] = useState<string>("");
@@ -161,49 +160,11 @@ export default function Page() {
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
-  // Âncoras (primeiro CPC por (company|ticker_root))
-  const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
-  const [anchorCompanies, setAnchorCompanies] = useState<string[]>([]);
-
   // Auto-período (min→max) de toda a view
   const [autoPeriod, setAutoPeriod] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  // Pré-busca: carregar mapa de âncoras (CPC inicial por (company|ticker_root))
-  useEffect(() => {
-    (async () => {
-      setLoadingAnchors(true);
-      setErrorMsg(null);
-      try {
-        const { data, error } = await supabase
-          .from("vw_bulletins_with_canonical")
-          .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
-          .ilike("canonical_type", `%${CPC_CANONICAL}%`);
-        if (error) throw error;
-
-        const map = new Map<string, string>();
-        const companies = new Set<string>();
-        for (const r of (data || []) as Row[]) {
-          const key = keyCT(r.company, r.ticker);
-          const d = r.bulletin_date || "";
-          if (!d) continue;
-          const hasCpc =
-            (r.canonical_type || "").toUpperCase().includes(CPC_CANONICAL) ||
-            (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
-          if (!hasCpc) continue;
-          if (!map.has(key) || d < (map.get(key) as string)) map.set(key, d);
-          if (r.company) companies.add(r.company);
-        }
-        setAnchors(map);
-        setAnchorCompanies(Array.from(companies).sort());
-      } catch (e) {
-        setErrorMsg(errMessage(e));
-      } finally {
-        setLoadingAnchors(false);
-      }
-    })();
-  }, []);
-
-  // Auto-período (min→max) quando habilitado ou ao montar
+  // Auto-período (min→max)
   useEffect(() => {
     (async () => {
       if (!autoPeriod) return;
@@ -224,9 +185,7 @@ export default function Page() {
         const maxDate = ((dataMax as { bulletin_date: string }[] | null)?.[0]?.bulletin_date) || "";
         if (minDate && (!startDate || autoPeriod)) setStartDate(minDate);
         if (maxDate && (!endDate || autoPeriod)) setEndDate(maxDate);
-      } catch (e) {
-        console.warn("autoPeriod preset failed:", e);
-      }
+      } catch { /* ignore */ }
     })();
   }, [autoPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -246,7 +205,26 @@ export default function Page() {
     history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
   }, [startDate, endDate, selTickers, selCompanies]);
 
-  // Janela básica por período (para filtros/contagens)
+  // -------- Buscar dados --------
+  async function fetchRows() {
+    setLoading(true);
+    try {
+      let query = supabase
+        .from("vw_bulletins_with_canonical")
+        .select(
+          "id,source_file,company,ticker,bulletin_type,canonical_type,canonical_class,bulletin_date,composite_key,body_text",
+        );
+      if (startDate) query = query.gte("bulletin_date", startDate);
+      if (endDate) query = query.lte("bulletin_date", endDate);
+      const { data, error } = await query;
+      if (error) throw error;
+      setRows((data || []) as Row[]);
+      setTableLimit(PAGE);
+    } catch { /* ignore for UI */ }
+    finally { setLoading(false); }
+  }
+
+  // -------- Janela por período --------
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -256,7 +234,7 @@ export default function Page() {
     });
   }, [rows, startDate, endDate]);
 
-  // Selects
+  // -------- Selects --------
   const companyOpts = useMemo<Opt[]>(() => {
     const s = new Set<string>();
     for (const r of rowsInWindow) if (r.company) s.add(r.company);
@@ -281,7 +259,6 @@ export default function Page() {
 
   // -------- Tabela --------
   const filteredBaseForTable = useMemo(() => {
-    // Base por período + Company/Ticker
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
     let data = rowsInWindow.filter((r) => {
@@ -291,7 +268,6 @@ export default function Page() {
       return true;
     });
 
-    // Se flags do Scatter estiverem ativas, aplica a mesma lógica aqui
     const flagsActive = onlySingle || onlyMulti || onlyFirst || onlyLast;
     if (flagsActive) {
       const counts = new Map<string, number>();
@@ -357,7 +333,6 @@ export default function Page() {
       return k;
     });
   }
-  const sortIndicator = (k: SortKey) => (sortKey === k ? <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span> : null);
 
   const tableRows = useMemo(() => {
     const getVal = (r: Row, k: SortKey) =>
@@ -378,10 +353,62 @@ export default function Page() {
   }, [tableRowsBase, sortKey, sortDir]);
 
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
-  // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-    // -------- Scatter --------
+  // -------- KPIs (date_range only) --------
+  const kpis = useMemo(() => {
+    const a_total = rowsInWindow.length;
+
+    // classe
+    let b_unico = 0, b_misto = 0;
+    for (const r of rowsInWindow) {
+      const cl = (r.canonical_class ?? "").toLowerCase();
+      if (cl === "unico" || cl === "único") b_unico++;
+      else if (cl === "misto" || cl === "mistos" || cl === "mixed") b_misto++;
+    }
+
+    // primeiros por ticker_root
+    const byRoot = new Map<string, Row[]>();
+    for (const r of rowsInWindow) {
+      const root = normalizeTicker(r.ticker);
+      if (!root || !r.bulletin_date) continue;
+      const arr = byRoot.get(root) || [];
+      arr.push(r);
+      byRoot.set(root, arr);
+    }
+    let c_primeiros = 0;
+    let e_primeiro_padrao = 0;
+    for (const arr of byRoot.values()) {
+      arr.sort((a, b) => {
+        const da = toDateNum(a.bulletin_date);
+        const db = toDateNum(b.bulletin_date);
+        if (da !== db) return da - db;
+        const ka = (a.composite_key ?? "");
+        const kb = (b.composite_key ?? "");
+        return ka.localeCompare(kb);
+      });
+      const first = arr[0];
+      c_primeiros++;
+      const typeUp = ((first.canonical_type ?? first.bulletin_type ?? "")).toUpperCase();
+      if (typeUp === CPC_CANONICAL) e_primeiro_padrao++;
+    }
+    const d_nao_primeiros = a_total - c_primeiros;
+    const f_primeiro_fora = c_primeiros - e_primeiro_padrao;
+    const g_demais = a_total - (e_primeiro_padrao + f_primeiro_fora);
+
+    return {
+      a_total,
+      b_unico,
+      b_misto,
+      c_primeiros,
+      d_nao_primeiros,
+      e_primeiro_padrao,
+      f_primeiro_fora,
+      g_demais,
+    };
+  }, [rowsInWindow]);
+
+  // -------- Scatter base --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
@@ -481,6 +508,17 @@ export default function Page() {
     return m;
   }, [rowsInWindow]);
 
+  // Y-axis tick formatter typed (no 'any')
+  const yAxisFormatter = useMemo<((v: unknown, _i: number) => string) | undefined>(() => {
+    if (!showTickerAxis) return undefined;
+    return (t: unknown) => {
+      const key = String(t);
+      const count = tickerCount.get(key);
+      const num = count ?? 0;
+      return `${key} (${num})`;
+    };
+  }, [showTickerAxis, tickerCount]);
+
   // Reset
   const handleReset = () => {
     setSelCompanies([]);
@@ -500,7 +538,6 @@ export default function Page() {
     setTableLimit(PAGE);
     setShowChart(true);
     setShowStats(true);
-    // mantém datas; o usuário pode usar Auto-período (min→max) para repopular
   };
 
   // modal
@@ -522,7 +559,7 @@ export default function Page() {
   const closeBulletinModal = () => setSelectedBulletin(null);
 
   function onPointClick(payload: ScatterDatum, _index: number, ...rest: unknown[]) {
-    const evtLike = rest[0] as { shiftKey?: boolean } | undefined;
+    const evtLike = (rest && rest.length > 0 ? (rest[0] as { shiftKey?: boolean }) : undefined);
     const isShift = Boolean(evtLike && evtLike.shiftKey);
     if (isShift && payload.composite_key) {
       setFKey(payload.composite_key);
@@ -538,7 +575,7 @@ export default function Page() {
     }, 0);
   }
 
-  // Export .txt unificado (apenas body_text)
+  // Export .txt unificado
   const SEP = "\\n--------------------------------\\n";
   async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
     if (!baseRows.length) return;
@@ -569,7 +606,7 @@ export default function Page() {
     window.URL.revokeObjectURL(url);
   }
 
-  // Export .xlsx de TABELA (sem agregação) — exatamente as linhas mostradas (respeita filtros e flags)
+  // Export .xlsx da TABELA
   async function exportRowsToXlsxTable(baseRows: Row[], filenameBase: string) {
     if (!baseRows.length) { alert("Nada a exportar."); return; }
     const rowsPlain = baseRows.map(r => ({
@@ -592,147 +629,12 @@ export default function Page() {
     XLSX.writeFile(wb, filename);
   }
 
-  // ===== base para o novo gráfico temático (segue date_range + Company/Ticker) =====
-  const baseForThematic = useMemo(() => {
-    const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value));
-    return rowsInWindow.filter((r) => {
-      const tRoot = normalizeTicker(r.ticker);
-      if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      return true;
-    });
-  }, [rowsInWindow, selCompanies, selTickers]);
-
-  // ===== Painel de cartões (base: date_range + Company/Ticker) =====
-  const cardsStats = useMemo(() => {
-    const total = baseForThematic.length;
-
-    // primeiro boletim por ticker_root dentro da base atual
-    const byRoot = new Map<string, Row[]>();
-    for (const r of baseForThematic) {
-      const root = normalizeTicker(r.ticker);
-      if (!root) continue;
-      const arr = byRoot.get(root) || [];
-      arr.push(r);
-      byRoot.set(root, arr);
-    }
-
-    let firstCount = 0;
-    let firstCpc = 0;
-    for (const arr of byRoot.values()) {
-      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-      const first = arr[0];
-      if (!first) continue;
-      firstCount++;
-      const ct = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-      if (ct.includes(CPC_CANONICAL)) firstCpc++;
-    }
-    const firstOther = firstCount - firstCpc;
-    const demais = total - firstCount;
-
-    let uniqueCount = 0;
-    let mixedCount = 0;
-    for (const r of baseForThematic) {
-      const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") uniqueCount++;
-      if (cl === "mistos") mixedCount++;
-    }
-
-    return { total, firstCount, firstCpc, firstOther, demais, uniqueCount, mixedCount };
-  }, [baseForThematic]);
-
-  function CardStat({
-    value,
-    label,
-    sublabel,
-  }: {
-    value: number | string;
-    label: string;
-    sublabel?: string;
-  }) {
-    return (
-      <div className="p-4 border rounded shadow-sm bg-white flex flex-col">
-        <div className="text-3xl font-bold text-gray-800">{value}</div>
-        <div className="text-sm text-gray-600 mt-1">{label}</div>
-        {sublabel && <div className="text-xs text-gray-500 mt-0.5">{sublabel}</div>}
-      </div>
-    );
-  }
-
-
-
-  function computeMinAnchorByCompany(map: Map<string, string>) {
-    const perCompany = new Map<string, string>();
-    for (const k of map.keys()) {
-      const [company] = k.split("|");
-      const d = map.get(k)!;
-      const prev = perCompany.get(company);
-      if (!prev || d < prev) perCompany.set(company, d);
-    }
-    return perCompany;
-  }
-
-  async function fetchAnchoredTimeline() {
-    if (!anchors.size || !anchorCompanies.length) {
-      setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado).");
-      return;
-    }
-    setLoadingTimeline(true);
-    setErrorMsg(null);
-    try {
-      const perCompanyMin = computeMinAnchorByCompany(anchors);
-      const chunks = chunk(anchorCompanies, 100);
-      const allowedKeys = new Set(anchors.keys());
-      const all: Row[] = [];
-      for (const companies of chunks) {
-        let chunkMin = "9999-12-31";
-        for (const c of companies) {
-          const d = perCompanyMin.get(c)!;
-          if (d < chunkMin) chunkMin = d;
-        }
-        const query = supabase
-          .from("vw_bulletins_with_canonical")
-          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
-          .in("company", companies)
-          .gte("bulletin_date", chunkMin)
-          .order("bulletin_date", { ascending: true });
-        if (endDate) query.lte("bulletin_date", endDate);
-        const { data, error } = await query;
-        if (error) throw error;
-        for (const r of (data || []) as Row[]) {
-          const key = keyCT(r.company, r.ticker);
-          if (!allowedKeys.has(key)) continue;
-          const anchor = anchors.get(key);
-          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
-          all.push(r);
-        }
-      }
-      setRows(all);
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setLoadingTimeline(false);
-    }
-  }
-
   return (
     <div className="p-6 space-y-4">
       {/* Título + EXPORTS */}
       <div className="flex items-center gap-4">
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
-        {loadingAnchors && <span className="text-xs text-gray-500">carregando âncoras...</span>}
         <div className="ml-auto flex flex-wrap gap-2">
-          <button
-            onClick={async () => {
-              const base = [...tableRows];
-              if (!base.length) { alert("Nada a exportar. Ajuste os filtros/seleção."); return; }
-              await exportRowsToTxt(base, "cpc_notices_selecao");
-            }}
-            disabled={!tableRows.length}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-          >📜 Exportar seleção (.txt)</button>
-
           <button
             onClick={async () => {
               const base = [...rowsInWindow];
@@ -745,7 +647,6 @@ export default function Page() {
 
           <button
             onClick={async () => {
-              // Exporta exatamente o que a tabela está mostrando (sem agregação)
               await exportRowsToXlsxTable(tableRows, "cpc_tabela");
             }}
             disabled={!tableRows.length}
@@ -754,7 +655,17 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Linha: Start | End | ⚡ | 🧹 */}
+      {/* Badges-resumo (rápido) */}
+      <div className="flex flex-wrap gap-2">
+        <Badge text={`a=${kpis.a_total}`} />
+        <Badge text={`c=${kpis.c_primeiros}`} />
+        <Badge text={`d=${kpis.d_nao_primeiros}`} />
+        <Badge text={`e=${kpis.e_primeiro_padrao}`} />
+        <Badge text={`f=${kpis.f_primeiro_fora}`} />
+        <Badge text={`g=${kpis.g_demais}`} />
+      </div>
+
+      {/* Linha: Start | End | GO | Limpar */}
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col">
           <label className="block text-sm">Start</label>
@@ -765,12 +676,16 @@ export default function Page() {
           <input type="date" className="border rounded px-2 h-10" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
         </div>
         <div className="flex items-end gap-2 pb-[2px]">
-          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={fetchAnchoredTimeline} disabled={loadingTimeline || (!startDate && !endDate)}>⚡</button>
+          <button
+            className="border rounded px-3 h-10 font-semibold flex items-center justify-center"
+            title="Executar busca (raio)"
+            aria-label="Executar busca"
+            onClick={fetchRows}
+            disabled={loading || (!startDate && !endDate)}
+          >⚡</button>
           <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">🧹</button>
         </div>
       </div>
-
-      {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
 
       {/* Auto-período (min→max) */}
       <div>
@@ -802,21 +717,19 @@ export default function Page() {
         </button>
       </div>
 
-      {/* Estatísticas + Novo Gráfico (lado a lado) */}
+      {/* KPIs (cards) */}
       {showStats && (
-        <div className="w-full border rounded p-4 space-y-4 bg-white">
-          <div className="text-sm text-gray-700 mb-2">
-            Distribuição dos boletins no período/seleção atual.
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            <CardStat value={cardsStats.total} label="Total de boletins" />
-            <CardStat value={cardsStats.firstCount} label="Primeiros boletins" sublabel="1º por ticker" />
-            <CardStat value={cardsStats.firstCpc} label="CPC (primeiro)" sublabel="NEW LISTING-CPC-SHARES" />
-            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" />
-            <CardStat value={cardsStats.demais} label="Demais boletins" sublabel="Total − primeiros" />
-            <CardStat value={cardsStats.uniqueCount} label="Classe: Únicos" />
-            <CardStat value={cardsStats.mixedCount} label="Classe: Mistos" />
+        <div className="w-full border rounded p-3">
+          <div className="text-sm text-gray-700 mb-2">Foto global no período selecionado (date_range).</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard k="a" label="Total de boletins" value={kpis.a_total} />
+            <KpiCard k="b" label="Classe: Único" value={kpis.b_unico} />
+            <KpiCard k="b" label="Classe: Misto" value={kpis.b_misto} />
+            <KpiCard k="c" label="‘Primeiro boletim’ (1º por ticker)" value={kpis.c_primeiros} />
+            <KpiCard k="d" label="Não ‘primeiro boletim’" value={kpis.d_nao_primeiros} />
+            <KpiCard k="e" label="1º boletim ‘padrão’ (CPC exato)" value={kpis.e_primeiro_padrao} />
+            <KpiCard k="f" label="1º boletim fora do padrão" value={kpis.f_primeiro_fora} />
+            <KpiCard k="g" label="‘Demais boletins’ = a − (e + f)" value={kpis.g_demais} />
           </div>
         </div>
       )}
@@ -877,7 +790,7 @@ export default function Page() {
                   width={showTickerAxis ? 90 : 0}
                   tick={showTickerAxis ? { fontSize: 12 } : undefined}
                   allowDuplicatedCategory={false}
-                  tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
+                  tickFormatter={yAxisFormatter}
                   hide={!showTickerAxis}
                 />
                 <Tooltip
@@ -914,26 +827,18 @@ export default function Page() {
           <table className="w-full text-sm">
             <thead className="bg-gray-100 border-b sticky top-0 z-10">
               <tr className="text-left align-top">
-                <th className="p-2" aria-sort={sortKey === "company" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>Empresa {sortIndicator("company")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fCompany} onChange={(e) => setFCompany(e.target.value)} />
-                </th>
-                <th className="p-2" aria-sort={sortKey === "ticker" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>Ticker {sortIndicator("ticker")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fTicker} onChange={(e) => setFTicker(e.target.value)} />
-                </th>
-                <th className="p-2" aria-sort={sortKey === "composite_key" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>Composite Key {sortIndicator("composite_key")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fKey} onChange={(e) => setFKey(e.target.value)} />
-                </th>
-                <th className="p-2" aria-sort={sortKey === "bulletin_date" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>Data {sortIndicator("bulletin_date")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD" value={fDate} onChange={(e) => setFDate(e.target.value)} />
-                </th>
-                <th className="p-2" aria-sort={sortKey === "canonical_type" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>Tipo de Boletim {sortIndicator("canonical_type")}</button>
-                  <input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fType} onChange={(e) => setFType(e.target.value)} />
-                </th>
+                <th className="p-2"><button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("company")}>Empresa</button></th>
+                <th className="p-2"><button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("ticker")}>Ticker</button></th>
+                <th className="p-2"><button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("composite_key")}>Composite Key</button></th>
+                <th className="p-2"><button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("bulletin_date")}>Data</button></th>
+                <th className="p-2"><button className="font-semibold cursor-pointer select-none" onClick={() => toggleSort("canonical_type")}>Tipo de Boletim</button></th>
+              </tr>
+              <tr className="text-left align-top">
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fCompany} onChange={(e) => setFCompany(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fTicker} onChange={(e) => setFTicker(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fKey} onChange={(e) => setFKey(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD" value={fDate} onChange={(e) => setFDate(e.target.value)} /></th>
+                <th className="p-2"><input className="mt-1 w-full border rounded px-2 py-1 text-sm" placeholder="Filtrar" value={fType} onChange={(e) => setFType(e.target.value)} /></th>
               </tr>
             </thead>
             <tbody>
@@ -969,7 +874,7 @@ export default function Page() {
       {/* Modal */}
       {selectedBulletin && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={closeBulletinModal}>
-          <div className="bg-white max-w-3xl w-full rounded shadow p-4 space-y-2" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white max-w-3xl w-full rounded shadow p-4 space-y-2" onClick={(e) => e.stopPropagation())}>
             <div className="flex justify-between items-center">
               <h3 className="font-semibold text-lg">Boletim</h3>
               <button className="border rounded px-2 h-10" onClick={closeBulletinModal}>Fechar</button>
