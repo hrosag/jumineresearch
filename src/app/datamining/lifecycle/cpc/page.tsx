@@ -633,10 +633,13 @@ export default function Page() {
 
     let uniqueCount = 0;
     let mixedCount = 0;
+
     for (const r of baseForThematic) {
-      const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") uniqueCount++;
-      if (cl === "mistos") mixedCount++;
+      const raw = (r.canonical_class ?? "").toString().trim().toLowerCase();
+      const norm = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      if (norm.startsWith("unic")) uniqueCount++;
+      if (norm.startsWith("mist")) mixedCount++;
     }
 
     return { total, firstCount, firstCpc, firstOther, demais, uniqueCount, mixedCount };
