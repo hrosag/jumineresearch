@@ -635,8 +635,8 @@ export default function Page() {
     let mixedCount = 0;
     for (const r of baseForThematic) {
       const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") uniqueCount++;
-      if (cl === "mistos") mixedCount++;
+      if (cl === "Unico") uniqueCount++;
+      if (cl === "Misto") mixedCount++;
     }
 
     return { total, firstCount, firstCpc, firstOther, demais, uniqueCount, mixedCount };
