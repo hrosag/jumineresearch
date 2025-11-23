@@ -11,6 +11,11 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  Treemap,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
   BarChart,
   Bar,
   LabelList,
@@ -398,27 +403,9 @@ export default function Page() {
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
-    for (const r of rowsInWindow) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
-    }
-    const totalCompanies = perCompany.size;
-    let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
-    }
-    const chartData = [
-      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
-      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
-      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
-      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
-    ];
-    return { chartData };
-  }, [rowsInWindow]);
+  // -------- Estatísticas (substituídas por treemap + donut) --------
+  const stats = useMemo(() => ({}), []);
+
 
   // -------- Scatter --------
   const filteredForChart = useMemo(() => {
@@ -666,6 +653,67 @@ export default function Page() {
     ];
   }, [baseForThematic]);
 
+  // ===== Treemap: total -> primeiros vs demais; dentro de primeiros: CPC vs não-CPC =====
+  const treemapData = useMemo(() => {
+    const total = baseForThematic.length;
+
+    // primeiro boletim por ticker_root dentro da base atual
+    const byRoot = new Map<string, Row[]>();
+    for (const r of baseForThematic) {
+      const root = normalizeTicker(r.ticker);
+      if (!root) continue;
+      const arr = byRoot.get(root) || [];
+      arr.push(r);
+      byRoot.set(root, arr);
+    }
+
+    let firstCount = 0;
+    let firstCpc = 0;
+    for (const arr of byRoot.values()) {
+      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      const first = arr[0];
+      if (!first) continue;
+      firstCount++;
+      const ct = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+      if (ct.includes(CPC_CANONICAL)) firstCpc++;
+    }
+    const firstOther = firstCount - firstCpc;
+    const demais = total - firstCount;
+
+    return [
+      {
+        name: "Total",
+        size: total,
+        children: [
+          {
+            name: "Primeiros boletins",
+            size: firstCount,
+            children: [
+              { name: "Padrão CPC", size: firstCpc },
+              { name: "Fora do padrão", size: firstOther },
+            ],
+          },
+          { name: "Demais boletins", size: demais },
+        ],
+      },
+    ];
+  }, [baseForThematic]);
+
+  // ===== Donut por classe (único/misto) =====
+  const classPieData = useMemo(() => {
+    let unicos = 0, mistos = 0;
+    for (const r of baseForThematic) {
+      const cl = (r.canonical_class ?? "").toLowerCase();
+      if (cl === "unicos") unicos++;
+      if (cl === "mistos") mistos++;
+    }
+    return [
+      { name: "Únicos", value: unicos },
+      { name: "Mistos", value: mistos },
+    ];
+  }, [baseForThematic]);
+
+
   function computeMinAnchorByCompany(map: Map<string, string>) {
     const perCompany = new Map<string, string>();
     for (const k of map.keys()) {
@@ -809,48 +857,56 @@ export default function Page() {
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
         <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período */}
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+          <div className="text-sm text-gray-700 mb-2">
+            Distribuição dos boletins no período/seleção atual.
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+            {/* Treemap (ocupando 2 colunas) */}
+            <div className="md:col-span-2 w-full h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <Treemap
+                  data={treemapData[0].children}
+                  dataKey="size"
+                  nameKey="name"
+                  stroke="#fff"
+                  fill="#8884d8"
+                  isAnimationActive={false}
+                >
                   <Tooltip
                     formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
+                      const payload = p as { payload?: { name?: string } } | undefined;
+                      return [String(v), payload?.payload?.name ?? ""];
                     }}
-                    labelFormatter={(l: string) => l}
                   />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
+                </Treemap>
               </ResponsiveContainer>
+              <div className="text-xs text-gray-500 mt-1">
+                Hierarquia: Total → Primeiros (CPC / fora) → Demais.
+              </div>
             </div>
 
-            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
+            {/* Donut Únicos vs Mistos */}
+            <div className="w-full h-[260px] flex flex-col">
+              <div className="text-xs text-gray-600 mb-1">Classe do boletim</div>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={classPieData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius="55%"
+                    outerRadius="80%"
+                    paddingAngle={2}
+                    isAnimationActive={false}
+                  >
+                    {classPieData.map((_, i) => (
+                      <Cell key={i} />
+                    ))}
+                  </Pie>
+                  <Legend verticalAlign="bottom" height={36} />
+                  <Tooltip />
+                </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
