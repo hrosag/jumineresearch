@@ -116,6 +116,20 @@ function errMessage(e: unknown): string {
   return "Erro desconhecido";
 }
 
+// Tipagem explícita para evitar "any" no LabelList custom
+type BarLabelProps = {
+  x?: number;
+  y?: number;
+  width?: number;
+  value?: number | string;
+};
+function BarValueLabel(props: BarLabelProps) {
+  const { x, y, width, value } = props;
+  const cx = (x ?? 0) + (width ?? 0) / 2;
+  const vy = (y ?? 0) - 6;
+  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
+}
+
 // =========================================================
 
 export default function Page() {
@@ -381,7 +395,29 @@ export default function Page() {
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-    // -------- Scatter --------
+  // -------- Estatísticas (esquerda, date_range only) --------
+  const stats = useMemo(() => {
+    const totalBulletins = rowsInWindow.length;
+    const perCompany = new Map<string, number>();
+    for (const r of rowsInWindow) {
+      if (!r.company) continue;
+      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
+    }
+    const totalCompanies = perCompany.size;
+    let eq1 = 0, ge2 = 0;
+    for (const cnt of perCompany.values()) {
+      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
+    }
+    const chartData = [
+      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
+      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
+      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
+      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
+    ];
+    return { chartData };
+  }, [rowsInWindow]);
+
+  // -------- Scatter --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
@@ -605,44 +641,70 @@ export default function Page() {
   }, [rowsInWindow, selCompanies, selTickers]);
 
   // ===== Painel de cartões (base: date_range + Company/Ticker) =====
+  // Definições:
+  // - "Primeiro boletim": 1º boletim por ticker PUBLICADO dentro da seleção atual.
+  // - "Padrão CPC": primeiro boletim cuja canonical_type é NEW LISTING-CPC-SHARES
+  //   E NÃO é misto (ou seja, não vem acompanhado de outro tipo no mesmo boletim).
+  // - "Fora do padrão (1º)": primeiro boletim CPC, mas classificado como misto.
   const cardsStats = useMemo(() => {
     const total = baseForThematic.length;
 
-    // primeiro boletim por ticker_root dentro da base atual
-    const byRoot = new Map<string, Row[]>();
+    // primeiro boletim por ticker (publicado)
+    const byTicker = new Map<string, Row[]>();
     for (const r of baseForThematic) {
-      const root = normalizeTicker(r.ticker);
-      if (!root) continue;
-      const arr = byRoot.get(root) || [];
+      const key = (r.ticker ?? "").trim().toUpperCase();
+      if (!key) continue;
+      const arr = byTicker.get(key) || [];
       arr.push(r);
-      byRoot.set(root, arr);
+      byTicker.set(key, arr);
     }
 
     let firstCount = 0;
-    let firstCpc = 0;
-    for (const arr of byRoot.values()) {
+    let firstStandard = 0;
+    let firstMixed = 0;
+
+    for (const arr of byTicker.values()) {
       arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
       const first = arr[0];
       if (!first) continue;
+
       firstCount++;
-      const ct = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-      if (ct.includes(CPC_CANONICAL)) firstCpc++;
+
+      const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+      const isCpc = canon.includes(CPC_CANONICAL);
+
+      // misto: flag _mixed, ou bulletin_type contendo vírgula, ou canonical_type com vírgula
+      const bt = (first.bulletin_type ?? "").toString();
+      const mixedFlag = (first as any)._mixed === true; // _mixed existe no Row runtime
+      const isMixed = mixedFlag || bt.includes(",") || canon.includes(",");
+
+      if (isCpc && !isMixed) firstStandard++;
+      if (isCpc && isMixed) firstMixed++;
     }
-    const firstOther = firstCount - firstCpc;
+
+    const firstOther = firstMixed;           // seu card "fora do padrão"
+    const firstCpc = firstStandard + firstMixed; // total de primeiros CPC (standard + misto)
     const demais = total - firstCount;
 
     let uniqueCount = 0;
     let mixedCount = 0;
-
     for (const r of baseForThematic) {
       const raw = (r.canonical_class ?? "").toString().trim().toLowerCase();
       const norm = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
       if (norm.startsWith("unic")) uniqueCount++;
       if (norm.startsWith("mist")) mixedCount++;
     }
 
-    return { total, firstCount, firstCpc, firstOther, demais, uniqueCount, mixedCount };
+    return {
+      total,
+      firstCount,
+      firstCpc,
+      firstStandard,
+      firstOther,
+      demais,
+      uniqueCount,
+      mixedCount,
+    };
   }, [baseForThematic]);
 
   function CardStat({
@@ -655,15 +717,41 @@ export default function Page() {
     sublabel?: string;
   }) {
     return (
-      <div className="p-4 border rounded shadow-sm bg-white flex flex-col">
-        <div className="text-3xl font-bold text-gray-800">{value}</div>
-        <div className="text-sm text-gray-600 mt-1">{label}</div>
-        {sublabel && <div className="text-xs text-gray-500 mt-0.5">{sublabel}</div>}
+      <div className="p-3 border rounded-lg bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
+        <div className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">
+          {value}
+        </div>
+        <div className="text-sm text-gray-700 mt-1 leading-snug">{label}</div>
+        {sublabel && (
+          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{sublabel}</div>
+        )}
       </div>
     );
   }
 
 
+  const thematicData = useMemo(() => {
+    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+    for (const r of baseForThematic) {
+      const ct = (r.canonical_type ?? "").toUpperCase();
+      const cl = (r.canonical_class ?? "").toLowerCase();
+      if (cl === "unicos") unicos++;
+      if (cl === "mistos") mistos++;
+      if (ct === CPC_CANONICAL) {
+        cpc++;
+        if (cl === "mistos") cpcMisto++;
+      } else {
+        outros++;
+      }
+    }
+    return [
+      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
+      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
+      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
+      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
+      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
+    ];
+  }, [baseForThematic]);
 
   function computeMinAnchorByCompany(map: Map<string, string>) {
     const perCompany = new Map<string, string>();
@@ -807,19 +895,19 @@ export default function Page() {
 
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
-        <div className="w-full border rounded p-4 space-y-4 bg-white">
-          <div className="text-sm text-gray-700 mb-2">
+        <div className="w-full border rounded-lg p-4 space-y-3 bg-gray-50">
+          <div className="text-sm text-gray-700">
             Distribuição dos boletins no período/seleção atual.
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             <CardStat value={cardsStats.total} label="Total de boletins" />
             <CardStat value={cardsStats.firstCount} label="Primeiros boletins" sublabel="1º por ticker" />
-            <CardStat value={cardsStats.firstCpc} label="CPC (primeiro)" sublabel="NEW LISTING-CPC-SHARES" />
-            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" />
+            <CardStat value={cardsStats.firstStandard} label="Padrão CPC (1º)" sublabel="NEW LISTING-CPC-SHARES (único)" />
+            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" sublabel="CPC misto (ex.: + HALT)" />
             <CardStat value={cardsStats.demais} label="Demais boletins" sublabel="Total − primeiros" />
-            <CardStat value={cardsStats.uniqueCount} label="Classe: Únicos" />
-            <CardStat value={cardsStats.mixedCount} label="Classe: Mistos" />
+            <CardStat value={cardsStats.uniqueCount} label="Classe: Único" />
+            <CardStat value={cardsStats.mixedCount} label="Classe: Misto" />
           </div>
         </div>
       )}
