@@ -11,9 +11,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
-  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -119,19 +116,6 @@ function errMessage(e: unknown): string {
   return "Erro desconhecido";
 }
 
-// Tipagem explícita para evitar "any" no LabelList custom
-type BarLabelProps = {
-  x?: number;
-  y?: number;
-  width?: number;
-  value?: number | string;
-};
-function BarValueLabel(props: BarLabelProps) {
-  const { x, y, width, value } = props;
-  const cx = (x ?? 0) + (width ?? 0) / 2;
-  const vy = (y ?? 0) - 6;
-  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
-}
 
 // =========================================================
 
@@ -435,11 +419,6 @@ export default function Page() {
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
-
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
     for (const r of rowsInWindow) {
       if (!r.company) continue;
       perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
@@ -716,10 +695,94 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers]);
 
-  const thematicData = useMemo(() => {
-    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+  // ===== KPIs em cartões (compactos) =====
+  const cardsStats = useMemo(() => {
+    const total = baseForThematic.length;
+
+    // universo CPC (.P) agrupado por root (antes do ponto)
+    const byRootCpc = new Map<string, Row[]>();
     for (const r of baseForThematic) {
-      const ct = (r.canonical_type ?? "").toUpperCase();
+      const pub = (r.ticker ?? "").trim().toUpperCase();
+      if (!pub.endsWith(".P")) continue;
+      const root = normalizeTicker(pub);
+      if (!root) continue;
+      const arr = byRootCpc.get(root) || [];
+      arr.push(r);
+      byRootCpc.set(root, arr);
+    }
+
+    let firstCount = 0;
+    let firstStandard = 0;
+    let firstMixed = 0;
+    let oneBulletinCompanies = 0;
+
+    for (const arr of byRootCpc.values()) {
+      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      const first = arr[0];
+      if (!first) continue;
+
+      if (arr.length === 1) oneBulletinCompanies++;
+
+      firstCount++;
+
+      const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+      const isCpc = canon.includes(CPC_CANONICAL);
+
+      const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
+      const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const isMixedClass = normClass.startsWith("mist");
+
+      if (isCpc && !isMixedClass) firstStandard++;
+      if (isCpc && isMixedClass) firstMixed++;
+    }
+
+    const firstOther = firstMixed;
+    const cpcTotal = Array.from(byRootCpc.values()).reduce((s, a) => s + a.length, 0);
+    const demais = cpcTotal - firstCount;
+
+    let uniqueCount = 0;
+    let mixedCount = 0;
+    for (const r of baseForThematic) {
+      const raw = (r.canonical_class ?? "").toString().trim().toLowerCase();
+      const norm = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (norm.startsWith("unic")) uniqueCount++;
+      if (norm.startsWith("mist")) mixedCount++;
+    }
+
+    return {
+      total,
+      firstCount,
+      firstStandard,
+      firstOther,
+      demais,
+      uniqueCount,
+      mixedCount,
+      oneBulletinCompanies,
+    };
+  }, [baseForThematic]);
+
+  function CardStat({
+    value,
+    label,
+    sublabel,
+  }: {
+    value: number | string;
+    label: string;
+    sublabel?: string;
+  }) {
+    return (
+      <div className="p-2 border rounded-md bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
+        <div className="text-xl md:text-2xl font-semibold text-gray-900 tracking-tight">
+          {value}
+        </div>
+        <div className="text-xs md:text-sm text-gray-700 mt-0.5 leading-snug">{label}</div>
+        {sublabel && (
+          <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sublabel}</div>
+        )}
+      </div>
+    );
+  }
+
       const cl = (r.canonical_class ?? "").toLowerCase();
       if (cl === "unicos") unicos++;
       if (cl === "mistos") mistos++;
@@ -881,51 +944,20 @@ export default function Page() {
 
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
-        <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período */}
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        <div className="w-full border rounded-lg p-3 space-y-2 bg-gray-50">
+          <div className="text-sm text-gray-700">
+            Distribuição dos boletins no período/seleção atual.
+          </div>
 
-            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+            <CardStat value={cardsStats.total} label="Total de boletins" />
+            <CardStat value={cardsStats.firstCount} label="Primeiros CPC (1º)" sublabel="1º por ticker_root .P" />
+            <CardStat value={cardsStats.firstStandard} label="Padrão CPC (1º)" sublabel="NEW LISTING-CPC-SHARES (único)" />
+            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" sublabel="CPC misto (ex.: + HALT)" />
+            <CardStat value={cardsStats.demais} label="Demais CPC" sublabel="CPC total − primeiros" />
+            <CardStat value={cardsStats.oneBulletinCompanies} label="Empresas c/ 1 boletim" sublabel="no universo CPC (.P)" />
+            <CardStat value={cardsStats.uniqueCount} label="Classe: Único" />
+            <CardStat value={cardsStats.mixedCount} label="Classe: Misto" />
           </div>
         </div>
       )}
