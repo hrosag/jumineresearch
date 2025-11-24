@@ -11,9 +11,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
-  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -48,6 +45,8 @@ type ScatterDatum = {
 type Opt = { value: string; label: string };
 
 const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
+const QT_COMPLETED = "QUALIFYING TRANSACTION-COMPLETED";
+const QT_ANY = "QUALIFYING TRANSACTION";
 type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "canonical_type";
 type SortDir = "asc" | "desc";
 
@@ -119,13 +118,12 @@ function errMessage(e: unknown): string {
   return "Erro desconhecido";
 }
 
-// CPC helpers (padronizam a classificação padrão vs misto)
+// CPC / QT helpers
 function isCpc(row: Row): boolean {
   const canon = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
   return canon.includes(CPC_CANONICAL);
 }
 function isCpcMixed(row: Row): boolean {
-  // respeita possível flag interna _mixed; se não houver, usa presença de vírgula (tipos combinados)
   const bt = (row.bulletin_type ?? "").toString();
   const canon = (row.canonical_type ?? row.bulletin_type ?? "").toString();
   const mixedFlag =
@@ -135,22 +133,15 @@ function isCpcMixed(row: Row): boolean {
   const byClass = (row.canonical_class ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").startsWith("mist");
   return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
 }
-function isCpcPadrao(row: Row): boolean {
-  return isCpc(row) && !isCpcMixed(row);
-}
+function isCpcPadrao(row: Row): boolean { return isCpc(row) && !isCpcMixed(row); }
 
-// Tipagem explícita para evitar "any" no LabelList custom
-type BarLabelProps = {
-  x?: number;
-  y?: number;
-  width?: number;
-  value?: number | string;
-};
-function BarValueLabel(props: BarLabelProps) {
-  const { x, y, width, value } = props;
-  const cx = (x ?? 0) + (width ?? 0) / 2;
-  const vy = (y ?? 0) - 6;
-  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
+function isQtAny(row: Row): boolean {
+  const t = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
+  return t.includes(QT_ANY);
+}
+function isQtCompleted(row: Row): boolean {
+  const t = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
+  return t.includes(QT_COMPLETED);
 }
 
 // =========================================================
@@ -168,16 +159,18 @@ export default function Page() {
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
-  // FLAGS: afetam Scatter e, via regra abaixo, a TABELA
+  // FLAGS (Scatter + Tabela)
   const [onlyMulti, setOnlyMulti] = useState(false);
   const [onlySingle, setOnlySingle] = useState(false);
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
   const [showTickerAxis, setShowTickerAxis] = useState(true);
 
-  // CPC padrão x não-padrão (afetam Scatter e Tabela)
-  const [flagNewCpc, setFlagNewCpc] = useState(false);      // CPC padrão (único)
-  const [flagCpcMixed, setFlagCpcMixed] = useState(false);  // CPC não-padrão (misto)
+  // CPC
+  const [flagNewCpc, setFlagNewCpc] = useState(false);
+  const [flagCpcMixed, setFlagCpcMixed] = useState(false);
+  // QT Completed
+  const [flagQtCompleted, setFlagQtCompleted] = useState(false);
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -202,14 +195,14 @@ export default function Page() {
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
 
-  // Âncoras (primeiro CPC por (company|ticker_root))
+  // Âncoras (1º CPC por (company|ticker_root))
   const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
   const [anchorCompanies, setAnchorCompanies] = useState<string[]>([]);
 
-  // Auto-período (min→max) de toda a view
+  // Auto-período
   const [autoPeriod, setAutoPeriod] = useState(true);
 
-  // Pré-busca: carregar mapa de âncoras (CPC inicial por (company|ticker_root))
+  // Pré-busca: mapa de âncoras
   useEffect(() => {
     (async () => {
       setLoadingAnchors(true);
@@ -241,7 +234,7 @@ export default function Page() {
     })();
   }, []);
 
-  // Auto-período (min→max) quando habilitado ou ao montar
+  // Auto-período (min→max)
   useEffect(() => {
     (async () => {
       if (!autoPeriod) return;
@@ -268,12 +261,12 @@ export default function Page() {
     })();
   }, [autoPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // sanity de datas
+  // sanity datas
   useEffect(() => {
     if (startDate && endDate && startDate > endDate) setEndDate(startDate);
   }, [startDate, endDate]);
 
-  // URL (não dispara buscas)
+  // URL
   useEffect(() => {
     const p = new URLSearchParams();
     if (startDate) p.set("s", startDate);
@@ -284,7 +277,7 @@ export default function Page() {
     history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
   }, [startDate, endDate, selTickers, selCompanies]);
 
-  // Janela básica por período (para filtros/contagens)
+  // Janela básica
   const rowsInWindow = useMemo(() => {
     return rows.filter((r) => {
       if (!r.bulletin_date) return false;
@@ -293,6 +286,20 @@ export default function Page() {
       return true;
     });
   }, [rows, startDate, endDate]);
+
+  // ===== BASE GLOBAL (KPIs) com de-dup por company|ticker_root (com data+tipo p/ não colapsar eventos distintos)
+  const kpiRows = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Row[] = [];
+    for (const r of rowsInWindow) {
+      const root = normalizeTicker(r.ticker);
+      const key = `${(r.company ?? "").trim()}|${root}|${(r.bulletin_date ?? "").slice(0,10)}|${(r.canonical_type ?? r.bulletin_type ?? "").trim()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+    }
+    return out;
+  }, [rowsInWindow]);
 
   // Selects
   const companyOpts = useMemo<Opt[]>(() => {
@@ -317,7 +324,38 @@ export default function Page() {
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
-  // -------- Tabela --------
+  // -------- KPIs Globais (duas linhas, compactos) --------
+  const kpiBoletins = useMemo(() => {
+    const total = kpiRows.length;
+    let unico = 0, misto = 0, cpcPad = 0, cpcMix = 0, outros = 0, qtAny = 0;
+    for (const r of kpiRows) {
+      const cln = (r.canonical_class ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const isMixed = cln.startsWith("mist") || isCpcMixed(r);
+      const isCpcNotice = isCpc(r);
+      if (!isMixed) unico++; else misto++;
+      if (isCpcNotice) { if (isMixed) cpcMix++; else cpcPad++; }
+      if (!isCpcNotice) outros++;
+      if (isQtAny(r)) qtAny++;
+    }
+    return { total, unico, misto, cpcPad, cpcMix, outros, qtAny };
+  }, [kpiRows]);
+
+  const kpiEmpresas = useMemo(() => {
+    const perCompany = new Map<string, number>();
+    const qtCompanies = new Set<string>();
+    for (const r of kpiRows) {
+      const c = (r.company ?? "").trim();
+      if (!c) continue;
+      perCompany.set(c, (perCompany.get(c) ?? 0) + 1);
+      if (isQtCompleted(r)) qtCompanies.add(c);
+    }
+    const total = perCompany.size;
+    let eq1 = 0, ge2 = 0;
+    for (const cnt of perCompany.values()) { if (cnt === 1) eq1++; else if (cnt >= 2) ge2++; }
+    return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size };
+  }, [kpiRows]);
+
+  // -------- Tabela base (com flags espelhadas) --------
   const filteredBaseForTable = useMemo(() => {
     // Base por período + Company/Ticker
     const cset = new Set(selCompanies.map((o) => o.value));
@@ -329,7 +367,7 @@ export default function Page() {
       return true;
     });
 
-    // Se flags do Scatter estiverem ativas, aplica a mesma lógica aqui
+    // flags (=1, >=2, first/last)
     const flagsActive = onlySingle || onlyMulti || onlyFirst || onlyLast;
     if (flagsActive) {
       const counts = new Map<string, number>();
@@ -359,7 +397,7 @@ export default function Page() {
       }
     }
 
-    // ===== filtros especiais: New CPC / CPC Mixed =====
+    // CPC flags (New CPC / CPC Mixed)
     if (flagNewCpc || flagCpcMixed) {
       const byRootCpc = new Map<string, Row[]>();
       for (const r of data) {
@@ -371,22 +409,25 @@ export default function Page() {
         arr.push(r);
         byRootCpc.set(root, arr);
       }
-
       const picked: Row[] = [];
       for (const arr of byRootCpc.values()) {
         arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
         const first = arr[0];
         if (!first) continue;
         if (!isCpc(first)) continue;
-
         if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
         if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
       }
       data = picked;
     }
 
+    // QT Completed flag
+    if (flagQtCompleted) {
+      data = data.filter(isQtCompleted);
+    }
+
     return data;
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed]);
+  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed, flagQtCompleted]);
 
   const tC = useDeferredValue(dfCompany);
   const tT = useDeferredValue(dfTicker);
@@ -443,175 +484,7 @@ export default function Page() {
   }, [tableRowsBase, sortKey, sortDir]);
 
   const tableRowsPage = useMemo(() => tableRows.slice(0, tableLimit), [tableRows, tableLimit]);
-  // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
-
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
-    for (const r of rowsInWindow) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
-    }
-    const totalCompanies = perCompany.size;
-    let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
-    }
-    const chartData = [
-      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
-      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
-      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
-      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
-    ];
-    return { chartData };
-  }, [rowsInWindow]);
-
-  // -------- Thematic (direita) --------
-  const baseForThematic = useMemo(() => {
-    const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value));
-    return rowsInWindow.filter((r) => {
-      const tRoot = normalizeTicker(r.ticker);
-      if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      return true;
-    });
-  }, [rowsInWindow, selCompanies, selTickers]);
-
-  const thematicData = useMemo(() => {
-    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
-    for (const r of baseForThematic) {
-      const cln = (r.canonical_class ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const ct = (r.canonical_type ?? r.bulletin_type ?? "").toUpperCase();
-      const isCpcNotice = ct.includes(CPC_CANONICAL);
-      const isMixed = cln.startsWith("mist");
-      if (cln.startsWith("unic")) unicos++;
-      if (isMixed) mistos++;
-      if (isCpcNotice) {
-        cpc++;
-        if (isMixed) cpcMisto++;
-      } else {
-        outros++;
-      }
-    }
-    return [
-      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
-      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
-      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
-      { group: "CPC (misto)", count: cpcMisto, label: "CPC class='mistos' (subset de CPC)" },
-      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
-    ];
-  }, [baseForThematic]);
-
-  function computeMinAnchorByCompany(map: Map<string, string>) {
-    const perCompany = new Map<string, string>();
-    for (const k of map.keys()) {
-      const [company] = k.split("|");
-      const d = map.get(k)!;
-      const prev = perCompany.get(company);
-      if (!prev || d < prev) perCompany.set(company, d);
-    }
-    return perCompany;
-  }
-
-  async function fetchAnchoredTimeline() {
-    if (!anchors.size || !anchorCompanies.length) {
-      setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado).");
-      return;
-    }
-    setLoadingTimeline(true);
-    setErrorMsg(null);
-    try {
-      const perCompanyMin = computeMinAnchorByCompany(anchors);
-      const chunks = chunk(anchorCompanies, 100);
-      const allowedKeys = new Set(anchors.keys());
-      const all: Row[] = [];
-      for (const companies of chunks) {
-        let chunkMin = "9999-12-31";
-        for (const c of companies) {
-          const d = perCompanyMin.get(c)!;
-          if (d < chunkMin) chunkMin = d;
-        }
-        const query = supabase
-          .from("vw_bulletins_with_canonical")
-          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
-          .in("company", companies)
-          .gte("bulletin_date", chunkMin)
-          .order("bulletin_date", { ascending: true });
-        if (endDate) query.lte("bulletin_date", endDate);
-        const { data, error } = await query;
-        if (error) throw error;
-        for (const r of (data || []) as Row[]) {
-          const key = keyCT(r.company, r.ticker);
-          if (!allowedKeys.has(key)) continue;
-          const anchor = anchors.get(key);
-          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
-          all.push(r);
-        }
-      }
-      setRows(all);
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setLoadingTimeline(false);
-    }
-  }
-
-  // Export .txt unificado (apenas body_text)
-  const SEP = "\n--------------------------------\n";
-  async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
-    if (!baseRows.length) return;
-    const missing = Array.from(new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)));
-    let filled: Row[] = baseRows;
-    if (missing.length) {
-      const { data } = await supabase
-        .from("vw_bulletins_with_canonical")
-        .select("composite_key, body_text")
-        .in("composite_key", missing);
-      const map = new Map<string, string>();
-      for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
-        if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
-      }
-      filled = withBodyTextFilled(baseRows, map);
-    }
-    const sorted = [...filled].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-    const story = sorted.map((r) => (r.body_text ?? "").trim()).filter((t) => t.length > 0).join(SEP);
-    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-    const e = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `${filenameBase}_${s}_${e}.txt`;
-    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  }
-
-  // Export .xlsx de TABELA (sem agregação) — exatamente as linhas mostradas (respeita filtros e flags)
-  async function exportRowsToXlsxTable(baseRows: Row[], filenameBase: string) {
-    if (!baseRows.length) { alert("Nada a exportar."); return; }
-    const rowsPlain = baseRows.map(r => ({
-      id: r.id,
-      company: r.company ?? "",
-      ticker: r.ticker ?? "",
-      composite_key: r.composite_key ?? "",
-      bulletin_date: r.bulletin_date ?? "",
-      canonical_type: r.canonical_type ?? r.bulletin_type ?? "",
-      canonical_class: r.canonical_class ?? "",
-      source_file: r.source_file ?? ""
-    }));
-    const XLSX = await import("xlsx");
-    const ws = XLSX.utils.json_to_sheet(rowsPlain);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Tabela");
-    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-    const e = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `${filenameBase}_${s}_${e}.xlsx`;
-    XLSX.writeFile(wb, filename);
-  }
 
   // -------- Scatter --------
   const filteredForChart = useMemo(() => {
@@ -649,7 +522,7 @@ export default function Page() {
       data = picked;
     }
 
-    // ===== filtros especiais: New CPC / CPC Mixed =====
+    // CPC flags
     if (flagNewCpc || flagCpcMixed) {
       const byRootCpc = new Map<string, Row[]>();
       for (const r of data) {
@@ -661,22 +534,25 @@ export default function Page() {
         arr.push(r);
         byRootCpc.set(root, arr);
       }
-
       const picked: Row[] = [];
       for (const arr of byRootCpc.values()) {
         arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
         const first = arr[0];
         if (!first) continue;
         if (!isCpc(first)) continue;
-
         if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
         if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
       }
       data = picked;
     }
 
+    // QT Completed flag
+    if (flagQtCompleted) {
+      data = data.filter(isQtCompleted);
+    }
+
     return data.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed]);
+  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed, flagQtCompleted]);
 
   const chartData = useMemo(
     () =>
@@ -751,6 +627,7 @@ export default function Page() {
     setShowTickerAxis(true);
     setFlagNewCpc(false);
     setFlagCpcMixed(false);
+    setFlagQtCompleted(false);
     setSortKey("bulletin_date");
     setSortDir("asc");
     setFCompany("");
@@ -761,7 +638,6 @@ export default function Page() {
     setTableLimit(PAGE);
     setShowChart(true);
     setShowStats(true);
-    // mantém datas; o usuário pode usar Auto-período (min→max) para repopular
   };
 
   // modal
@@ -799,6 +675,60 @@ export default function Page() {
     }, 0);
   }
 
+  // Export .txt unificado (apenas body_text)
+  const SEP = "\\n--------------------------------\\n";
+  async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
+    if (!baseRows.length) return;
+    const missing = Array.from(new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)));
+    let filled: Row[] = baseRows;
+    if (missing.length) {
+      const { data } = await supabase
+        .from("vw_bulletins_with_canonical")
+        .select("composite_key, body_text")
+        .in("composite_key", missing);
+      const map = new Map<string, string>();
+      for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
+        if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
+      }
+      filled = withBodyTextFilled(baseRows, map);
+    }
+    const sorted = [...filled].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+    const story = sorted.map((r) => (r.body_text ?? "").trim()).filter((t) => t.length > 0).join(SEP);
+    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
+    const e = endDate ? endDate.replaceAll("-", "") : "fim";
+    const filename = `${filenameBase}_${s}_${e}.txt`;
+    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+  // Export .xlsx da tabela (sem agregação) — respeita filtros e flags
+  async function exportRowsToXlsxTable(baseRows: Row[], filenameBase: string) {
+    if (!baseRows.length) { alert("Nada a exportar."); return; }
+    const rowsPlain = baseRows.map(r => ({
+      id: r.id,
+      company: r.company ?? "",
+      ticker: r.ticker ?? "",
+      composite_key: r.composite_key ?? "",
+      bulletin_date: r.bulletin_date ?? "",
+      canonical_type: r.canonical_type ?? r.bulletin_type ?? "",
+      canonical_class: r.canonical_class ?? "",
+      source_file: r.source_file ?? ""
+    }));
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.json_to_sheet(rowsPlain);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tabela");
+    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
+    const e = endDate ? endDate.replaceAll("-", "") : "fim";
+    const filename = `${filenameBase}_${s}_${e}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
+
   return (
     <div className="p-6 space-y-4">
       {/* Título + EXPORTS */}
@@ -828,7 +758,6 @@ export default function Page() {
 
           <button
             onClick={async () => {
-              // Exporta exatamente o que a tabela está mostrando (sem agregação)
               await exportRowsToXlsxTable(tableRows, "cpc_tabela");
             }}
             disabled={!tableRows.length}
@@ -837,7 +766,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Linha: Start | End | ⚡ | 🧹 */}
+      {/* Linha: datas + ações */}
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col">
           <label className="block text-sm">Start</label>
@@ -848,9 +777,75 @@ export default function Page() {
           <input type="date" className="border rounded px-2 h-10" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
         </div>
         <div className="flex items-end gap-2 pb-[2px]">
-          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={fetchAnchoredTimeline} disabled={loadingTimeline || (!startDate && !endDate)}>⚡</button>
-          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">🧹</button>
-        </div>
+          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={async () => {
+            if (!anchors.size || !anchorCompanies.length) { setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado)."); return; }
+            setLoadingTimeline(true);
+            setErrorMsg(null);
+            try {
+              const perCompanyMin = new Map<string,string>();
+              for (const k of anchors.keys()) {
+                const [company] = k.split("|");
+                const d = anchors.get(k)!;
+                const prev = perCompanyMin.get(company);
+                if (!prev || d < prev) perCompanyMin.set(company, d);
+              }
+              const chunks = ((arr: string[], size: number) => {
+                const out: string[][] = [];
+                for (let i=0; i<arr.length; i+=size) out.push(arr.slice(i,i+size));
+                return out;
+              })(anchorCompanies, 100);
+              const allowedKeys = new Set(anchors.keys());
+              const all: Row[] = [];
+              for (const companies of chunks) {
+                let chunkMin = "9999-12-31";
+                for (const c of companies) {
+                  const d = perCompanyMin.get(c)!;
+                  if (d < chunkMin) chunkMin = d;
+                }
+                const query = supabase
+                  .from("vw_bulletins_with_canonical")
+                  .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
+                  .in("company", companies)
+                  .gte("bulletin_date", chunkMin)
+                  .order("bulletin_date", { ascending: true });
+                if (endDate) query.lte("bulletin_date", endDate);
+                const { data, error } = await query;
+                if (error) throw error;
+                for (const r of (data || []) as Row[]) {
+                  const key = keyCT(r.company, r.ticker);
+                  if (!allowedKeys.has(key)) continue;
+                  const anchor = anchors.get(key);
+                  if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
+                  all.push(r);
+                }
+              }
+              setRows(all);
+            } catch (e) { setErrorMsg(errMessage(e)); }
+            finally { setLoadingTimeline(false); }
+          }} disabled={loadingTimeline || (!startDate && !endDate)}>⚡</button>
+          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={() => {
+            setSelCompanies([]);
+            setSelTickers([]);
+            setOnlyMulti(false);
+            setOnlySingle(false);
+            setOnlyFirst(false);
+            setOnlyLast(false);
+            setShowTickerAxis(true);
+            setFlagNewCpc(false);
+            setFlagCpcMixed(false);
+            setFlagQtCompleted(false);
+            setSortKey("bulletin_date");
+            setSortDir("asc");
+            setFCompany("");
+            setFTicker("");
+            setFKey("");
+            setFDate("");
+            setFType("");
+            setTableLimit(PAGE);
+            setShowChart(true);
+            setShowStats(true);
+          }} title="Limpar" aria-label="Limpar filtros">🧹</button>
+      </div>
       </div>
 
       {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
@@ -880,43 +875,47 @@ export default function Page() {
         <button className="border rounded px-3 py-2" onClick={() => setShowChart((v) => !v)} title={showChart ? "Fechar Scatter" : "Abrir Scatter"}>
           {showChart ? "Fechar Scatter" : "Abrir Scatter"}
         </button>
-        <button className="border rounded px-3 py-2" onClick={() => setShowStats((v) => !v)} title={showStats ? "Fechar estatísticas" : "Abrir estatísticas"}>
-          {showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
+        <button className="border rounded px-3 py-2" onClick={() => setShowStats((v) => !v)} title={showStats ? "Fechar KPI's" : "Abrir KPI's"}>
+          {showStats ? "Fechar KPI's" : "Abrir KPI's"}
         </button>
       </div>
 
-      {/* Estatísticas + Novo Gráfico (lado a lado) */}
-      
-      {/* Estatísticas + Novo Gráfico (lado a lado) */}
+      {/* KPIs (duas linhas, compactos) */}
       {showStats && (
-        <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período (KPI cards) */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {stats.chartData.map((d) => (
-                <div key={d.group} className="p-3 border rounded-lg bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
-                  <div className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">{d.count}</div>
-                  <div className="text-sm text-gray-700 mt-1 leading-snug">{d.group}</div>
-                  {d.label && <div className="text-xs text-gray-500 mt-0.5 leading-snug">{d.label}</div>}
-                </div>
-              ))}
-            </div>
+        <div className="w-full border rounded p-4 bg-white">
+          {/* Boletins */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              { label: "Boletins — Total", val: kpiBoletins.total },
+              { label: "Boletins — Único", val: kpiBoletins.unico },
+              { label: "Boletins — Misto", val: kpiBoletins.misto },
+              { label: "Boletins — QT", val: kpiBoletins.qtAny },
+              { label: "Boletins — CPC (pad)", val: kpiBoletins.cpcPad },
+              { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
+            ].map((d) => (
+              <div key={d.label} className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow">
+                <div className="text-2xl font-semibold tracking-tight text-gray-900">{d.val}</div>
+                <div className="text-sm text-gray-800 mt-1">{d.label}</div>
+              </div>
+            ))}
+          </div>
 
-            {/* Direita: temático (KPI cards) */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              {thematicData.map((d) => (
-                <div key={d.group} className="p-3 border rounded-lg bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
-                  <div className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">{d.count}</div>
-                  <div className="text-sm text-gray-700 mt-1 leading-snug">{d.group}</div>
-                  {d.label && <div className="text-xs text-gray-500 mt-0.5 leading-snug">{d.label}</div>}
-                </div>
-              ))}
-            </div>
+          {/* Empresas */}
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[
+              { label: "Empresas — Total", val: kpiEmpresas.total },
+              { label: "Empresas — =1", val: kpiEmpresas.eq1 },
+              { label: "Empresas — ≥2", val: kpiEmpresas.ge2 },
+              { label: "Empresas — QT (completed)", val: kpiEmpresas.qtCompletedCompanies },
+            ].map((d) => (
+              <div key={d.label} className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow">
+                <div className="text-2xl font-semibold tracking-tight text-gray-900">{d.val}</div>
+                <div className="text-sm text-gray-800 mt-1">{d.label}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
-
 
       {/* Scatter */}
       {showChart && (
@@ -940,25 +939,23 @@ export default function Page() {
             </label>
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
-              Mostrar tickers no eixo Y
+              Mostrar Tickers
             </label>
 
+            {/* CPC flags */}
             <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={flagNewCpc}
-                onChange={(e) => setFlagNewCpc(e.target.checked)}
-              />
+              <input type="checkbox" checked={flagNewCpc} onChange={(e) => setFlagNewCpc(e.target.checked)} />
               New CPC
             </label>
-
             <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={flagCpcMixed}
-                onChange={(e) => setFlagCpcMixed(e.target.checked)}
-              />
+              <input type="checkbox" checked={flagCpcMixed} onChange={(e) => setFlagCpcMixed(e.target.checked)} />
               CPC Mixed
+            </label>
+
+            {/* QT Completed flag */}
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={flagQtCompleted} onChange={(e) => setFlagQtCompleted(e.target.checked)} />
+              QT Completed
             </label>
 
             <div className="ml-auto flex items-center gap-2">
