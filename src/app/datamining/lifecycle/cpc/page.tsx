@@ -137,6 +137,8 @@ export default function Page() {
   const [onlySingle, setOnlySingle] = useState(false);
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
+  const [flagNewCpc, setFlagNewCpc] = useState(false);
+  const [flagCpcMixed, setFlagCpcMixed] = useState(false);
   const [showTickerAxis, setShowTickerAxis] = useState(true);
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
@@ -281,48 +283,7 @@ export default function Page() {
   }, [companyOpts, tickerOpts]);
 
   // -------- Tabela --------
-  const filteredBaseForTable = useMemo(() => {
-    // Base por período + Company/Ticker
-    const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value));
-    let data = rowsInWindow.filter((r) => {
-      const tRoot = normalizeTicker(r.ticker);
-      if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      return true;
-    });
-
-    // Se flags do Scatter estiverem ativas, aplica a mesma lógica aqui
-    const flagsActive = onlySingle || onlyMulti || onlyFirst || onlyLast;
-    if (flagsActive) {
-      const counts = new Map<string, number>();
-      for (const r of data) {
-        const root = normalizeTicker(r.ticker);
-        if (!root) continue;
-        counts.set(root, (counts.get(root) ?? 0) + 1);
-      }
-      if (onlySingle) data = data.filter((r) => counts.get(normalizeTicker(r.ticker)) === 1);
-      if (onlyMulti)  data = data.filter((r) => (counts.get(normalizeTicker(r.ticker)) ?? 0) >= 2);
-      if (onlyFirst || onlyLast) {
-        const byRoot = new Map<string, Row[]>();
-        for (const r of data) {
-          const root = normalizeTicker(r.ticker);
-          if (!root) continue;
-          const arr = byRoot.get(root) || [];
-          arr.push(r);
-          byRoot.set(root, arr);
-        }
-        const picked: Row[] = [];
-        for (const arr of byRoot.values()) {
-          arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-          if (onlyFirst) picked.push(arr[0]);
-          if (onlyLast) picked.push(arr[arr.length - 1]);
-        }
-        data = picked;
-      }
-    }
-    return data;
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
+  const filteredBaseForTable = useMemo(() => filteredForChart, [filteredForChart]);
 
   const tC = useDeferredValue(dfCompany);
   const tT = useDeferredValue(dfTicker);
@@ -383,23 +344,39 @@ export default function Page() {
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
   // -------- Scatter --------
-  const filteredForChart = useMemo(() => {
+const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
+
+    // base filtro por company / ticker_root
     let data = rowsInWindow.filter((r) => {
       const tRoot = normalizeTicker(r.ticker);
       if (cset.size && (!r.company || !cset.has(r.company))) return false;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
       return true;
     });
+
+    // contagem por root (para flags =1 / >=2 / primeiro / último)
     const counts = new Map<string, number>();
     for (const r of data) {
       const root = normalizeTicker(r.ticker);
       if (!root) continue;
       counts.set(root, (counts.get(root) ?? 0) + 1);
     }
-    if (onlySingle) data = data.filter((r) => counts.get(normalizeTicker(r.ticker)) === 1);
-    if (onlyMulti) data = data.filter((r) => (counts.get(normalizeTicker(r.ticker)) ?? 0) >= 2);
+
+    if (onlySingle) {
+      data = data.filter((r) => {
+        const root = normalizeTicker(r.ticker);
+        return root ? (counts.get(root) ?? 0) === 1 : false;
+      });
+    }
+    if (onlyMulti) {
+      data = data.filter((r) => {
+        const root = normalizeTicker(r.ticker);
+        return root ? (counts.get(root) ?? 0) >= 2 : false;
+      });
+    }
+
     if (onlyFirst || onlyLast) {
       const byRoot = new Map<string, Row[]>();
       for (const r of data) {
@@ -417,8 +394,52 @@ export default function Page() {
       }
       data = picked;
     }
+
+    // ===== filtros especiais do scatter: New CPC / CPC Mixed =====
+    if (flagNewCpc || flagCpcMixed) {
+      const byRootCpc = new Map<string, Row[]>();
+      for (const r of data) {
+        const pub = (r.ticker ?? "").trim().toUpperCase();
+        if (!pub.endsWith(".P")) continue; // universo CPC
+        const root = normalizeTicker(pub);
+        if (!root) continue;
+        const arr = byRootCpc.get(root) || [];
+        arr.push(r);
+        byRootCpc.set(root, arr);
+      }
+
+      const picked: Row[] = [];
+      for (const arr of byRootCpc.values()) {
+        arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+        const first = arr[0];
+        if (!first) continue;
+
+        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+        if (!canon.includes(CPC_CANONICAL)) continue;
+
+        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
+        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const isMixedClass = normClass.startsWith("mist");
+
+        if (flagNewCpc && !isMixedClass) picked.push(first);
+        if (flagCpcMixed && isMixedClass) picked.push(first);
+      }
+
+      data = picked;
+    }
+
     return data.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
+  }, [
+    rowsInWindow,
+    selCompanies,
+    selTickers,
+    onlySingle,
+    onlyMulti,
+    onlyFirst,
+    onlyLast,
+    flagNewCpc,
+    flagCpcMixed,
+  ]);
 
   const chartData = useMemo(
     () =>
@@ -605,57 +626,52 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers]);
 
-  // ===== Painel de cartões (base: date_range + Company/Ticker) =====
-  // Definições:
-  // - "Primeiro boletim": 1º boletim por ticker PUBLICADO dentro da seleção atual.
-  // - "Padrão CPC (1º)": primeiro boletim com canonical_type NEW LISTING-CPC-SHARES e classe "único".
-  // - "Fora do padrão (1º)": primeiro boletim CPC classificado como "misto" (CPC + outro tipo).
+  // ===== Painel de cartões (KPI) =====
   const cardsStats = useMemo(() => {
     const total = baseForThematic.length;
 
-    // primeiro boletim por ticker (publicado)
-    const byTicker = new Map<string, Row[]>();
+    // Universo CPC (.P), agrupado por root
+    const byRootCpc = new Map<string, Row[]>();
     for (const r of baseForThematic) {
-      const key = (r.ticker ?? "").trim().toUpperCase();
-      if (!key) continue;
-      const arr = byTicker.get(key) || [];
+      const pub = (r.ticker ?? "").trim().toUpperCase();
+      if (!pub.endsWith(".P")) continue;
+      const root = normalizeTicker(pub);
+      if (!root) continue;
+      const arr = byRootCpc.get(root) || [];
       arr.push(r);
-      byTicker.set(key, arr);
+      byRootCpc.set(root, arr);
     }
 
     let firstCount = 0;
     let firstStandard = 0;
     let firstMixed = 0;
+    let oneBulletinCompanies = 0;
 
-    for (const arr of byTicker.values()) {
+    for (const arr of byRootCpc.values()) {
       arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
       const first = arr[0];
       if (!first) continue;
 
       firstCount++;
+      if (arr.length === 1) oneBulletinCompanies++;
 
       const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
       const isCpc = canon.includes(CPC_CANONICAL);
 
-      // misto: usa flag _mixed se existir, ou texto com vírgula
-      const bt = (first.bulletin_type ?? "").toString();
-      const mixedFlag =
-        typeof (first as unknown as { _mixed?: boolean })._mixed === "boolean"
-          ? (first as unknown as { _mixed?: boolean })._mixed
-          : false;
-      const isMixed = mixedFlag || bt.includes(",") || canon.includes(",");
+      const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
+      const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const isMixedClass = normClass.startsWith("mist");
 
-      if (isCpc && !isMixed) firstStandard++;
-      if (isCpc && isMixed) firstMixed++;
+      if (isCpc && !isMixedClass) firstStandard++;
+      if (isCpc && isMixedClass) firstMixed++;
     }
 
     const firstOther = firstMixed;
-    const firstCpc = firstStandard + firstMixed;
-    const demais = total - firstCount;
+    const cpcTotal = Array.from(byRootCpc.values()).reduce((s, a) => s + a.length, 0);
+    const demais = cpcTotal - firstCount;
 
     let uniqueCount = 0;
     let mixedCount = 0;
-
     for (const r of baseForThematic) {
       const raw = (r.canonical_class ?? "").toString().trim().toLowerCase();
       const norm = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -666,12 +682,12 @@ export default function Page() {
     return {
       total,
       firstCount,
-      firstCpc,
       firstStandard,
       firstOther,
       demais,
       uniqueCount,
       mixedCount,
+      oneBulletinCompanies,
     };
   }, [baseForThematic]);
 
@@ -685,13 +701,13 @@ export default function Page() {
     sublabel?: string;
   }) {
     return (
-      <div className="p-3 border rounded-lg bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
-        <div className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">
+      <div className="p-2 border rounded-md bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
+        <div className="text-xl md:text-2xl font-semibold text-gray-900 tracking-tight">
           {value}
         </div>
-        <div className="text-sm text-gray-700 mt-1 leading-snug">{label}</div>
+        <div className="text-xs md:text-sm text-gray-700 mt-0.5 leading-snug">{label}</div>
         {sublabel && (
-          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{sublabel}</div>
+          <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sublabel}</div>
         )}
       </div>
     );
@@ -840,17 +856,18 @@ export default function Page() {
 
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
-        <div className="w-full border rounded-lg p-4 space-y-3 bg-gray-50">
+        <div className="w-full border rounded-lg p-3 space-y-2 bg-gray-50">
           <div className="text-sm text-gray-700">
             Distribuição dos boletins no período/seleção atual.
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
             <CardStat value={cardsStats.total} label="Total de boletins" />
-            <CardStat value={cardsStats.firstCount} label="Primeiros boletins" sublabel="1º por ticker" />
-            <CardStat value={cardsStats.firstStandard} label="Padrão CPC (1º)" sublabel="NEW LISTING-CPC-SHARES (único)" />
-            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" sublabel="CPC misto (ex.: + HALT)" />
-            <CardStat value={cardsStats.demais} label="Demais boletins" sublabel="Total − primeiros" />
+            <CardStat value={cardsStats.firstCount} label="Primeiros CPC" sublabel="1º por ticker_root .P" />
+            <CardStat value={cardsStats.firstStandard} label="New CPC (1º)" sublabel="CPC único" />
+            <CardStat value={cardsStats.firstOther} label="CPC Mixed (1º)" sublabel="CPC misto" />
+            <CardStat value={cardsStats.demais} label="Demais CPC" sublabel="CPC total − primeiros" />
+            <CardStat value={cardsStats.oneBulletinCompanies} label="Empresas c/ 1 boletim" sublabel="no universo CPC" />
             <CardStat value={cardsStats.uniqueCount} label="Classe: Único" />
             <CardStat value={cardsStats.mixedCount} label="Classe: Misto" />
           </div>
@@ -880,6 +897,24 @@ export default function Page() {
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
               Mostrar tickers no eixo Y
+            </label>
+
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={flagNewCpc}
+                onChange={(e) => setFlagNewCpc(e.target.checked)}
+              />
+              New CPC
+            </label>
+
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={flagCpcMixed}
+                onChange={(e) => setFlagCpcMixed(e.target.checked)}
+              />
+              CPC Mixed
             </label>
 
             <div className="ml-auto flex items-center gap-2">
