@@ -11,9 +11,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
-  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -119,19 +116,6 @@ function errMessage(e: unknown): string {
   return "Erro desconhecido";
 }
 
-// Tipagem explícita para evitar "any" no LabelList custom
-type BarLabelProps = {
-  x?: number;
-  y?: number;
-  width?: number;
-  value?: number | string;
-};
-function BarValueLabel(props: BarLabelProps) {
-  const { x, y, width, value } = props;
-  const cx = (x ?? 0) + (width ?? 0) / 2;
-  const vy = (y ?? 0) - 6;
-  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
-}
 
 // =========================================================
 
@@ -154,9 +138,6 @@ export default function Page() {
   const [onlyFirst, setOnlyFirst] = useState(false);
   const [onlyLast, setOnlyLast] = useState(false);
   const [showTickerAxis, setShowTickerAxis] = useState(true);
-
-  const [flagNewCpc, setFlagNewCpc] = useState(false);
-  const [flagCpcMixed, setFlagCpcMixed] = useState(false);
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -340,43 +321,8 @@ export default function Page() {
         data = picked;
       }
     }
-
-    // ===== filtros especiais: New CPC / CPC Mixed =====
-    // Se alguma flag estiver ativa, mostramos apenas o 1º boletim CPC por ticker_root (.P),
-    // separado por classe Único vs Misto (149 / 5).
-    if (flagNewCpc || flagCpcMixed) {
-      const byRootCpc = new Map<string, Row[]>();
-      for (const r of data) {
-        const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) continue;
-        const root = normalizeTicker(pub);
-        if (!root) continue;
-        const arr = byRootCpc.get(root) || [];
-        arr.push(r);
-        byRootCpc.set(root, arr);
-      }
-
-      const picked: Row[] = [];
-      for (const arr of byRootCpc.values()) {
-        arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-        const first = arr[0];
-        if (!first) continue;
-
-        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-        if (!canon.includes(CPC_CANONICAL)) continue;
-
-        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
-        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const isMixedClass = normClass.startsWith("mist");
-
-        if (flagNewCpc && !isMixedClass) picked.push(first);
-        if (flagCpcMixed && isMixedClass) picked.push(first);
-      }
-      data = picked;
-    }
-
     return data;
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed]);
+  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
 
   const tC = useDeferredValue(dfCompany);
   const tT = useDeferredValue(dfTicker);
@@ -436,28 +382,6 @@ export default function Page() {
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
-    for (const r of rowsInWindow) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
-    }
-    const totalCompanies = perCompany.size;
-    let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
-    }
-    const chartData = [
-      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
-      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
-      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
-      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
-    ];
-    return { chartData };
-  }, [rowsInWindow]);
-
   // -------- Scatter --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
@@ -493,43 +417,8 @@ export default function Page() {
       }
       data = picked;
     }
-
-    // ===== filtros especiais: New CPC / CPC Mixed =====
-    // Se alguma flag estiver ativa, mostramos apenas o 1º boletim CPC por ticker_root (.P),
-    // separado por classe Único vs Misto (149 / 5).
-    if (flagNewCpc || flagCpcMixed) {
-      const byRootCpc = new Map<string, Row[]>();
-      for (const r of data) {
-        const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) continue;
-        const root = normalizeTicker(pub);
-        if (!root) continue;
-        const arr = byRootCpc.get(root) || [];
-        arr.push(r);
-        byRootCpc.set(root, arr);
-      }
-
-      const picked: Row[] = [];
-      for (const arr of byRootCpc.values()) {
-        arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-        const first = arr[0];
-        if (!first) continue;
-
-        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-        if (!canon.includes(CPC_CANONICAL)) continue;
-
-        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
-        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const isMixedClass = normClass.startsWith("mist");
-
-        if (flagNewCpc && !isMixedClass) picked.push(first);
-        if (flagCpcMixed && isMixedClass) picked.push(first);
-      }
-      data = picked;
-    }
-
     return data.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed]);
+  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast]);
 
   const chartData = useMemo(
     () =>
@@ -716,312 +605,93 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers]);
 
-  const thematicData = useMemo(() => {
-    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+  // ===== KPIs em cartões (compactos) =====
+  const cardsStats = useMemo(() => {
+    const totalBulletins = baseForThematic.length;
+
+    // universo CPC (.P) agrupado por root (antes do ponto)
+    const byRootCpc = new Map<string, Row[]>();
     for (const r of baseForThematic) {
-      const ct = (r.canonical_type ?? "").toUpperCase();
-      const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") unicos++;
-      if (cl === "mistos") mistos++;
-      if (ct === CPC_CANONICAL) {
-        cpc++;
-        if (cl === "mistos") cpcMisto++;
-      } else {
-        outros++;
-      }
+      const pub = (r.ticker ?? "").trim().toUpperCase();
+      if (!pub.endsWith(".P")) continue;
+      const root = normalizeTicker(pub);
+      if (!root) continue;
+      const arr = byRootCpc.get(root) || [];
+      arr.push(r);
+      byRootCpc.set(root, arr);
     }
-    return [
-      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
-      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
-      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
-      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
-      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
-    ];
+
+    let firstCount = 0;
+    let firstStandard = 0;
+    let firstMixed = 0;
+    let oneBulletinCompanies = 0;
+
+    for (const arr of byRootCpc.values()) {
+      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      const first = arr[0];
+      if (!first) continue;
+
+      if (arr.length === 1) oneBulletinCompanies++;
+
+      firstCount++;
+
+      const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+      const isCpc = canon.includes(CPC_CANONICAL);
+
+      const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
+      const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const isMixedClass = normClass.startsWith("mist");
+
+      if (isCpc && !isMixedClass) firstStandard++;
+      if (isCpc && isMixedClass) firstMixed++;
+    }
+
+    const firstOther = firstMixed; // fora do padrão = CPC misto no 1º boletim
+    const cpcTotal = Array.from(byRootCpc.values()).reduce((s, a) => s + a.length, 0);
+    const demais = cpcTotal - firstCount;
+
+    let uniqueCount = 0;
+    let mixedCount = 0;
+    for (const r of baseForThematic) {
+      const raw = (r.canonical_class ?? "").toString().trim().toLowerCase();
+      const norm = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (norm.startsWith("unic")) uniqueCount++;
+      if (norm.startsWith("mist")) mixedCount++;
+    }
+
+    return {
+      totalBulletins,
+      firstCount,
+      firstStandard,
+      firstOther,
+      demais,
+      uniqueCount,
+      mixedCount,
+      oneBulletinCompanies,
+    };
   }, [baseForThematic]);
 
-  function computeMinAnchorByCompany(map: Map<string, string>) {
-    const perCompany = new Map<string, string>();
-    for (const k of map.keys()) {
-      const [company] = k.split("|");
-      const d = map.get(k)!;
-      const prev = perCompany.get(company);
-      if (!prev || d < prev) perCompany.set(company, d);
-    }
-    return perCompany;
+  function CardStat({
+    value,
+    label,
+    sublabel,
+  }: {
+    value: number | string;
+    label: string;
+    sublabel?: string;
+  }) {
+    return (
+      <div className="p-2 border rounded-md bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
+        <div className="text-xl md:text-2xl font-semibold text-gray-900 tracking-tight">
+          {value}
+        </div>
+        <div className="text-xs md:text-sm text-gray-700 mt-0.5 leading-snug">{label}</div>
+        {sublabel && (
+          <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sublabel}</div>
+        )}
+      </div>
+    );
   }
-
-  async function fetchAnchoredTimeline() {
-    if (!anchors.size || !anchorCompanies.length) {
-      setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado).");
-      return;
-    }
-    setLoadingTimeline(true);
-    setErrorMsg(null);
-    try {
-      const perCompanyMin = computeMinAnchorByCompany(anchors);
-      const chunks = chunk(anchorCompanies, 100);
-      const allowedKeys = new Set(anchors.keys());
-      const all: Row[] = [];
-      for (const companies of chunks) {
-        let chunkMin = "9999-12-31";
-        for (const c of companies) {
-          const d = perCompanyMin.get(c)!;
-          if (d < chunkMin) chunkMin = d;
-        }
-        const query = supabase
-          .from("vw_bulletins_with_canonical")
-          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
-          .in("company", companies)
-          .gte("bulletin_date", chunkMin)
-          .order("bulletin_date", { ascending: true });
-        if (endDate) query.lte("bulletin_date", endDate);
-        const { data, error } = await query;
-        if (error) throw error;
-        for (const r of (data || []) as Row[]) {
-          const key = keyCT(r.company, r.ticker);
-          if (!allowedKeys.has(key)) continue;
-          const anchor = anchors.get(key);
-          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
-          all.push(r);
-        }
-      }
-      setRows(all);
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setLoadingTimeline(false);
-    }
-  }
-
-  return (
-    <div className="p-6 space-y-4">
-      {/* Título + EXPORTS */}
-      <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-bold">CPC — Notices</h1>
-        {loadingAnchors && <span className="text-xs text-gray-500">carregando âncoras...</span>}
-        <div className="ml-auto flex flex-wrap gap-2">
-          <button
-            onClick={async () => {
-              const base = [...tableRows];
-              if (!base.length) { alert("Nada a exportar. Ajuste os filtros/seleção."); return; }
-              await exportRowsToTxt(base, "cpc_notices_selecao");
-            }}
-            disabled={!tableRows.length}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-          >📜 Exportar seleção (.txt)</button>
-
-          <button
-            onClick={async () => {
-              const base = [...rowsInWindow];
-              if (!base.length) { alert("Nenhum boletim no período."); return; }
-              await exportRowsToTxt(base, "cpc_notices_periodo");
-            }}
-            disabled={!rowsInWindow.length}
-            className="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-60"
-          >🗂️ Exportar período (.txt)</button>
-
-          <button
-            onClick={async () => {
-              // Exporta exatamente o que a tabela está mostrando (sem agregação)
-              await exportRowsToXlsxTable(tableRows, "cpc_tabela");
-            }}
-            disabled={!tableRows.length}
-            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
-          >📄 Exportar tabela (.xlsx)</button>
-        </div>
-      </div>
-
-      {/* Linha: Start | End | ⚡ | 🧹 */}
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="flex flex-col">
-          <label className="block text-sm">Start</label>
-          <input type="date" className="border rounded px-2 h-10" value={startDate} max={endDate || undefined} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div className="flex flex-col">
-          <label className="block text-sm">End</label>
-          <input type="date" className="border rounded px-2 h-10" value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-        <div className="flex items-end gap-2 pb-[2px]">
-          <button className="border rounded px-3 h-10 font-semibold flex items-center justify-center" title="Executar busca" aria-label="Executar busca" onClick={fetchAnchoredTimeline} disabled={loadingTimeline || (!startDate && !endDate)}>⚡</button>
-          <button className="border rounded px-3 h-10 flex items-center justify-center" onClick={handleReset} title="Limpar" aria-label="Limpar filtros">🧹</button>
-        </div>
-      </div>
-
-      {errorMsg && <div className="border border-red-300 bg-red-50 text-red-800 p-2 rounded">{errorMsg}</div>}
-
-      {/* Auto-período (min→max) */}
-      <div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={autoPeriod} onChange={(e) => setAutoPeriod(e.target.checked)} />
-          Auto-período (min→max) na view
-        </label>
-      </div>
-
-      {/* Selects */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div>
-          <label className="block text-sm mb-1">Company</label>
-          <Select isMulti options={companyOpts} value={selCompanies} onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])} classNamePrefix="cpc-select" />
-        </div>
-        <div>
-          <label className="block text-sm mb-1">Ticker</label>
-          <Select isMulti options={tickerOpts} value={selTickers} onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])} classNamePrefix="cpc-select" />
-        </div>
-      </div>
-
-      {/* Acordeões */}
-      <div className="flex gap-2 flex-wrap">
-        <button className="border rounded px-3 py-2" onClick={() => setShowChart((v) => !v)} title={showChart ? "Fechar Scatter" : "Abrir Scatter"}>
-          {showChart ? "Fechar Scatter" : "Abrir Scatter"}
-        </button>
-        <button className="border rounded px-3 py-2" onClick={() => setShowStats((v) => !v)} title={showStats ? "Fechar estatísticas" : "Abrir estatísticas"}>
-          {showStats ? "Fechar estatísticas" : "Abrir estatísticas"}
-        </button>
-      </div>
-
-      {/* Estatísticas + Novo Gráfico (lado a lado) */}
-      {showStats && (
-        <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período */}
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Scatter */}
-      {showChart && (
-        <div className="w-full border rounded overflow-hidden">
-          <div className="px-2 py-2 border-b flex flex-wrap items-center gap-3 text-sm">
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={onlySingle} onChange={(e) => { setOnlySingle(e.target.checked); if (e.target.checked) setOnlyMulti(false); }} />
-              =1 Boletim
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={onlyMulti} onChange={(e) => { setOnlyMulti(e.target.checked); if (e.target.checked) setOnlySingle(false); }} />
-              ≥2 Boletins
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={onlyFirst} onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }} />
-              Apenas primeiro
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={onlyLast} onChange={(e) => { setOnlyLast(e.target.checked); if (e.target.checked) setOnlyFirst(false); }} />
-              Apenas último
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
-              Mostrar tickers no eixo Y
-            </label>
-
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={flagNewCpc}
-                onChange={(e) => setFlagNewCpc(e.target.checked)}
-              />
-              New CPC
-            </label>
-
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={flagCpcMixed}
-                onChange={(e) => setFlagCpcMixed(e.target.checked)}
-              />
-              CPC Mixed
-            </label>
-
-            <div className="ml-auto flex items-center gap-2">
-              <button className="border rounded px-2 h-10" onClick={() => setYLimit((v) => Math.max(10, v - 10))} title="-10 linhas do eixo Y">−10</button>
-              <button className="border rounded px-2 h-10" onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))} title="+10 linhas do eixo Y">+10</button>
-              <button className="border rounded px-2 h-10" onClick={() => setYLimit(tickerOrder.length || 10)} title="Mostrar todas as linhas do eixo Y">Todos</button>
-            </div>
-          </div>
-
-          <div className="p-2" style={{ height: chartHeight }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart>
-                <CartesianGrid />
-                <XAxis
-                  dataKey="dateNum"
-                  type="number"
-                  domain={xDomain}
-                  ticks={xTicksMemo.ticks}
-                  tickFormatter={(v) => xTicksMemo.formatter(Number(v))}
-                  name="Data (UTC)"
-                  tick={{ fontSize: 11 }}
-                  allowDecimals={false}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="ticker_root"
-                  name="Ticker"
-                  ticks={visibleTickers}
-                  interval={0}
-                  tickLine={false}
-                  width={showTickerAxis ? 90 : 0}
-                  tick={showTickerAxis ? { fontSize: 12 } : undefined}
-                  allowDuplicatedCategory={false}
-                  tickFormatter={showTickerAxis ? (t) => `${t} (${tickerCount.get(String(t)) ?? 0})` : undefined}
-                  hide={!showTickerAxis}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload || payload.length === 0) return null;
-                    const d = payload[0]?.payload as ScatterDatum | undefined;
-                    if (!d) return null;
-                    const date = d.dateISO || fmtUTC(d.dateNum);
-                    return (
-                      <div className="bg-white p-2 border rounded shadow text-sm">
-                        <div><strong>Data:</strong> {date}</div>
-                        <div><strong>Empresa:</strong> {d.company || "—"}</div>
-                        <div><strong>Ticker:</strong> {d.ticker || "—"}</div>
-                        <div><strong>Tipo:</strong> {d.type_display || "—"}</div>
-                        <div className="mt-1 text-xs text-gray-600">Clique: filtra empresa | Shift+Clique: isola este boletim</div>
-                      </div>
-                    );
                   }}
                 />
                 <Scatter data={chartDataVis} onClick={(p, idx, ...rest) => onPointClick(p as ScatterDatum, idx as number, ...rest)} />
