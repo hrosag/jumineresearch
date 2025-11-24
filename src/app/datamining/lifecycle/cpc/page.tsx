@@ -888,19 +888,42 @@ export default function Page() {
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
+      
+      {/* Estatísticas + KPIs globais */}
       {showStats && (
-        <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período (KPI cards) */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {stats.chartData.map((d) => (
-                <div key={d.group} className="p-3 border rounded-lg bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
-                  <div className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">{d.count}</div>
-                  <div className="text-sm text-gray-700 mt-1 leading-snug">{d.group}</div>
-                  {d.label && <div className="text-xs text-gray-500 mt-0.5 leading-snug">{d.label}</div>}
-                </div>
-              ))}
+        <div className="w-full border rounded p-4 bg-white">
+          <div className="text-sm text-gray-700 mb-3">Empresas e boletins no período selecionado.</div>
+          
+          {/* Linha 1: KPIs globais */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+            {stats.chartData.map((d) => (
+              <div
+                key={d.group}
+                className="rounded-xl border bg-gradient-to-b from-white to-gray-50 p-3 shadow-sm hover:shadow transition-shadow"
+              >
+                <div className="text-3xl font-semibold tracking-tight text-gray-900">{d.count}</div>
+                <div className="mt-1 text-sm text-gray-800">{d.group}</div>
+                {d.label && <div className="mt-0.5 text-xs text-gray-500">{d.label}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Linha 2: temático global (sobrepõe) */}
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+            {thematicData.map((d) => (
+              <div
+                key={d.group}
+                className="rounded-xl border bg-gradient-to-b from-white to-gray-50 p-3 shadow-sm hover:shadow transition-shadow"
+              >
+                <div className="text-3xl font-semibold tracking-tight text-gray-900">{d.count}</div>
+                <div className="mt-1 text-sm text-gray-800">{d.group}</div>
+                {d.label && <div className="mt-0.5 text-xs text-gray-500">{d.label}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
             </div>
 
             {/* Direita: temático (KPI cards) */}
