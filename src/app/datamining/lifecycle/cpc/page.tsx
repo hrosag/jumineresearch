@@ -881,31 +881,39 @@ export default function Page() {
       </div>
 
       {/* KPIs (duas linhas, compactos) */}
-      {showStats && (
-        <div className="w-full border rounded p-4 bg-white">
-          {/* Boletins */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {[
-              { label: "Boletins — Total", val: kpiBoletins.total },
-              { label: "Boletins — Único", val: kpiBoletins.unico },
-              { label: "Boletins — Misto", val: kpiBoletins.misto },
-              { label: "Boletins — QT", val: kpiBoletins.qtAny },
-              { label: "Boletins — CPC (pad)", val: kpiBoletins.cpcPad },
-              { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
-            ].map((d) => (
-              <div key={d.label} className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow">
-                <div className="text-2xl font-semibold tracking-tight text-gray-900">{d.val}</div>
-                <div className="text-sm text-gray-800 mt-1">{d.label}</div>
-              </div>
-            ))}
+      
+{showStats && (
+  <div className="w-full border rounded p-4 bg-white">
+    <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+      {[
+        { label: "Boletins — Total", val: kpiBoletins.total },
+        { label: "Boletins — Único", val: kpiBoletins.unico },
+        { label: "Boletins — Misto", val: kpiBoletins.misto },
+        { label: "Boletins — QT", val: kpiBoletins.qtAny },
+        { label: "Boletins — CPC", val: kpiBoletins.cpcPad },
+        { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
+        { label: "Empresas — Total", val: kpiEmpresas.total },
+        { label: "Empresas — 1 boletim", val: kpiEmpresas.eq1 },
+        { label: "Empresas — 2+ boletins", val: kpiEmpresas.ge2 },
+        { label: "Empresas — QT (completed)", val: kpiEmpresas.qtCompletedCompanies },
+      ].map((d) => (
+        <div key={d.label} className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
+          <div className="text-2xl font-semibold tracking-tight">{d.val}</div>
+          <div className="text-sm mt-1">{d.label}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
           </div>
 
           {/* Empresas */}
           <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
               { label: "Empresas — Total", val: kpiEmpresas.total },
-              { label: "Empresas — =1", val: kpiEmpresas.eq1 },
-              { label: "Empresas — ≥2", val: kpiEmpresas.ge2 },
+              { label: "Empresas — 1 boletim", val: kpiEmpresas.eq1 },
+              { label: "Empresas — 2+ boletins", val: kpiEmpresas.ge2 },
               { label: "Empresas — QT (completed)", val: kpiEmpresas.qtCompletedCompanies },
             ].map((d) => (
               <div key={d.label} className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow">
