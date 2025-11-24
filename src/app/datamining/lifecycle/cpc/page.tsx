@@ -119,6 +119,26 @@ function errMessage(e: unknown): string {
   return "Erro desconhecido";
 }
 
+// CPC helpers (padronizam a classificação padrão vs misto)
+function isCpc(row: Row): boolean {
+  const canon = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
+  return canon.includes(CPC_CANONICAL);
+}
+function isCpcMixed(row: Row): boolean {
+  // respeita possível flag interna _mixed; se não houver, usa presença de vírgula (tipos combinados)
+  const bt = (row.bulletin_type ?? "").toString();
+  const canon = (row.canonical_type ?? row.bulletin_type ?? "").toString();
+  const mixedFlag =
+    typeof (row as unknown as { _mixed?: boolean })._mixed === "boolean"
+      ? (row as unknown as { _mixed?: boolean })._mixed
+      : false;
+  const byClass = (row.canonical_class ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").startsWith("mist");
+  return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
+}
+function isCpcPadrao(row: Row): boolean {
+  return isCpc(row) && !isCpcMixed(row);
+}
+
 // Tipagem explícita para evitar "any" no LabelList custom
 type BarLabelProps = {
   x?: number;
@@ -155,8 +175,9 @@ export default function Page() {
   const [onlyLast, setOnlyLast] = useState(false);
   const [showTickerAxis, setShowTickerAxis] = useState(true);
 
-  const [flagNewCpc, setFlagNewCpc] = useState(false);
-  const [flagCpcMixed, setFlagCpcMixed] = useState(false);
+  // CPC padrão x não-padrão (afetam Scatter e Tabela)
+  const [flagNewCpc, setFlagNewCpc] = useState(false);      // CPC padrão (único)
+  const [flagCpcMixed, setFlagCpcMixed] = useState(false);  // CPC não-padrão (misto)
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -196,7 +217,7 @@ export default function Page() {
       try {
         const { data, error } = await supabase
           .from("vw_bulletins_with_canonical")
-          .select("company, ticker, bulletin_date, canonical_type, bulletin_type")
+          .select("company, ticker, bulletin_date, canonical_type, bulletin_type, canonical_class")
           .ilike("canonical_type", `%${CPC_CANONICAL}%`);
         if (error) throw error;
 
@@ -206,10 +227,7 @@ export default function Page() {
           const key = keyCT(r.company, r.ticker);
           const d = r.bulletin_date || "";
           if (!d) continue;
-          const hasCpc =
-            (r.canonical_type || "").toUpperCase().includes(CPC_CANONICAL) ||
-            (r.bulletin_type || "").toUpperCase().includes(CPC_CANONICAL);
-          if (!hasCpc) continue;
+          if (!isCpc(r)) continue;
           if (!map.has(key) || d < (map.get(key) as string)) map.set(key, d);
           if (r.company) companies.add(r.company);
         }
@@ -342,8 +360,6 @@ export default function Page() {
     }
 
     // ===== filtros especiais: New CPC / CPC Mixed =====
-    // Se alguma flag estiver ativa, mostramos apenas o 1º boletim CPC por ticker_root (.P),
-    // separado por classe Único vs Misto (149 / 5).
     if (flagNewCpc || flagCpcMixed) {
       const byRootCpc = new Map<string, Row[]>();
       for (const r of data) {
@@ -361,16 +377,10 @@ export default function Page() {
         arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
         const first = arr[0];
         if (!first) continue;
+        if (!isCpc(first)) continue;
 
-        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-        if (!canon.includes(CPC_CANONICAL)) continue;
-
-        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
-        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const isMixedClass = normClass.startsWith("mist");
-
-        if (flagNewCpc && !isMixedClass) picked.push(first);
-        if (flagCpcMixed && isMixedClass) picked.push(first);
+        if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
+        if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
       }
       data = picked;
     }
@@ -458,6 +468,151 @@ export default function Page() {
     return { chartData };
   }, [rowsInWindow]);
 
+  // -------- Thematic (direita) --------
+  const baseForThematic = useMemo(() => {
+    const cset = new Set(selCompanies.map((o) => o.value));
+    const tset = new Set(selTickers.map((o) => o.value));
+    return rowsInWindow.filter((r) => {
+      const tRoot = normalizeTicker(r.ticker);
+      if (cset.size && (!r.company || !cset.has(r.company))) return false;
+      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
+      return true;
+    });
+  }, [rowsInWindow, selCompanies, selTickers]);
+
+  const thematicData = useMemo(() => {
+    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+    for (const r of baseForThematic) {
+      const cln = (r.canonical_class ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const ct = (r.canonical_type ?? r.bulletin_type ?? "").toUpperCase();
+      const isCpcNotice = ct.includes(CPC_CANONICAL);
+      const isMixed = cln.startsWith("mist");
+      if (cln.startsWith("unic")) unicos++;
+      if (isMixed) mistos++;
+      if (isCpcNotice) {
+        cpc++;
+        if (isMixed) cpcMisto++;
+      } else {
+        outros++;
+      }
+    }
+    return [
+      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
+      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
+      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
+      { group: "CPC (misto)", count: cpcMisto, label: "CPC class='mistos' (subset de CPC)" },
+      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
+    ];
+  }, [baseForThematic]);
+
+  function computeMinAnchorByCompany(map: Map<string, string>) {
+    const perCompany = new Map<string, string>();
+    for (const k of map.keys()) {
+      const [company] = k.split("|");
+      const d = map.get(k)!;
+      const prev = perCompany.get(company);
+      if (!prev || d < prev) perCompany.set(company, d);
+    }
+    return perCompany;
+  }
+
+  async function fetchAnchoredTimeline() {
+    if (!anchors.size || !anchorCompanies.length) {
+      setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado).");
+      return;
+    }
+    setLoadingTimeline(true);
+    setErrorMsg(null);
+    try {
+      const perCompanyMin = computeMinAnchorByCompany(anchors);
+      const chunks = chunk(anchorCompanies, 100);
+      const allowedKeys = new Set(anchors.keys());
+      const all: Row[] = [];
+      for (const companies of chunks) {
+        let chunkMin = "9999-12-31";
+        for (const c of companies) {
+          const d = perCompanyMin.get(c)!;
+          if (d < chunkMin) chunkMin = d;
+        }
+        const query = supabase
+          .from("vw_bulletins_with_canonical")
+          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
+          .in("company", companies)
+          .gte("bulletin_date", chunkMin)
+          .order("bulletin_date", { ascending: true });
+        if (endDate) query.lte("bulletin_date", endDate);
+        const { data, error } = await query;
+        if (error) throw error;
+        for (const r of (data || []) as Row[]) {
+          const key = keyCT(r.company, r.ticker);
+          if (!allowedKeys.has(key)) continue;
+          const anchor = anchors.get(key);
+          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
+          all.push(r);
+        }
+      }
+      setRows(all);
+    } catch (e) {
+      setErrorMsg(errMessage(e));
+    } finally {
+      setLoadingTimeline(false);
+    }
+  }
+
+  // Export .txt unificado (apenas body_text)
+  const SEP = "\n--------------------------------\n";
+  async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
+    if (!baseRows.length) return;
+    const missing = Array.from(new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)));
+    let filled: Row[] = baseRows;
+    if (missing.length) {
+      const { data } = await supabase
+        .from("vw_bulletins_with_canonical")
+        .select("composite_key, body_text")
+        .in("composite_key", missing);
+      const map = new Map<string, string>();
+      for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
+        if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
+      }
+      filled = withBodyTextFilled(baseRows, map);
+    }
+    const sorted = [...filled].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+    const story = sorted.map((r) => (r.body_text ?? "").trim()).filter((t) => t.length > 0).join(SEP);
+    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
+    const e = endDate ? endDate.replaceAll("-", "") : "fim";
+    const filename = `${filenameBase}_${s}_${e}.txt`;
+    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+  // Export .xlsx de TABELA (sem agregação) — exatamente as linhas mostradas (respeita filtros e flags)
+  async function exportRowsToXlsxTable(baseRows: Row[], filenameBase: string) {
+    if (!baseRows.length) { alert("Nada a exportar."); return; }
+    const rowsPlain = baseRows.map(r => ({
+      id: r.id,
+      company: r.company ?? "",
+      ticker: r.ticker ?? "",
+      composite_key: r.composite_key ?? "",
+      bulletin_date: r.bulletin_date ?? "",
+      canonical_type: r.canonical_type ?? r.bulletin_type ?? "",
+      canonical_class: r.canonical_class ?? "",
+      source_file: r.source_file ?? ""
+    }));
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.json_to_sheet(rowsPlain);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tabela");
+    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
+    const e = endDate ? endDate.replaceAll("-", "") : "fim";
+    const filename = `${filenameBase}_${s}_${e}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  }
+
   // -------- Scatter --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
@@ -495,8 +650,6 @@ export default function Page() {
     }
 
     // ===== filtros especiais: New CPC / CPC Mixed =====
-    // Se alguma flag estiver ativa, mostramos apenas o 1º boletim CPC por ticker_root (.P),
-    // separado por classe Único vs Misto (149 / 5).
     if (flagNewCpc || flagCpcMixed) {
       const byRootCpc = new Map<string, Row[]>();
       for (const r of data) {
@@ -514,16 +667,10 @@ export default function Page() {
         arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
         const first = arr[0];
         if (!first) continue;
+        if (!isCpc(first)) continue;
 
-        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-        if (!canon.includes(CPC_CANONICAL)) continue;
-
-        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
-        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const isMixedClass = normClass.startsWith("mist");
-
-        if (flagNewCpc && !isMixedClass) picked.push(first);
-        if (flagCpcMixed && isMixedClass) picked.push(first);
+        if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
+        if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
       }
       data = picked;
     }
@@ -602,6 +749,8 @@ export default function Page() {
     setOnlyFirst(false);
     setOnlyLast(false);
     setShowTickerAxis(true);
+    setFlagNewCpc(false);
+    setFlagCpcMixed(false);
     setSortKey("bulletin_date");
     setSortDir("asc");
     setFCompany("");
@@ -648,149 +797,6 @@ export default function Page() {
       firstRowRef.current?.classList.add("bg-yellow-50");
       setTimeout(() => firstRowRef.current?.classList.remove("bg-yellow-50"), 1800);
     }, 0);
-  }
-
-  // Export .txt unificado (apenas body_text)
-  const SEP = "\\n--------------------------------\\n";
-  async function exportRowsToTxt(baseRows: Row[], filenameBase: string) {
-    if (!baseRows.length) return;
-    const missing = Array.from(new Set(baseRows.filter((r) => !r.body_text && r.composite_key).map((r) => r.composite_key as string)));
-    let filled: Row[] = baseRows;
-    if (missing.length) {
-      const { data } = await supabase
-        .from("vw_bulletins_with_canonical")
-        .select("composite_key, body_text")
-        .in("composite_key", missing);
-      const map = new Map<string, string>();
-      for (const r of (data || []) as { composite_key: string | null; body_text: string | null }[]) {
-        if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
-      }
-      filled = withBodyTextFilled(baseRows, map);
-    }
-    const sorted = [...filled].sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-    const story = sorted.map((r) => (r.body_text ?? "").trim()).filter((t) => t.length > 0).join(SEP);
-    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-    const e = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `${filenameBase}_${s}_${e}.txt`;
-    const blob = new Blob([story], { type: "text/plain;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  }
-
-  // Export .xlsx de TABELA (sem agregação) — exatamente as linhas mostradas (respeita filtros e flags)
-  async function exportRowsToXlsxTable(baseRows: Row[], filenameBase: string) {
-    if (!baseRows.length) { alert("Nada a exportar."); return; }
-    const rowsPlain = baseRows.map(r => ({
-      id: r.id,
-      company: r.company ?? "",
-      ticker: r.ticker ?? "",
-      composite_key: r.composite_key ?? "",
-      bulletin_date: r.bulletin_date ?? "",
-      canonical_type: r.canonical_type ?? r.bulletin_type ?? "",
-      canonical_class: r.canonical_class ?? "",
-      source_file: r.source_file ?? ""
-    }));
-    const XLSX = await import("xlsx");
-    const ws = XLSX.utils.json_to_sheet(rowsPlain);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Tabela");
-    const s = startDate ? startDate.replaceAll("-", "") : "inicio";
-    const e = endDate ? endDate.replaceAll("-", "") : "fim";
-    const filename = `${filenameBase}_${s}_${e}.xlsx`;
-    XLSX.writeFile(wb, filename);
-  }
-
-  // ===== base para o novo gráfico temático (segue date_range + Company/Ticker) =====
-  const baseForThematic = useMemo(() => {
-    const cset = new Set(selCompanies.map((o) => o.value));
-    const tset = new Set(selTickers.map((o) => o.value));
-    return rowsInWindow.filter((r) => {
-      const tRoot = normalizeTicker(r.ticker);
-      if (cset.size && (!r.company || !cset.has(r.company))) return false;
-      if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
-      return true;
-    });
-  }, [rowsInWindow, selCompanies, selTickers]);
-
-  const thematicData = useMemo(() => {
-    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
-    for (const r of baseForThematic) {
-      const ct = (r.canonical_type ?? "").toUpperCase();
-      const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") unicos++;
-      if (cl === "mistos") mistos++;
-      if (ct === CPC_CANONICAL) {
-        cpc++;
-        if (cl === "mistos") cpcMisto++;
-      } else {
-        outros++;
-      }
-    }
-    return [
-      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
-      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
-      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
-      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
-      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
-    ];
-  }, [baseForThematic]);
-
-  function computeMinAnchorByCompany(map: Map<string, string>) {
-    const perCompany = new Map<string, string>();
-    for (const k of map.keys()) {
-      const [company] = k.split("|");
-      const d = map.get(k)!;
-      const prev = perCompany.get(company);
-      if (!prev || d < prev) perCompany.set(company, d);
-    }
-    return perCompany;
-  }
-
-  async function fetchAnchoredTimeline() {
-    if (!anchors.size || !anchorCompanies.length) {
-      setErrorMsg("Âncoras indisponíveis (CPC inicial não encontrado).");
-      return;
-    }
-    setLoadingTimeline(true);
-    setErrorMsg(null);
-    try {
-      const perCompanyMin = computeMinAnchorByCompany(anchors);
-      const chunks = chunk(anchorCompanies, 100);
-      const allowedKeys = new Set(anchors.keys());
-      const all: Row[] = [];
-      for (const companies of chunks) {
-        let chunkMin = "9999-12-31";
-        for (const c of companies) {
-          const d = perCompanyMin.get(c)!;
-          if (d < chunkMin) chunkMin = d;
-        }
-        const query = supabase
-          .from("vw_bulletins_with_canonical")
-          .select("id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text")
-          .in("company", companies)
-          .gte("bulletin_date", chunkMin)
-          .order("bulletin_date", { ascending: true });
-        if (endDate) query.lte("bulletin_date", endDate);
-        const { data, error } = await query;
-        if (error) throw error;
-        for (const r of (data || []) as Row[]) {
-          const key = keyCT(r.company, r.ticker);
-          if (!allowedKeys.has(key)) continue;
-          const anchor = anchors.get(key);
-          if (!anchor || !r.bulletin_date || r.bulletin_date < anchor) continue;
-          all.push(r);
-        }
-      }
-      setRows(all);
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setLoadingTimeline(false);
-    }
   }
 
   return (
