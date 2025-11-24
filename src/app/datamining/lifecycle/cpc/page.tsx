@@ -11,9 +11,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
-  LabelList,
 } from "recharts";
 
 const supabase = createClient(
@@ -48,6 +45,27 @@ type ScatterDatum = {
 type Opt = { value: string; label: string };
 
 const CPC_CANONICAL = "NEW LISTING-CPC-SHARES";
+function isCpcPadrao(r: Row): boolean {
+  const canon = (r.canonical_type ?? r.bulletin_type ?? "").toUpperCase();
+  if (!canon.includes(CPC_CANONICAL)) return false;
+  const bt = (r.bulletin_type ?? "").toString();
+  const mixedFlag = typeof (r as unknown as { _mixed?: boolean })._mixed === "boolean"
+    ? (r as unknown as { _mixed?: boolean })._mixed
+    : false;
+  const isMixed = mixedFlag || bt.includes(",") || canon.includes(",");
+  return !isMixed;
+}
+function isCpcNaoPadrao(r: Row): boolean {
+  const canon = (r.canonical_type ?? r.bulletin_type ?? "").toUpperCase();
+  if (!canon.includes(CPC_CANONICAL)) return false;
+  const bt = (r.bulletin_type ?? "").toString();
+  const mixedFlag = typeof (r as unknown as { _mixed?: boolean })._mixed === "boolean"
+    ? (r as unknown as { _mixed?: boolean })._mixed
+    : false;
+  const isMixed = mixedFlag || bt.includes(",") || canon.includes(",");
+  return isMixed;
+}
+
 type SortKey = "company" | "ticker" | "composite_key" | "bulletin_date" | "canonical_type";
 type SortDir = "asc" | "desc";
 
@@ -119,19 +137,6 @@ function errMessage(e: unknown): string {
   return "Erro desconhecido";
 }
 
-// Tipagem explícita para evitar "any" no LabelList custom
-type BarLabelProps = {
-  x?: number;
-  y?: number;
-  width?: number;
-  value?: number | string;
-};
-function BarValueLabel(props: BarLabelProps) {
-  const { x, y, width, value } = props;
-  const cx = (x ?? 0) + (width ?? 0) / 2;
-  const vy = (y ?? 0) - 6;
-  return <text x={cx} y={vy} textAnchor="middle" fontSize={12} fontWeight={600}>{value}</text>;
-}
 
 // =========================================================
 
@@ -155,10 +160,7 @@ export default function Page() {
   const [onlyLast, setOnlyLast] = useState(false);
   const [showTickerAxis, setShowTickerAxis] = useState(true);
 
-  const [flagNewCpc, setFlagNewCpc] = useState(false);
-  const [flagCpcMixed, setFlagCpcMixed] = useState(false);
-
-  const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
+    // CPC padrão x não-padrão (afetam Scatter e Tabela)const [onlyCpcPadrao, setOnlyCpcPadrao] = useState(false);const [onlyCpcNaoPadrao, setOnlyCpcNaoPadrao] = useState(false);const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
   const [fTicker, setFTicker] = useState("");
@@ -340,43 +342,18 @@ export default function Page() {
         data = picked;
       }
     }
-
-    // ===== filtros especiais: New CPC / CPC Mixed =====
-    // Se alguma flag estiver ativa, mostramos apenas o 1º boletim CPC por ticker_root (.P),
-    // separado por classe Único vs Misto (149 / 5).
-    if (flagNewCpc || flagCpcMixed) {
-      const byRootCpc = new Map<string, Row[]>();
-      for (const r of data) {
-        const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) continue;
-        const root = normalizeTicker(pub);
-        if (!root) continue;
-        const arr = byRootCpc.get(root) || [];
-        arr.push(r);
-        byRootCpc.set(root, arr);
-      }
-
-      const picked: Row[] = [];
-      for (const arr of byRootCpc.values()) {
-        arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-        const first = arr[0];
-        if (!first) continue;
-
-        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-        if (!canon.includes(CPC_CANONICAL)) continue;
-
-        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
-        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const isMixedClass = normClass.startsWith("mist");
-
-        if (flagNewCpc && !isMixedClass) picked.push(first);
-        if (flagCpcMixed && isMixedClass) picked.push(first);
-      }
-      data = picked;
-    }
-
     return data;
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed]);
+  
+    // CPC padrão / não-padrão flags (espelhar Scatter)
+    const cpcFlagsActive = onlyCpcPadrao || onlyCpcNaoPadrao;
+    if (cpcFlagsActive) {
+      data = data.filter((r) => {
+        const okPadrao = onlyCpcPadrao && isCpcPadrao(r);
+        const okNao = onlyCpcNaoPadrao && isCpcNaoPadrao(r);
+        return okPadrao || okNao;
+      });
+    }
+}, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, onlyCpcPadrao, onlyCpcNaoPadrao]);
 
   const tC = useDeferredValue(dfCompany);
   const tT = useDeferredValue(dfTicker);
@@ -436,28 +413,6 @@ export default function Page() {
   // Reset do limite: não reseta ao ordenar (não incluí sortKey/sortDir)
   useEffect(() => { setTableLimit(PAGE); }, [tableRowsBase.length, tC, tT, tK, tD, tY]);
 
-  // -------- Estatísticas (esquerda, date_range only) --------
-  const stats = useMemo(() => {
-    const totalBulletins = rowsInWindow.length;
-    const perCompany = new Map<string, number>();
-    for (const r of rowsInWindow) {
-      if (!r.company) continue;
-      perCompany.set(r.company, (perCompany.get(r.company) ?? 0) + 1);
-    }
-    const totalCompanies = perCompany.size;
-    let eq1 = 0, ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++; else if (cnt >= 2) ge2++;
-    }
-    const chartData = [
-      { group: "Boletins", count: totalBulletins, label: "Total de boletins" },
-      { group: "Empresas", count: totalCompanies, label: "Total de empresas" },
-      { group: "=1", count: eq1, label: "Empresas com 1 boletim" },
-      { group: "≥2", count: ge2, label: "Empresas com ≥2 boletins" },
-    ];
-    return { chartData };
-  }, [rowsInWindow]);
-
   // -------- Scatter --------
   const filteredForChart = useMemo(() => {
     const cset = new Set(selCompanies.map((o) => o.value));
@@ -493,43 +448,18 @@ export default function Page() {
       }
       data = picked;
     }
-
-    // ===== filtros especiais: New CPC / CPC Mixed =====
-    // Se alguma flag estiver ativa, mostramos apenas o 1º boletim CPC por ticker_root (.P),
-    // separado por classe Único vs Misto (149 / 5).
-    if (flagNewCpc || flagCpcMixed) {
-      const byRootCpc = new Map<string, Row[]>();
-      for (const r of data) {
-        const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) continue;
-        const root = normalizeTicker(pub);
-        if (!root) continue;
-        const arr = byRootCpc.get(root) || [];
-        arr.push(r);
-        byRootCpc.set(root, arr);
-      }
-
-      const picked: Row[] = [];
-      for (const arr of byRootCpc.values()) {
-        arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-        const first = arr[0];
-        if (!first) continue;
-
-        const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
-        if (!canon.includes(CPC_CANONICAL)) continue;
-
-        const rawClass = (first.canonical_class ?? "").toString().trim().toLowerCase();
-        const normClass = rawClass.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const isMixedClass = normClass.startsWith("mist");
-
-        if (flagNewCpc && !isMixedClass) picked.push(first);
-        if (flagCpcMixed && isMixedClass) picked.push(first);
-      }
-      data = picked;
-    }
-
     return data.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
-  }, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, flagNewCpc, flagCpcMixed]);
+  
+    // CPC padrão / não-padrão flags
+    const cpcFlagsActive = onlyCpcPadrao || onlyCpcNaoPadrao;
+    if (cpcFlagsActive) {
+      data = data.filter((r) => {
+        const okPadrao = onlyCpcPadrao && isCpcPadrao(r);
+        const okNao = onlyCpcNaoPadrao && isCpcNaoPadrao(r);
+        return okPadrao || okNao;
+      });
+    }
+}, [rowsInWindow, selCompanies, selTickers, onlySingle, onlyMulti, onlyFirst, onlyLast, onlyCpcPadrao, onlyCpcNaoPadrao]);
 
   const chartData = useMemo(
     () =>
@@ -601,7 +531,9 @@ export default function Page() {
     setOnlySingle(false);
     setOnlyFirst(false);
     setOnlyLast(false);
-    setShowTickerAxis(true);
+        setOnlyCpcPadrao(false);
+    setOnlyCpcNaoPadrao(false);
+setShowTickerAxis(true);
     setSortKey("bulletin_date");
     setSortDir("asc");
     setFCompany("");
@@ -716,28 +648,98 @@ export default function Page() {
     });
   }, [rowsInWindow, selCompanies, selTickers]);
 
-  const thematicData = useMemo(() => {
-    let unicos = 0, mistos = 0, cpc = 0, cpcMisto = 0, outros = 0;
+  // ===== Painel de cartões (base: date_range + Company/Ticker) =====
+  // Definições:
+  // - "Primeiro boletim": 1º boletim por ticker PUBLICADO dentro da seleção atual.
+  // - "Padrão CPC (1º)": primeiro boletim com canonical_type NEW LISTING-CPC-SHARES e classe "único".
+  // - "Fora do padrão (1º)": primeiro boletim CPC classificado como "misto" (CPC + outro tipo).
+  const cardsStats = useMemo(() => {
+    const total = baseForThematic.length;
+
+    // primeiro boletim por ticker (publicado)
+    const byTicker = new Map<string, Row[]>();
     for (const r of baseForThematic) {
-      const ct = (r.canonical_type ?? "").toUpperCase();
-      const cl = (r.canonical_class ?? "").toLowerCase();
-      if (cl === "unicos") unicos++;
-      if (cl === "mistos") mistos++;
-      if (ct === CPC_CANONICAL) {
-        cpc++;
-        if (cl === "mistos") cpcMisto++;
-      } else {
-        outros++;
-      }
+      const key = (r.ticker ?? "").trim().toUpperCase();
+      if (!key) continue;
+      const arr = byTicker.get(key) || [];
+      arr.push(r);
+      byTicker.set(key, arr);
     }
-    return [
-      { group: "Únicos", count: unicos, label: "Boletins 'únicos' (pode sobrepor)" },
-      { group: "Mistos", count: mistos, label: "Boletins 'mistos' (pode sobrepor)" },
-      { group: "CPC", count: cpc, label: "NEW LISTING-CPC-SHARES (pode sobrepor)" },
-      { group: "CPC (misto)", count: cpcMisto, label: "CPC com class='mistos' (subset de CPC)" },
-      { group: "Outros", count: outros, label: "Demais tipos (não CPC)" },
-    ];
+
+    let firstCount = 0;
+    let firstStandard = 0;
+    let firstMixed = 0;
+
+    for (const arr of byTicker.values()) {
+      arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+      const first = arr[0];
+      if (!first) continue;
+
+      firstCount++;
+
+      const canon = (first.canonical_type ?? first.bulletin_type ?? "").toUpperCase();
+      const isCpc = canon.includes(CPC_CANONICAL);
+
+      // misto: usa flag _mixed se existir, ou texto com vírgula
+      const bt = (first.bulletin_type ?? "").toString();
+      const mixedFlag =
+        typeof (first as unknown as { _mixed?: boolean })._mixed === "boolean"
+          ? (first as unknown as { _mixed?: boolean })._mixed
+          : false;
+      const isMixed = mixedFlag || bt.includes(",") || canon.includes(",");
+
+      if (isCpc && !isMixed) firstStandard++;
+      if (isCpc && isMixed) firstMixed++;
+    }
+
+    const firstOther = firstMixed;
+    const firstCpc = firstStandard + firstMixed;
+    const demais = total - firstCount;
+
+    let uniqueCount = 0;
+    let mixedCount = 0;
+
+    for (const r of baseForThematic) {
+      const raw = (r.canonical_class ?? "").toString().trim().toLowerCase();
+      const norm = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (norm.startsWith("unic")) uniqueCount++;
+      if (norm.startsWith("mist")) mixedCount++;
+    }
+
+    return {
+      total,
+      firstCount,
+      firstCpc,
+      firstStandard,
+      firstOther,
+      demais,
+      uniqueCount,
+      mixedCount,
+    };
   }, [baseForThematic]);
+
+  function CardStat({
+    value,
+    label,
+    sublabel,
+  }: {
+    value: number | string;
+    label: string;
+    sublabel?: string;
+  }) {
+    return (
+      <div className="p-3 border rounded-lg bg-white shadow-sm hover:shadow transition-shadow flex flex-col">
+        <div className="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">
+          {value}
+        </div>
+        <div className="text-sm text-gray-700 mt-1 leading-snug">{label}</div>
+        {sublabel && (
+          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{sublabel}</div>
+        )}
+      </div>
+    );
+  }
+
 
   function computeMinAnchorByCompany(map: Map<string, string>) {
     const perCompany = new Map<string, string>();
@@ -881,51 +883,19 @@ export default function Page() {
 
       {/* Estatísticas + Novo Gráfico (lado a lado) */}
       {showStats && (
-        <div className="w-full border rounded p-3">
-          <div className="text-sm text-gray-700 mb-2">Empresas e boletins no período selecionado.</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Esquerda: estatística global por período */}
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={stats.chartData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        <div className="w-full border rounded-lg p-4 space-y-3 bg-gray-50">
+          <div className="text-sm text-gray-700">
+            Distribuição dos boletins no período/seleção atual.
+          </div>
 
-            {/* Direita: novo gráfico temático (segue date_range + Company/Ticker) */}
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Contagens podem se sobrepor</div>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={thematicData} margin={{ top: 16, right: 24, bottom: 8, left: 8 }} barCategoryGap="20%" barGap={2}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis dataKey="group" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(v: unknown, _n: unknown, p: unknown) => {
-                      const payload = p as { payload?: { label?: string } } | undefined;
-                      return [String(v), payload?.payload?.label ?? ""];
-                    }}
-                    labelFormatter={(l: string) => l}
-                  />
-                  <Bar dataKey="count">
-                    <LabelList dataKey="count" content={<BarValueLabel />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            <CardStat value={cardsStats.total} label="Total de boletins" />
+            <CardStat value={cardsStats.firstCount} label="Primeiros boletins" sublabel="1º por ticker" />
+            <CardStat value={cardsStats.firstStandard} label="Padrão CPC (1º)" sublabel="NEW LISTING-CPC-SHARES (único)" />
+            <CardStat value={cardsStats.firstOther} label="Fora do padrão (1º)" sublabel="CPC misto (ex.: + HALT)" />
+            <CardStat value={cardsStats.demais} label="Demais boletins" sublabel="Total − primeiros" />
+            <CardStat value={cardsStats.uniqueCount} label="Classe: Único" />
+            <CardStat value={cardsStats.mixedCount} label="Classe: Misto" />
           </div>
         </div>
       )}
@@ -943,7 +913,9 @@ export default function Page() {
               ≥2 Boletins
             </label>
             <label className="flex items-center gap-1">
-              <input type="checkbox" checked={onlyFirst} onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false); }} />
+              <input type="checkbox" checked={onlyFirst} onChange={(e) => { setOnlyFirst(e.target.checked); if (e.target.checked) setOnlyLast(false);     setOnlyCpcPadrao(false);
+    setOnlyCpcNaoPadrao(false);
+}} />
               Apenas primeiro
             </label>
             <label className="flex items-center gap-1">
@@ -952,25 +924,9 @@ export default function Page() {
             </label>
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={showTickerAxis} onChange={(e) => setShowTickerAxis(e.target.checked)} />
-              Mostrar tickers no eixo Y
-            </label>
-
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={flagNewCpc}
-                onChange={(e) => setFlagNewCpc(e.target.checked)}
-              />
-              New CPC
-            </label>
-
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={flagCpcMixed}
-                onChange={(e) => setFlagCpcMixed(e.target.checked)}
-              />
-              CPC Mixed
+              Mostrar tickers no eixo Y</label>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={onlyCpcPadrao} onChange={(e) => setOnlyCpcPadrao(e.target.checked)} /> CPC padrão</label>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={onlyCpcNaoPadrao} onChange={(e) => setOnlyCpcNaoPadrao(e.target.checked)} /> CPC não-padrão
             </label>
 
             <div className="ml-auto flex items-center gap-2">
