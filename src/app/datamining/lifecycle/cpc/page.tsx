@@ -82,16 +82,9 @@ function fmtDayMonth(ts: number): string {
 function normalizeTicker(t?: string | null) {
   return (t ?? "").trim().toUpperCase().split(".")[0];
 }
-function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
-  return rows.map((r) => {
-    if (r.body_text || !r.composite_key) return r;
-    return { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" };
-  });
-}
 function keyCT(company?: string | null, ticker?: string | null) {
   return `${(company ?? "").trim()}|${normalizeTicker(ticker)}`;
 }
-
 function startOfDayUTC(ts: number) {
   const d = new Date(ts);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -111,73 +104,6 @@ function addDaysUTC(ts: number, n: number) {
 function addMonthsUTC(ts: number, n: number) {
   const d = new Date(ts);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1);
-}
-
-function makeTicksAdaptive(domain: [number, number]) {
-  const [min, max] = domain;
-  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max)
-    return { ticks: [] as number[], formatter: (v: number) => fmtDayMonth(v) };
-  const span = max - min;
-  const fYear = new Intl.DateTimeFormat("pt-BR", {
-    year: "numeric",
-    timeZone: "UTC",
-  });
-  const fMonY = new Intl.DateTimeFormat("pt-BR", {
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-  const fMon = new Intl.DateTimeFormat("pt-BR", {
-    month: "short",
-    timeZone: "UTC",
-  });
-  const fDayMon = new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "UTC",
-  });
-  if (span >= 3 * 365 * DAY) {
-    let t = startOfMonthUTC(min);
-    const ticks: number[] = [];
-    while (t <= max) {
-      ticks.push(t);
-      t = addMonthsUTC(t, 12);
-    }
-    return { ticks, formatter: (v: number) => fYear.format(v) };
-  }
-  if (span >= 12 * 30 * DAY) {
-    let t = startOfQuarterUTC(min);
-    const ticks: number[] = [];
-    while (t <= max) {
-      ticks.push(t);
-      t = addMonthsUTC(t, 3);
-    }
-    return { ticks, formatter: (v: number) => fMonY.format(v) };
-  }
-  if (span >= 3 * 30 * DAY) {
-    let t = startOfMonthUTC(min);
-    const ticks: number[] = [];
-    while (t <= max) {
-      ticks.push(t);
-      t = addMonthsUTC(t, 1);
-    }
-    return { ticks, formatter: (v: number) => fMon.format(v) };
-  }
-  {
-    let t = startOfDayUTC(min);
-    const ticks: number[] = [];
-    while (t <= max) {
-      ticks.push(t);
-      t = addDaysUTC(t, 15);
-    }
-    return { ticks, formatter: (v: number) => fDayMon.format(v) };
-  }
-}
-
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
 }
 function errMessage(e: unknown): string {
   if (typeof e === "string") return e;
@@ -210,7 +136,6 @@ function isCpcMixed(row: Row): boolean {
 function isCpcPadrao(row: Row): boolean {
   return isCpc(row) && !isCpcMixed(row);
 }
-
 function isQtAny(row: Row): boolean {
   const t = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
   return t.includes(QT_ANY);
@@ -218,12 +143,6 @@ function isQtAny(row: Row): boolean {
 function isQtCompleted(row: Row): boolean {
   const t = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
   return t.includes(QT_COMPLETED);
-}
-
-// Novo: detecção de CPC pelo corpo do texto
-function isCpcByBody(row: Row): boolean {
-  const body = (row.body_text ?? "").toLowerCase();
-  return /new[-\s]?cpc[-\s]?share/.test(body);
 }
 
 // =========================================================
@@ -383,7 +302,7 @@ export default function Page() {
     });
   }, [rows, startDate, endDate]);
 
-  // ===== BASE GLOBAL (KPIs) com de-dup por company|ticker_root (com data+tipo p/ não colapsar eventos distintos)
+  // ===== BASE GLOBAL (KPIs) com de-dup por company|ticker_root =====
   const kpiRows = useMemo(() => {
     const seen = new Set<string>();
     const out: Row[] = [];
@@ -451,20 +370,8 @@ export default function Page() {
       if (!isCpcNotice) outros++;
       if (isQtAny(r)) qtAny++;
     }
-
-    // CPC por corpo (New-CPC-Share no texto)
-    let cpcBodyTotal = 0, cpcBodyU = 0, cpcBodyM = 0;
-    for (const r of kpiRows) {
-      if (isCpcByBody(r)) {
-        cpcBodyTotal++;
-        if (isCpcMixed(r)) cpcBodyM++; else cpcBodyU++;
-      }
-    }
-
-    return {
-      total, unico, misto, cpcPad, cpcMix, outros, qtAny,
-      cpcBodyTotal, cpcBodyU, cpcBodyM
-    };
+    const cpcUnifiedTotal = cpcPad + cpcMix;
+    return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny };
   }, [kpiRows]);
 
   const kpiEmpresas = useMemo(() => {
@@ -591,11 +498,11 @@ export default function Page() {
     flagQtCompleted,
   ]);
 
-  const tC = useDeferredValue(dfCompany);
-  const tT = useDeferredValue(dfTicker);
-  const tK = useDeferredValue(dfKey);
-  const tD = useDeferredValue(dfDate);
-  const tY = useDeferredValue(dfType);
+  const tC = useDeferredValue(fCompany);
+  const tT = useDeferredValue(fTicker);
+  const tK = useDeferredValue(fKey);
+  const tD = useDeferredValue(fDate);
+  const tY = useDeferredValue(fType);
 
   const tableRowsBase = useMemo(() => {
     const cf = tC.trim().toLowerCase();
@@ -934,7 +841,10 @@ export default function Page() {
       }[]) {
         if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
       }
-      filled = withBodyTextFilled(baseRows, map);
+      filled = baseRows.map((r) => {
+        if (r.body_text || !r.composite_key) return r;
+        return { ...r, body_text: map.get(r.composite_key) ?? r.body_text ?? "" };
+      });
     }
     const sorted = [...filled].sort(
       (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
@@ -986,9 +896,6 @@ export default function Page() {
       {/* Título + EXPORTS */}
       <div className="flex items-center gap-4">
         <h1 className="text-2xl font-bold">CPC — Notices</h1>
-        {loadingAnchors && (
-          <span className="text-xs text-gray-500">carregando âncoras...</span>
-        )}
         <div className="ml-auto flex flex-wrap gap-2">
           <button
             onClick={async () => {
@@ -1200,16 +1107,16 @@ export default function Page() {
               <div className="text-sm mt-1">Boletins — QT</div>
             </div>
 
-            {/* BU — CPC unificado (do corpo do texto) */}
+            {/* BU — CPC unificado (mesmo critério do arquivo: canonical) */}
             <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
               <div className="flex items-baseline gap-2">
-                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcBodyTotal}</div>
+                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcUnifiedTotal}</div>
                 <div className="text-sm whitespace-nowrap">BU — CPC</div>
               </div>
               <div className="h-px bg-black/30 my-1" />
               <div className="flex items-center gap-6 text-sm">
-                <span>U: {kpiBoletins.cpcBodyU}</span>
-                <span>M: {kpiBoletins.cpcBodyM}</span>
+                <span>U: {kpiBoletins.cpcPad}</span>
+                <span>M: {kpiBoletins.cpcMix}</span>
               </div>
             </div>
           </div>
