@@ -451,20 +451,30 @@ export default function Page() {
   const kpiEmpresas = useMemo(() => {
     const perCompany = new Map<string, number>();
     const qtCompanies = new Set<string>();
+    const lastRowByCompany = new Map<string, Row>();
     for (const r of kpiRows) {
       const c = (r.company ?? "").trim();
       if (!c) continue;
       perCompany.set(c, (perCompany.get(c) ?? 0) + 1);
+      lastRowByCompany.set(c, r);
       if (isQtCompleted(r)) qtCompanies.add(c);
     }
     const total = perCompany.size;
     let eq1 = 0,
-      ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++;
-      else if (cnt >= 2) ge2++;
+      ge2 = 0,
+      eq1_unico = 0,
+      eq1_misto = 0;
+    for (const [c, cnt] of perCompany.entries()) {
+      if (cnt === 1) {
+        eq1++;
+        const r = lastRowByCompany.get(c);
+        if (r && isCpcMixed(r)) eq1_misto++;
+        else eq1_unico++;
+      } else if (cnt >= 2) {
+        ge2++;
+      }
     }
-    return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size };
+    return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size, eq1_unico, eq1_misto };
   }, [kpiRows]);
 
   // -------- Tabela base (com flags espelhadas) --------
@@ -1153,18 +1163,9 @@ export default function Page() {
           {showChart ? "Fechar Scatter" : "Abrir Scatter"}
         </button>
         <button
-          className="border rounded px-3 py-2"
-          onClick={() => setShowStats((v) => !v)}
-          title={showStats ? "Fechar KPI's" : "Abrir KPI's"}
-        >
-          {showStats ? "Fechar KPI's" : "Abrir KPI's"}
-        </button>
-      </div>
-
-      {/* KPIs (grid único, cards iguais) */}
-      {showStats && (
-        <div className="w-full border rounded p-4 bg-white">
+          className="b        <div className="w-full border rounded p-4 bg-white">
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+            {/* Boletins */}
             {[
               { label: "Boletins — Total", val: kpiBoletins.total },
               { label: "Boletins — Único", val: kpiBoletins.unico },
@@ -1173,16 +1174,46 @@ export default function Page() {
               { label: "Boletins — CPC", val: kpiBoletins.cpcPad },
               { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
               { label: "Empresas — Total", val: kpiEmpresas.total },
-              { label: "Empresas — 1 boletim", val: kpiEmpresas.eq1 },
-              { label: "Empresas — 2+ boletins", val: kpiEmpresas.ge2 },
-              {
-                label: "Empresas — QT (completed)",
-                val: kpiEmpresas.qtCompletedCompanies,
-              },
             ].map((d) => (
               <div
                 key={d.label}
-                className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]"
+                className="rounded-lg border p-3 bg-white flex flex-col justify-center min-h-[88px]"
+              >
+                <div className="text-2xl font-semibold tracking-tight">
+                  {d.val}
+                </div>
+                <div className="text-sm mt-1">{d.label}</div>
+              </div>
+            ))}
+            {/* Card especial: Empresas =1 BU */}
+            <div className="rounded-lg border p-3 bg-white flex flex-col justify-center min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-semibold tracking-tight">{kpiEmpresas.eq1}</div>
+                <div className="text-base whitespace-nowrap">Emp. =1 BU</div>
+              </div>
+              <div className="border-t my-2 opacity-40" />
+              <div className="flex items-center gap-8 text-sm">
+                <div>U: {kpiEmpresas.eq1_unico}</div>
+                <div>M: {kpiEmpresas.eq1_misto}</div>
+              </div>
+            </div>
+            {/* Demais KPIs de empresas */}
+            {[
+              { label: "Empresas — 2+ boletins", val: kpiEmpresas.ge2 },
+              { label: "Empresas — QT (completed)", val: kpiEmpresas.qtCompletedCompanies },
+            ].map((d) => (
+              <div
+                key={d.label}
+                className="rounded-lg border p-3 bg-white flex flex-col justify-center min-h-[88px]"
+              >
+                <div className="text-2xl font-semibold tracking-tight">
+                  {d.val}
+                </div>
+                <div className="text-sm mt-1">{d.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>y-center min-h-[88px]"
               >
                 <div className="text-2xl font-semibold tracking-tight">
                   {d.val}
