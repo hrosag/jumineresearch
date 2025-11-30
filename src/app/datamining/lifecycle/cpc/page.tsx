@@ -174,11 +174,6 @@ function makeTicksAdaptive(domain: [number, number]) {
   }
 }
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
 function errMessage(e: unknown): string {
   if (typeof e === "string") return e;
   if (e && typeof e === "object" && "message" in e) {
@@ -220,10 +215,14 @@ function isQtCompleted(row: Row): boolean {
   return t.includes(QT_COMPLETED);
 }
 
-// Novo: detecção de CPC pelo corpo do texto
+// Novo: detecção de CPC pelo corpo do texto (várias variantes)
 function isCpcByBody(row: Row): boolean {
   const body = (row.body_text ?? "").toLowerCase();
-  return /new[-\s]?cpc[-\s]?share/.test(body);
+  if (!body) return false;
+  // cobre "New Listing - CPC - Shares", "New-CPC-Share(s)", "New Listing CPC Shares"
+  const re =
+    /(new\s*listing\s*[-–—]?\s*cpc\s*[-–—]?\s*shares?)|new[-\s]?cpc[-\s]?share(s)?/i;
+  return re.test(body);
 }
 
 // =========================================================
@@ -383,7 +382,49 @@ export default function Page() {
     });
   }, [rows, startDate, endDate]);
 
-  // ===== BASE GLOBAL (KPIs) com de-dup por company|ticker_root (com data+tipo p/ não colapsar eventos distintos)
+  // ===== Após carregar rows, preencher body_text ausente (para CPC body matching) =====
+  const filledKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    (async () => {
+      const missingKeys = Array.from(
+        new Set(
+          rows
+            .filter((r) => !r.body_text && r.composite_key)
+            .map((r) => r.composite_key as string),
+        ),
+      ).filter((k) => !filledKeysRef.current.has(k));
+
+      if (!missingKeys.length) return;
+      // buscar em lotes de 300
+      const chunk = (arr: string[], size: number) => {
+        const out: string[][] = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+      };
+      try {
+        for (const batch of chunk(missingKeys, 300)) {
+          const { data, error } = await supabase
+            .from("vw_bulletins_with_canonical")
+            .select("composite_key, body_text")
+            .in("composite_key", batch);
+          if (error) throw error;
+          const map = new Map<string, string>();
+          for (const r of (data || []) as {
+            composite_key: string | null;
+            body_text: string | null;
+          }[]) {
+            if (r.composite_key) map.set(r.composite_key, r.body_text ?? "");
+          }
+          setRows((prev) => withBodyTextFilled(prev, map));
+          batch.forEach((k) => filledKeysRef.current.add(k));
+        }
+      } catch (e) {
+        console.warn("Falha ao preencher body_text:", e);
+      }
+    })();
+  }, [rows]);
+
+  // ===== BASE GLOBAL (KPIs) com de-dup por company|ticker_root =====
   const kpiRows = useMemo(() => {
     const seen = new Set<string>();
     const out: Row[] = [];
@@ -427,45 +468,31 @@ export default function Page() {
   }, [companyOpts, tickerOpts]);
 
   // -------- KPIs Globais --------
-  const kpiBoletins = useMemo(() => {
-    const total = kpiRows.length;
-    let unico = 0,
+  
+const kpiBoletins = useMemo(() => {
+  const total = kpiRows.length;
+  let unico = 0,
       misto = 0,
       cpcPad = 0,
       cpcMix = 0,
       outros = 0,
       qtAny = 0;
-    for (const r of kpiRows) {
-      const cln = (r.canonical_class ?? "")
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-      const isMixed = cln.startsWith("mist") || isCpcMixed(r);
-      const isCpcNotice = isCpc(r);
-      if (!isMixed) unico++;
-      else misto++;
-      if (isCpcNotice) {
-        if (isMixed) cpcMix++;
-        else cpcPad++;
-      }
-      if (!isCpcNotice) outros++;
-      if (isQtAny(r)) qtAny++;
-    }
+  for (const r of kpiRows) {
+    const cln = (r.canonical_class ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    const isMixed = cln.startsWith("mist") || isCpcMixed(r);
+    const isCpcNotice = isCpc(r);
+    if (!isMixed) unico++; else misto++;
+    if (isCpcNotice) { if (isMixed) cpcMix++; else cpcPad++; }
+    if (!isCpcNotice) outros++;
+    if (isQtAny(r)) qtAny++;
+  }
+  const cpcUnifiedTotal = cpcPad + cpcMix;
+  return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny };
+}, [kpiRows]);
 
-    // CPC por corpo (New-CPC-Share no texto)
-    let cpcBodyTotal = 0, cpcBodyU = 0, cpcBodyM = 0;
-    for (const r of kpiRows) {
-      if (isCpcByBody(r)) {
-        cpcBodyTotal++;
-        if (isCpcMixed(r)) cpcBodyM++; else cpcBodyU++;
-      }
-    }
-
-    return {
-      total, unico, misto, cpcPad, cpcMix, outros, qtAny,
-      cpcBodyTotal, cpcBodyU, cpcBodyM
-    };
-  }, [kpiRows]);
 
   const kpiEmpresas = useMemo(() => {
     // map empresa -> rows
@@ -499,7 +526,7 @@ export default function Page() {
   }, [kpiRows]);
 
   // -------- Tabela base (com flags espelhadas) --------
-  const filteredBaseForTable = useMemo(() => {
+  const rowsInWindowFiltered = useMemo(() => {
     // Base por período + Company/Ticker
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
@@ -603,7 +630,7 @@ export default function Page() {
     const kf = tK.trim().toLowerCase();
     const dfv = tD.trim();
     const yf = tY.trim().toLowerCase();
-    return filteredBaseForTable.filter((r) => {
+    return rowsInWindowFiltered.filter((r) => {
       const c = (r.company ?? "").toLowerCase();
       const t = (r.ticker ?? "").toLowerCase();
       const k = (r.composite_key ?? "").toLowerCase();
@@ -616,7 +643,7 @@ export default function Page() {
       if (yf && !y.includes(yf)) return false;
       return true;
     });
-  }, [filteredBaseForTable, tC, tT, tK, tD, tY]);
+  }, [rowsInWindowFiltered, tC, tT, tK, tD, tY]);
 
   function toggleSort(k: SortKey) {
     setSortKey((prevK) => {
@@ -1200,18 +1227,18 @@ export default function Page() {
               <div className="text-sm mt-1">Boletins — QT</div>
             </div>
 
-            {/* BU — CPC unificado (do corpo do texto) */}
-            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
-              <div className="flex items-baseline gap-2">
-                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcBodyTotal}</div>
-                <div className="text-sm whitespace-nowrap">BU — CPC</div>
-              </div>
-              <div className="h-px bg-black/30 my-1" />
-              <div className="flex items-center gap-6 text-sm">
-                <span>U: {kpiBoletins.cpcBodyU}</span>
-                <span>M: {kpiBoletins.cpcBodyM}</span>
-              </div>
-            </div>
+            {/* BU — CPC (unificado por canonical) */}
+<div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+  <div className="flex items-baseline gap-2">
+    <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcUnifiedTotal}</div>
+    <div className="text-sm whitespace-nowrap">BU — CPC</div>
+  </div>
+  <div className="h-px bg-black/30 my-1" />
+  <div className="flex items-center gap-6 text-sm">
+    <span>U: {kpiBoletins.cpcPad}</span>
+    <span>M: {kpiBoletins.cpcMix}</span>
+  </div>
+</div>
           </div>
 
           {/* DEGRAU 2 — EMPRESAS */}
