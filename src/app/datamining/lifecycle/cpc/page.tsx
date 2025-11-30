@@ -1155,14 +1155,26 @@ export default function Page() {
         </div>
       </div>
 
-      {/* KPIs (grid único, com card customizado para "Emp. =1 BU") */}
+      {/* KPIs: com dois cards especiais e sem os obsoletos */}
       {showStats && (
         <div className="w-full border rounded p-4 bg-white">
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+
+            {/* CARD ESPECIAL: "BU — Total" com breakdown U/M */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-extrabold tracking-tight">{kpiBoletins.total}</div>
+                <div className="text-sm whitespace-nowrap">BU — Total</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>U: {kpiBoletins.unico}</span>
+                <span>M: {kpiBoletins.misto}</span>
+              </div>
+            </div>
+
+            {/* Boletins QT / CPC */}
             {[
-              { label: "Boletins — Total", val: kpiBoletins.total },
-              { label: "Boletins — Único", val: kpiBoletins.unico },
-              { label: "Boletins — Misto", val: kpiBoletins.misto },
               { label: "Boletins — QT", val: kpiBoletins.qtAny },
               { label: "Boletins — CPC", val: kpiBoletins.cpcPad },
               { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
