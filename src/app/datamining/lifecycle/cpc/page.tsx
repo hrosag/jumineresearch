@@ -420,7 +420,7 @@ export default function Page() {
     setSelTickers((prev) => prev.filter((o) => validTickers.has(o.value)));
   }, [companyOpts, tickerOpts]);
 
-  // -------- KPIs Globais (duas linhas condensadas em grid único) --------
+  // -------- KPIs Globais --------
   const kpiBoletins = useMemo(() => {
     const total = kpiRows.length;
     let unico = 0,
@@ -449,22 +449,34 @@ export default function Page() {
   }, [kpiRows]);
 
   const kpiEmpresas = useMemo(() => {
-    const perCompany = new Map<string, number>();
-    const qtCompanies = new Set<string>();
+    // map empresa -> rows
+    const perCompanyRows = new Map<string, Row[]>();
     for (const r of kpiRows) {
       const c = (r.company ?? "").trim();
       if (!c) continue;
-      perCompany.set(c, (perCompany.get(c) ?? 0) + 1);
-      if (isQtCompleted(r)) qtCompanies.add(c);
+      const arr = perCompanyRows.get(c) || [];
+      arr.push(r);
+      perCompanyRows.set(c, arr);
     }
-    const total = perCompany.size;
+    const total = perCompanyRows.size;
     let eq1 = 0,
-      ge2 = 0;
-    for (const cnt of perCompany.values()) {
-      if (cnt === 1) eq1++;
-      else if (cnt >= 2) ge2++;
+      ge2 = 0,
+      eq1_unico = 0,
+      eq1_misto = 0;
+    const qtCompanies = new Set<string>();
+
+    for (const [company, arr] of perCompanyRows) {
+      if (arr.length === 1) {
+        eq1++;
+        const only = arr[0];
+        if (isCpcMixed(only)) eq1_misto++;
+        else eq1_unico++;
+      } else if (arr.length >= 2) {
+        ge2++;
+      }
+      for (const r of arr) if (isQtCompleted(r)) qtCompanies.add(company);
     }
-    return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size };
+    return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size, eq1_unico, eq1_misto };
   }, [kpiRows]);
 
   // -------- Tabela base (com flags espelhadas) --------
@@ -480,7 +492,7 @@ export default function Page() {
     });
 
     // flags (=1, >=2, first/last)
-    const flagsActive = onlySingle || onlyMulti || onlyFirst || onlyLast;
+    const flagsActive = onlyMulti || onlySingle || onlyFirst || onlyLast;
     if (flagsActive) {
       const counts = new Map<string, number>();
       for (const r of data) {
@@ -1143,25 +1155,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Acordeões */}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          className="border rounded px-3 py-2"
-          onClick={() => setShowChart((v) => !v)}
-          title={showChart ? "Fechar Scatter" : "Abrir Scatter"}
-        >
-          {showChart ? "Fechar Scatter" : "Abrir Scatter"}
-        </button>
-        <button
-          className="border rounded px-3 py-2"
-          onClick={() => setShowStats((v) => !v)}
-          title={showStats ? "Fechar KPI's" : "Abrir KPI's"}
-        >
-          {showStats ? "Fechar KPI's" : "Abrir KPI's"}
-        </button>
-      </div>
-
-      {/* KPIs (grid único, cards iguais) */}
+      {/* KPIs (grid único, com card customizado para "Emp. =1 BU") */}
       {showStats && (
         <div className="w-full border rounded p-4 bg-white">
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
@@ -1173,7 +1167,33 @@ export default function Page() {
               { label: "Boletins — CPC", val: kpiBoletins.cpcPad },
               { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
               { label: "Empresas — Total", val: kpiEmpresas.total },
-              { label: "Empresas — 1 boletim", val: kpiEmpresas.eq1 },
+            ].map((d) => (
+              <div
+                key={d.label}
+                className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]"
+              >
+                <div className="text-2xl font-semibold tracking-tight">
+                  {d.val}
+                </div>
+                <div className="text-sm mt-1">{d.label}</div>
+              </div>
+            ))}
+
+            {/* CARD ESPECIAL: "Emp. =1 BU" com breakdown U/M */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-extrabold tracking-tight">{kpiEmpresas.eq1}</div>
+                <div className="text-sm whitespace-nowrap">Emp. =1 BU</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>U: {kpiEmpresas.eq1_unico}</span>
+                <span>M: {kpiEmpresas.eq1_misto}</span>
+              </div>
+            </div>
+
+            {/* Demais cards de empresas */}
+            {[
               { label: "Empresas — 2+ boletins", val: kpiEmpresas.ge2 },
               {
                 label: "Empresas — QT (completed)",
