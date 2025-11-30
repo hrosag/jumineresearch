@@ -220,6 +220,12 @@ function isQtCompleted(row: Row): boolean {
   return t.includes(QT_COMPLETED);
 }
 
+// Novo: detecção de CPC pelo corpo do texto
+function isCpcByBody(row: Row): boolean {
+  const body = (row.body_text ?? "").toLowerCase();
+  return /new[-\s]?cpc[-\s]?share/.test(body);
+}
+
 // =========================================================
 
 export default function Page() {
@@ -445,7 +451,20 @@ export default function Page() {
       if (!isCpcNotice) outros++;
       if (isQtAny(r)) qtAny++;
     }
-    return { total, unico, misto, cpcPad, cpcMix, outros, qtAny };
+
+    // CPC por corpo (New-CPC-Share no texto)
+    let cpcBodyTotal = 0, cpcBodyU = 0, cpcBodyM = 0;
+    for (const r of kpiRows) {
+      if (isCpcByBody(r)) {
+        cpcBodyTotal++;
+        if (isCpcMixed(r)) cpcBodyM++; else cpcBodyU++;
+      }
+    }
+
+    return {
+      total, unico, misto, cpcPad, cpcMix, outros, qtAny,
+      cpcBodyTotal, cpcBodyU, cpcBodyM
+    };
   }, [kpiRows]);
 
   const kpiEmpresas = useMemo(() => {
@@ -1155,34 +1174,59 @@ export default function Page() {
         </div>
       </div>
 
-      {/* KPIs (grid único, com card customizado para "Emp. =1 BU") */}
+      {/* KPIs: dois degraus (Boletins / Empresas) com cards especiais e tipografia suave */}
       {showStats && (
-        <div className="w-full border rounded p-4 bg-white">
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
-            {[
-              { label: "Boletins — Total", val: kpiBoletins.total },
-              { label: "Boletins — Único", val: kpiBoletins.unico },
-              { label: "Boletins — Misto", val: kpiBoletins.misto },
-              { label: "Boletins — QT", val: kpiBoletins.qtAny },
-              { label: "Boletins — CPC", val: kpiBoletins.cpcPad },
-              { label: "Boletins — CPC (mix)", val: kpiBoletins.cpcMix },
-              { label: "Empresas — Total", val: kpiEmpresas.total },
-            ].map((d) => (
-              <div
-                key={d.label}
-                className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]"
-              >
-                <div className="text-2xl font-semibold tracking-tight">
-                  {d.val}
-                </div>
-                <div className="text-sm mt-1">{d.label}</div>
-              </div>
-            ))}
+        <div className="w-full border rounded p-4 bg-white space-y-3">
 
-            {/* CARD ESPECIAL: "Emp. =1 BU" com breakdown U/M */}
+          {/* DEGRAU 1 — BOLETINS */}
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+
+            {/* BU — Total (com U/M) */}
             <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
               <div className="flex items-baseline gap-2">
-                <div className="text-2xl font-extrabold tracking-tight">{kpiEmpresas.eq1}</div>
+                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.total}</div>
+                <div className="text-sm whitespace-nowrap">BU — Total</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>U: {kpiBoletins.unico}</span>
+                <span>M: {kpiBoletins.misto}</span>
+              </div>
+            </div>
+
+            {/* Boletins — QT */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny}</div>
+              <div className="text-sm mt-1">Boletins — QT</div>
+            </div>
+
+            {/* BU — CPC unificado (do corpo do texto) */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcBodyTotal}</div>
+                <div className="text-sm whitespace-nowrap">BU — CPC</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>U: {kpiBoletins.cpcBodyU}</span>
+                <span>M: {kpiBoletins.cpcBodyM}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* DEGRAU 2 — EMPRESAS */}
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+
+            {/* Empresas — Total */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiEmpresas.total}</div>
+              <div className="text-sm mt-1">Empresas — Total</div>
+            </div>
+
+            {/* Emp. =1 BU (com U/M) */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-semibold tracking-tight">{kpiEmpresas.eq1}</div>
                 <div className="text-sm whitespace-nowrap">Emp. =1 BU</div>
               </div>
               <div className="h-px bg-black/30 my-1" />
@@ -1192,24 +1236,17 @@ export default function Page() {
               </div>
             </div>
 
-            {/* Demais cards de empresas */}
-            {[
-              { label: "Empresas — 2+ boletins", val: kpiEmpresas.ge2 },
-              {
-                label: "Empresas — QT (completed)",
-                val: kpiEmpresas.qtCompletedCompanies,
-              },
-            ].map((d) => (
-              <div
-                key={d.label}
-                className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]"
-              >
-                <div className="text-2xl font-semibold tracking-tight">
-                  {d.val}
-                </div>
-                <div className="text-sm mt-1">{d.label}</div>
-              </div>
-            ))}
+            {/* Empresas — 2+ boletins */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiEmpresas.ge2}</div>
+              <div className="text-sm mt-1">Empresas — 2+ boletins</div>
+            </div>
+
+            {/* Empresas — QT (completed) */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiEmpresas.qtCompletedCompanies}</div>
+              <div className="text-sm mt-1">Empresas — QT (completed)</div>
+            </div>
           </div>
         </div>
       )}
