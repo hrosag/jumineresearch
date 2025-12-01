@@ -602,30 +602,16 @@ const kpiBoletins = useMemo(() => {
 
     // CPC flags (New CPC / CPC Mixed)
     if (flagNewCpc || flagCpcMixed) {
-      const byRootCpc = new Map<string, Row[]>();
-      for (const r of data) {
+      // Apenas filtra por CPC padrão/misto sem colapsar por root;
+      // a remoção de duplicatas fica a cargo do flag 'Rem. Dupli.' (removeDupByType).
+      data = data.filter((r) => {
         const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) continue;
-        const root = normalizeTicker(pub);
-        if (!root) continue;
-        const arr = byRootCpc.get(root) || [];
-        arr.push(r);
-        byRootCpc.set(root, arr);
-      }
-      const picked: Row[] = [];
-      for (const arr of byRootCpc.values()) {
-        arr.sort(
-          (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
-        );
-        const first = arr[0];
-        if (!first) continue;
-        if (!isCpc(first)) continue;
-        if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
-        if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
-      }
-      data = picked;
+        if (!pub.endsWith(".P")) return false;
+        const pad = isCpcPadrao(r);
+        const mix = isCpcMixed(r);
+        return (flagNewCpc && pad) || (flagCpcMixed && mix);
+      });
     }
-
     // QT Completed flag
     if (flagQtCompleted) {
       data = data.filter(isQtCompleted);
@@ -765,32 +751,18 @@ return data;
       data = picked;
     }
 
-    // CPC flags
+    // CPC flags (New CPC / CPC Mixed)
     if (flagNewCpc || flagCpcMixed) {
-      const byRootCpc = new Map<string, Row[]>();
-      for (const r of data) {
+      // Apenas filtra por CPC padrão/misto sem colapsar por root;
+      // a remoção de duplicatas fica a cargo do flag 'Rem. Dupli.' (removeDupByType).
+      data = data.filter((r) => {
         const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) continue;
-        const root = normalizeTicker(pub);
-        if (!root) continue;
-        const arr = byRootCpc.get(root) || [];
-        arr.push(r);
-        byRootCpc.set(root, arr);
-      }
-      const picked: Row[] = [];
-      for (const arr of byRootCpc.values()) {
-        arr.sort(
-          (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
-        );
-        const first = arr[0];
-        if (!first) continue;
-        if (!isCpc(first)) continue;
-        if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
-        if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
-      }
-      data = picked;
+        if (!pub.endsWith(".P")) return false;
+        const pad = isCpcPadrao(r);
+        const mix = isCpcMixed(r);
+        return (flagNewCpc && pad) || (flagCpcMixed && mix);
+      });
     }
-
     // QT Completed flag
     if (flagQtCompleted) {
       data = data.filter(isQtCompleted);
