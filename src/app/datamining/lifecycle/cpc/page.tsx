@@ -884,6 +884,15 @@ return data;
 
   // Reset
   const handleReset = () => {
+    // Limpa datas, flags e resultados base
+    setStartDate("");
+    setEndDate("");
+    setAutoPeriod(true);
+    setRemoveDupByType(false);
+    setRows([]);
+    setErrorMsg(null);
+    setSelectedBulletin(null);
+
     setSelCompanies([]);
     setSelTickers([]);
     setOnlyMulti(false);
