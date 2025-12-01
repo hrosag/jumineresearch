@@ -82,6 +82,30 @@ function fmtDayMonth(ts: number): string {
 function normalizeTicker(t?: string | null) {
   return (t ?? "").trim().toUpperCase().split(".")[0];
 }
+
+// Remove duplicatas por Empresa × TickerRoot × Tipo (mantém a mais antiga por data)
+function dedupByCompanyRootType(rows: Row[]): Row[] {
+  const best = new Map<string, Row>();
+  for (const r of rows) {
+    const company = (r.company ?? "").trim();
+    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+    if (!company || !root || !tipo) {
+      const k = `__loose__|${r.id ?? Math.random()}`;
+      best.set(k, r);
+      continue;
+    }
+    const k = `${company}|${root}|${tipo}`;
+    const prev = best.get(k);
+    if (!prev) best.set(k, r);
+    else {
+      const dPrev = toDateNum(prev.bulletin_date);
+      const dThis = toDateNum(r.bulletin_date);
+      if (dThis < dPrev) best.set(k, r);
+    }
+  }
+  return Array.from(best.values());
+}
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map((r) => {
     if (r.body_text || !r.composite_key) return r;
@@ -252,6 +276,9 @@ export default function Page() {
   const [flagCpcMixed, setFlagCpcMixed] = useState(false);
   // QT Completed
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
+  // Remover duplicatas por Tipo
+  const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
+
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -604,7 +631,12 @@ const kpiBoletins = useMemo(() => {
       data = data.filter(isQtCompleted);
     }
 
-    return data;
+    
+    // Remover duplicatas por tipo (opcional)
+    if (removeDupByType) {
+      data = dedupByCompanyRootType(data);
+    }
+return data;
   }, [
     rowsInWindow,
     selCompanies,
@@ -616,6 +648,7 @@ const kpiBoletins = useMemo(() => {
     flagNewCpc,
     flagCpcMixed,
     flagQtCompleted,
+    removeDupByType,
   ]);
 
   const tC = useDeferredValue(dfCompany);
@@ -763,6 +796,10 @@ const kpiBoletins = useMemo(() => {
       data = data.filter(isQtCompleted);
     }
 
+        if (removeDupByType) {
+      data = dedupByCompanyRootType(data);
+    }
+
     return data.sort(
       (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
     );
@@ -777,6 +814,7 @@ const kpiBoletins = useMemo(() => {
     flagNewCpc,
     flagCpcMixed,
     flagQtCompleted,
+    removeDupByType,
   ]);
 
   const chartData = useMemo(
@@ -1334,6 +1372,15 @@ const kpiBoletins = useMemo(() => {
               />
               Mostrar Tickers
             </label>
+            <label className="flex items-center gap-1" title="Remove duplicatas por Empresa×TickerRoot×Tipo (mantém o 1º por data)">
+              <input
+                type="checkbox"
+                checked={removeDupByType}
+                onChange={(e) => setRemoveDupByType(e.target.checked)}
+              />
+              Rem. Dupli.
+            </label>
+
 
             {/* CPC flags */}
             <label className="flex items-center gap-1">
