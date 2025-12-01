@@ -82,30 +82,6 @@ function fmtDayMonth(ts: number): string {
 function normalizeTicker(t?: string | null) {
   return (t ?? "").trim().toUpperCase().split(".")[0];
 }
-
-// Remove duplicatas por Empresa × TickerRoot × Tipo (mantém a mais antiga por data)
-function dedupByCompanyRootType(rows: Row[]): Row[] {
-  const best = new Map<string, Row>();
-  for (const r of rows) {
-    const company = (r.company ?? "").trim();
-    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
-    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
-    if (!company || !root || !tipo) {
-      const k = `__loose__|${r.id ?? Math.random()}`;
-      best.set(k, r);
-      continue;
-    }
-    const k = `${company}|${root}|${tipo}`;
-    const prev = best.get(k);
-    if (!prev) best.set(k, r);
-    else {
-      const dPrev = toDateNum(prev.bulletin_date);
-      const dThis = toDateNum(r.bulletin_date);
-      if (dThis < dPrev) best.set(k, r);
-    }
-  }
-  return Array.from(best.values());
-}
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map((r) => {
     if (r.body_text || !r.composite_key) return r;
@@ -276,9 +252,6 @@ export default function Page() {
   const [flagCpcMixed, setFlagCpcMixed] = useState(false);
   // QT Completed
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
-  // Remover duplicatas por Tipo
-  const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
-
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -602,28 +575,36 @@ const kpiBoletins = useMemo(() => {
 
     // CPC flags (New CPC / CPC Mixed)
     if (flagNewCpc || flagCpcMixed) {
-      // Filtra SOMENTE boletins cujo corpo indica "New Listing - CPC - Shares"
-      // (isCpcByBody). Depois separa em padrão vs. mixed.
-      data = data.filter((r) => {
+      const byRootCpc = new Map<string, Row[]>();
+      for (const r of data) {
         const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) return false;
-        if (!isCpcByBody(r)) return false;
-        const mixed = isCpcMixed(r);
-        const pad = !mixed;
-        return (flagNewCpc && pad) || (flagCpcMixed && mixed);
-      });
+        if (!pub.endsWith(".P")) continue;
+        const root = normalizeTicker(pub);
+        if (!root) continue;
+        const arr = byRootCpc.get(root) || [];
+        arr.push(r);
+        byRootCpc.set(root, arr);
+      }
+      const picked: Row[] = [];
+      for (const arr of byRootCpc.values()) {
+        arr.sort(
+          (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
+        );
+        const first = arr[0];
+        if (!first) continue;
+        if (!isCpc(first)) continue;
+        if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
+        if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
+      }
+      data = picked;
     }
+
     // QT Completed flag
     if (flagQtCompleted) {
       data = data.filter(isQtCompleted);
     }
 
-    
-    // Remover duplicatas por tipo (opcional)
-    if (removeDupByType) {
-      data = dedupByCompanyRootType(data);
-    }
-return data;
+    return data;
   }, [
     rowsInWindow,
     selCompanies,
@@ -635,7 +616,6 @@ return data;
     flagNewCpc,
     flagCpcMixed,
     flagQtCompleted,
-    removeDupByType,
   ]);
 
   const tC = useDeferredValue(dfCompany);
@@ -752,26 +732,35 @@ return data;
       data = picked;
     }
 
-    // CPC flags (New CPC / CPC Mixed)
+    // CPC flags
     if (flagNewCpc || flagCpcMixed) {
-      // Filtra SOMENTE boletins cujo corpo indica "New Listing - CPC - Shares"
-      // (isCpcByBody). Depois separa em padrão vs. mixed.
-      data = data.filter((r) => {
+      const byRootCpc = new Map<string, Row[]>();
+      for (const r of data) {
         const pub = (r.ticker ?? "").trim().toUpperCase();
-        if (!pub.endsWith(".P")) return false;
-        if (!isCpcByBody(r)) return false;
-        const mixed = isCpcMixed(r);
-        const pad = !mixed;
-        return (flagNewCpc && pad) || (flagCpcMixed && mixed);
-      });
+        if (!pub.endsWith(".P")) continue;
+        const root = normalizeTicker(pub);
+        if (!root) continue;
+        const arr = byRootCpc.get(root) || [];
+        arr.push(r);
+        byRootCpc.set(root, arr);
+      }
+      const picked: Row[] = [];
+      for (const arr of byRootCpc.values()) {
+        arr.sort(
+          (a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date),
+        );
+        const first = arr[0];
+        if (!first) continue;
+        if (!isCpc(first)) continue;
+        if (flagNewCpc && isCpcPadrao(first)) picked.push(first);
+        if (flagCpcMixed && isCpcMixed(first)) picked.push(first);
+      }
+      data = picked;
     }
+
     // QT Completed flag
     if (flagQtCompleted) {
       data = data.filter(isQtCompleted);
-    }
-
-        if (removeDupByType) {
-      data = dedupByCompanyRootType(data);
     }
 
     return data.sort(
@@ -788,7 +777,6 @@ return data;
     flagNewCpc,
     flagCpcMixed,
     flagQtCompleted,
-    removeDupByType,
   ]);
 
   const chartData = useMemo(
@@ -884,6 +872,15 @@ return data;
 
   // Reset
   const handleReset = () => {
+    // Limpa datas, flags e resultados
+    setStartDate("");
+    setEndDate("");
+    setAutoPeriod(true);
+    setRemoveDupByType(false);
+    setRows([]);
+    setErrorMsg(null);
+    setSelectedBulletin(null);
+    
     setSelCompanies([]);
     setSelTickers([]);
     setOnlyMulti(false);
@@ -1346,15 +1343,6 @@ return data;
               />
               Mostrar Tickers
             </label>
-            <label className="flex items-center gap-1" title="Remove duplicatas por Empresa×TickerRoot×Tipo (mantém o 1º por data)">
-              <input
-                type="checkbox"
-                checked={removeDupByType}
-                onChange={(e) => setRemoveDupByType(e.target.checked)}
-              />
-              Rem. Dupli.
-            </label>
-
 
             {/* CPC flags */}
             <label className="flex items-center gap-1">
