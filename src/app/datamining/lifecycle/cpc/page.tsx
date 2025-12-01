@@ -602,14 +602,15 @@ const kpiBoletins = useMemo(() => {
 
     // CPC flags (New CPC / CPC Mixed)
     if (flagNewCpc || flagCpcMixed) {
-      // Apenas filtra por CPC padrão/misto sem colapsar por root;
-      // a remoção de duplicatas fica a cargo do flag 'Rem. Dupli.' (removeDupByType).
+      // Filtra SOMENTE boletins cujo corpo indica "New Listing - CPC - Shares"
+      // (isCpcByBody). Depois separa em padrão vs. mixed.
       data = data.filter((r) => {
         const pub = (r.ticker ?? "").trim().toUpperCase();
         if (!pub.endsWith(".P")) return false;
-        const pad = isCpcPadrao(r);
-        const mix = isCpcMixed(r);
-        return (flagNewCpc && pad) || (flagCpcMixed && mix);
+        if (!isCpcByBody(r)) return false;
+        const mixed = isCpcMixed(r);
+        const pad = !mixed;
+        return (flagNewCpc && pad) || (flagCpcMixed && mixed);
       });
     }
     // QT Completed flag
@@ -753,14 +754,15 @@ return data;
 
     // CPC flags (New CPC / CPC Mixed)
     if (flagNewCpc || flagCpcMixed) {
-      // Apenas filtra por CPC padrão/misto sem colapsar por root;
-      // a remoção de duplicatas fica a cargo do flag 'Rem. Dupli.' (removeDupByType).
+      // Filtra SOMENTE boletins cujo corpo indica "New Listing - CPC - Shares"
+      // (isCpcByBody). Depois separa em padrão vs. mixed.
       data = data.filter((r) => {
         const pub = (r.ticker ?? "").trim().toUpperCase();
         if (!pub.endsWith(".P")) return false;
-        const pad = isCpcPadrao(r);
-        const mix = isCpcMixed(r);
-        return (flagNewCpc && pad) || (flagCpcMixed && mix);
+        if (!isCpcByBody(r)) return false;
+        const mixed = isCpcMixed(r);
+        const pad = !mixed;
+        return (flagNewCpc && pad) || (flagCpcMixed && mixed);
       });
     }
     // QT Completed flag
