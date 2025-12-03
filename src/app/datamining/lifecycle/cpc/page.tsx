@@ -213,21 +213,22 @@ function isCpc(row: Row): boolean {
   return canon.includes(CPC_CANONICAL);
 }
 function isCpcMixed(row: Row): boolean {
-  const bt = (row.bulletin_type ?? "").toString();
-  const canon = (row.canonical_type ?? row.bulletin_type ?? "").toString();
-  const mixedFlag =
-    typeof (row as unknown as { _mixed?: boolean })._mixed === "boolean"
-      ? (row as unknown as { _mixed?: boolean })._mixed
-      : false;
-  const byClass = (row.canonical_class ?? "")
-    .toLowerCase()
+  if (!isCpc(row)) return false;
+  const c = (row.canonical_class ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .startsWith("mist");
-  return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
+    .trim()
+    .toLowerCase();
+  return c.startsWith("misto");
 }
 function isCpcPadrao(row: Row): boolean {
-  return isCpc(row) && !isCpcMixed(row);
+  if (!isCpc(row)) return false;
+  const c = (row.canonical_class ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  return c.startsWith("unico");
 }
 
 function isQtAny(row: Row): boolean {
@@ -503,7 +504,8 @@ const kpiBoletins = useMemo(() => {
       cpcPad = 0,
       cpcMix = 0,
       outros = 0,
-      qtAny = 0;
+      qtAny = 0,
+      qtCompleted = 0;
   for (const r of kpiRows) {
     const cln = (r.canonical_class ?? "")
       .toLowerCase()
@@ -515,9 +517,10 @@ const kpiBoletins = useMemo(() => {
     if (isCpcNotice) { if (isMixed) cpcMix++; else cpcPad++; }
     if (!isCpcNotice) outros++;
     if (isQtAny(r)) qtAny++;
+    if (isQtCompleted(r)) qtCompleted++;
   }
   const cpcUnifiedTotal = cpcPad + cpcMix;
-  return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny };
+  return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny, qtCompleted };
 }, [kpiRows]);
 
 
@@ -1242,14 +1245,7 @@ return data;
               </div>
             </div>
 
-            {/* Boletins — QT */}
-            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
-              <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny}</div>
-              <div className="text-sm mt-1">Boletins — QT</div>
-            </div>
-
-            {/* BU — CPC (unificado por canonical) */}
-<div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+            {/* BU — CPC (unificado por canonical) */}<div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
   <div className="flex items-baseline gap-2">
     <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcUnifiedTotal}</div>
     <div className="text-sm whitespace-nowrap">BU — CPC</div>
@@ -1261,6 +1257,11 @@ return data;
   </div>
 </div>
           </div>
+
+            {/* Boletins — QT */}<div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny} QT — Total</div>
+<div className="text-sm mt-1">C: {kpiBoletins.qtCompleted} &nbsp;&nbsp; O: {kpiBoletins.qtAny - kpiBoletins.qtCompleted}</div>
+            </div>
 
           {/* DEGRAU 2 — EMPRESAS */}
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
