@@ -19,6 +19,10 @@ const supabase = createClient(
 );
 
 type Row = {
+  // duplicate markers (computed)
+  dup_group_size?: number;
+  dup_rank?: number;
+  dup_is_duplicate?: boolean;
   id: number;
   source_file?: string | null;
   company: string | null;
@@ -105,6 +109,30 @@ function dedupByCompanyRootType(rows: Row[]): Row[] {
     }
   }
   return Array.from(best.values());
+}
+function markDuplicates(rows: Row[]): Row[] {
+  // group by company|ticker_root|type (canonical or bulletin_type)
+  const groups = new Map<string, Row[]>();
+  for (const r of rows) {
+    const company = (r.company ?? "").trim();
+    const root = normalizeTicker(r.ticker);
+    const tipo = (r.canonical_type ?? r.bulletin_type ?? "").trim();
+    if (!company || !root || !tipo) continue;
+    const k = `${company}|${root}|${tipo}`;
+    const arr = groups.get(k) ?? [];
+    arr.push(r);
+    groups.set(k, arr);
+  }
+  // sort each group by date asc and annotate
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => toDateNum(a.bulletin_date) - toDateNum(b.bulletin_date));
+    arr.forEach((r, i) => {
+      r.dup_group_size = arr.length;
+      r.dup_rank = i + 1;
+      r.dup_is_duplicate = arr.length > 1 && i >= 1;
+    });
+  }
+  return rows;
 }
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map((r) => {
@@ -226,10 +254,6 @@ function isCpcMixed(row: Row): boolean {
     .startsWith("mist");
   return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
 }
-function isCpcPadrao(row: Row): boolean {
-  return isCpc(row) && !isCpcMixed(row);
-}
-
 function isQtAny(row: Row): boolean {
   const t = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
   return t.includes(QT_ANY);
@@ -278,6 +302,7 @@ export default function Page() {
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
   // Remover duplicatas por Tipo
   const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
+  const [viewDupOnly, setViewDupOnly] = useState<boolean>(false);
 
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
@@ -552,6 +577,17 @@ const kpiBoletins = useMemo(() => {
     return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size, eq1_unico, eq1_misto };
   }, [kpiRows]);
 
+  const kpiDupCount = useMemo(() => {
+    // compute duplicates on the entire window after basic filtering (company/ticker agnostic)
+    const base = markDuplicates(rowsInWindow);
+    let dup = 0;
+    const seen = new Set<Row>();
+    for (const r of base) {
+      if (r.dup_group_size && r.dup_group_size > 1 && r.dup_is_duplicate) dup += 1;
+    }
+    return dup;
+  }, [rowsInWindow]);
+
   // -------- Tabela base (com flags espelhadas) --------
   const rowsInWindowFiltered = useMemo(() => {
     // Base por período + Company/Ticker
@@ -564,10 +600,16 @@ const kpiBoletins = useMemo(() => {
       return true;
     });
 
+    // Marcação de duplicatas por (Empresa×TickerRoot×Tipo)
+    data = markDuplicates(data);
+
     // flags (=1, >=2, first/last)
     const flagsActive = onlyMulti || onlySingle || onlyFirst || onlyLast;
     if (flagsActive) {
-      const counts = new Map<string, number>();
+      if (viewDupOnly) {
+      data = markDuplicates(data).filter((r) => r.dup_group_size && (r.dup_group_size ?? 0) > 1);
+    }
+    const counts = new Map<string, number>();
       for (const r of data) {
         const root = normalizeTicker(r.ticker);
         if (!root) continue;
@@ -620,6 +662,9 @@ const kpiBoletins = useMemo(() => {
 
     
     // Remover duplicatas por tipo (opcional)
+    if (viewDupOnly) {
+      data = data.filter((r) => r.dup_group_size && (r.dup_group_size ?? 0) > 1);
+    }
     if (removeDupByType) {
       data = dedupByCompanyRootType(data);
     }
@@ -720,6 +765,9 @@ return data;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
       return true;
     });
+    if (viewDupOnly) {
+      data = markDuplicates(data).filter((r) => r.dup_group_size && (r.dup_group_size ?? 0) > 1);
+    }
     const counts = new Map<string, number>();
     for (const r of data) {
       const root = normalizeTicker(r.ticker);
@@ -770,7 +818,10 @@ return data;
       data = data.filter(isQtCompleted);
     }
 
-        if (removeDupByType) {
+        if (viewDupOnly) {
+      data = data.filter((r) => r.dup_group_size && (r.dup_group_size ?? 0) > 1);
+    }
+    if (removeDupByType) {
       data = dedupByCompanyRootType(data);
     }
 
@@ -1243,9 +1294,16 @@ return data;
             </div>
 
             {/* Boletins — QT */}
-            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
-              <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny}</div>
-              <div className="text-sm mt-1">Boletins — QT</div>
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between min-h-[88px] ml-auto">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny}</div>
+                <div className="text-sm whitespace-nowrap">QT — Total</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>C: {kpiBoletins.qtCompleted}</span>
+                <span>O: {Math.max(0, kpiBoletins.qtAny - kpiBoletins.qtCompleted)}</span>
+              </div>
             </div>
 
             {/* BU — CPC (unificado por canonical) */}
@@ -1294,6 +1352,12 @@ return data;
             <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
               <div className="text-2xl font-semibold tracking-tight">{kpiEmpresas.qtCompletedCompanies}</div>
               <div className="text-sm mt-1">Empresas — QT (completed)</div>
+            </div>
+
+            {/* Eventos duplicados */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-center min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiDupCount}</div>
+              <div className="text-sm mt-1">Eventos duplicados</div>
             </div>
           </div>
         </div>
@@ -1362,6 +1426,14 @@ return data;
                 onChange={(e) => setRemoveDupByType(e.target.checked)}
               />
               Rem. Dupli.
+            </label>
+            <label className="flex items-center gap-1" title="Visualizar somente grupos com duplicatas (inclui original e repetições)">
+              <input
+                type="checkbox"
+                checked={viewDupOnly}
+                onChange={(e) => setViewDupOnly(e.target.checked)}
+              />
+              ver dupli.
             </label>
 
 
