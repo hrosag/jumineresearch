@@ -106,6 +106,34 @@ function dedupByCompanyRootType(rows: Row[]): Row[] {
   }
   return Array.from(best.values());
 }
+function markDuplicates(rows: Row[]) {
+  // returns rows augmented with dup metadata
+  const groups = new Map<string, Row[]>();
+  for (const r of rows) {
+    const company = (r.company ?? "").trim();
+    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+    if (!company || !root || !tipo) continue;
+    const k = `${company}|${root}|${tipo}`;
+    const arr = groups.get(k) || [];
+    arr.push(r);
+    groups.set(k, arr);
+  }
+  const marked = rows.map((r) => {
+    const company = (r.company ?? "").trim();
+    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+    const k = `${company}|${root}|${tipo}`;
+    const arr = groups.get(k) || [];
+    if (arr.length <= 1) return Object.assign({}, r, { dup_group_size: 1, dup_rank: 1, dup_is_duplicate: false });
+    // sort stable by date to compute rank
+    const sorted = [...arr].sort((a,b)=>toDateNum(a.bulletin_date)-toDateNum(b.bulletin_date));
+    const rank = Math.max(1, sorted.findIndex(x => x.composite_key === r.composite_key) + 1);
+    return Object.assign({}, r, { dup_group_size: arr.length, dup_rank: rank, dup_is_duplicate: rank > 1 });
+  });
+  return { marked, groups };
+}
+
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map((r) => {
     if (r.body_text || !r.composite_key) return r;
@@ -517,7 +545,9 @@ const kpiBoletins = useMemo(() => {
     if (isQtAny(r)) qtAny++;
   }
   const cpcUnifiedTotal = cpcPad + cpcMix;
-  return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny };
+  const qtCompleted = kpiRows.filter(r=>isQtCompleted(r)).length;
+  const qtOpen = Math.max(0, qtAny - qtCompleted);
+  return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny, qtCompleted, qtOpen };
 }, [kpiRows]);
 
 
@@ -550,7 +580,23 @@ const kpiBoletins = useMemo(() => {
       for (const r of arr) if (isQtCompleted(r)) qtCompanies.add(company);
     }
     return { total, eq1, ge2, qtCompletedCompanies: qtCompanies.size, eq1_unico, eq1_misto };
+  
+  // KPI — eventos duplicados (por company|ticker_root|tipo)
+  const kpiDup = useMemo(() => {
+    const byKey = new Map<string, number>();
+    for (const r of kpiRows) {
+      const company = (r.company ?? "").trim();
+      const root = normalizeTicker(r.ticker);
+      const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+      if (!company || !root || !tipo) continue;
+      const k = `${company}|${root}|${tipo}`;
+      byKey.set(k, (byKey.get(k) ?? 0) + 1);
+    }
+    let dupEvents = 0;
+    for (const n of byKey.values()) if (n > 1) dupEvents += (n - 1);
+    return { dupEvents };
   }, [kpiRows]);
+}, [kpiRows]);
 
   // -------- Tabela base (com flags espelhadas) --------
   const rowsInWindowFiltered = useMemo(() => {
@@ -619,6 +665,12 @@ const kpiBoletins = useMemo(() => {
     }
 
     
+    // Duplicatas — visualização
+    if (viewDupOnly) {
+      const m = markDuplicates(data);
+      data = m.marked.filter((r: any) => (r.dup_group_size ?? 1) > 1);
+    }
+
     // Remover duplicatas por tipo (opcional)
     if (removeDupByType) {
       data = dedupByCompanyRootType(data);
@@ -636,6 +688,7 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
+    viewDupOnly,
   ]);
 
   const tC = useDeferredValue(dfCompany);
@@ -1364,6 +1417,10 @@ return data;
               Rem. Dupli.
             </label>
 
+            <label className="flex items-center gap-1" title="Ver apenas grupos com duplicatas (mantém original e repetições)">
+              <input type="checkbox" checked={viewDupOnly} onChange={(e)=>setViewDupOnly(e.target.checked)} />
+              ver dupli.
+            </label>
 
             {/* CPC flags */}
             <label className="flex items-center gap-1">
