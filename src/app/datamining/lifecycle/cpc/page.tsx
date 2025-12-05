@@ -106,30 +106,6 @@ function dedupByCompanyRootType(rows: Row[]): Row[] {
   }
   return Array.from(best.values());
 }
-function filterOnlyDupByCompanyRootType(rows: Row[]): Row[] {
-  const counts = new Map<string, number>();
-
-  // Conta quantos registros existem por (Empresa|TickerRoot|Tipo)
-  for (const r of rows) {
-    const company = (r.company ?? "").trim();
-    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
-    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
-    if (!company || !root || !tipo) continue;
-    const k = `${company}|${root}|${tipo}`;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
-
-  // Mantém apenas linhas que têm 2+ ocorrências no mesmo grupo
-  return rows.filter((r) => {
-    const company = (r.company ?? "").trim();
-    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
-    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
-    if (!company || !root || !tipo) return false;
-    const k = `${company}|${root}|${tipo}`;
-    return (counts.get(k) ?? 0) >= 2;
-  });
-}
-
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map((r) => {
     if (r.body_text || !r.composite_key) return r;
@@ -236,38 +212,22 @@ function isCpc(row: Row): boolean {
   const canon = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
   return canon.includes(CPC_CANONICAL);
 }
-function getCanonicalClass(row: Row): string {
-  return (row.canonical_class ?? "").toString().trim().toLowerCase();
-}
-
 function isCpcMixed(row: Row): boolean {
-  if (!isCpc(row)) return false;
-
-  const cls = getCanonicalClass(row);
-  // Regra "oficial" pela view
-  if (cls === "misto") return true;
-  if (cls === "unico") return false;
-
-  // Fallback heurístico para dados legados / sem classificação
   const bt = (row.bulletin_type ?? "").toString();
   const canon = (row.canonical_type ?? row.bulletin_type ?? "").toString();
   const mixedFlag =
     typeof (row as unknown as { _mixed?: boolean })._mixed === "boolean"
       ? (row as unknown as { _mixed?: boolean })._mixed
       : false;
-
-  return mixedFlag || bt.includes(",") || canon.includes(",");
+  const byClass = (row.canonical_class ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .startsWith("mist");
+  return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
 }
-
 function isCpcPadrao(row: Row): boolean {
-  if (!isCpc(row)) return false;
-
-  const cls = getCanonicalClass(row);
-  if (cls === "unico") return true;
-  if (cls === "misto") return false;
-
-  // Fallback: considera padrão quando não for classificado como misto
-  return !isCpcMixed(row);
+  return isCpc(row) && !isCpcMixed(row);
 }
 
 function isQtAny(row: Row): boolean {
@@ -316,11 +276,11 @@ export default function Page() {
   const [flagCpcMixed, setFlagCpcMixed] = useState(false);
   // QT Completed
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
-  // Remover / filtrar duplicatas por Tipo
+  // Remover duplicatas por Tipo
   const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
-  const [onlyDupByType, setOnlyDupByType] = useState<boolean>(false);
 
-   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
+
+  const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
   const [fTicker, setFTicker] = useState("");
@@ -535,40 +495,69 @@ export default function Page() {
   }, [companyOpts, tickerOpts]);
 
   // -------- KPIs Globais --------
-  
-const kpiBoletins = useMemo(() => {
-  const total = kpiRows.length;
-  let unico = 0,
-    misto = 0,
-    cpcPad = 0,
-    cpcMix = 0,
-    outros = 0,
-    qtAny = 0;
 
-  for (const r of kpiRows) {
-    const cls = getCanonicalClass(r);
-    const isMixed =
-      cls === "misto" ||
-      (cls === "" && isCpcMixed(r)); // fallback para dados legados / sem classificação
-
-    const isCpcNotice = isCpc(r);
-
-    if (isMixed) misto++;
-    else unico++;
-
-    if (isCpcNotice) {
-      if (isMixed) cpcMix++;
-      else cpcPad++;
-    } else {
-      outros++;
+  const kpiBoletins = useMemo(() => {
+    const total = kpiRows.length;
+    let unico = 0,
+      misto = 0,
+      cpcPad = 0,
+      cpcMix = 0,
+      outros = 0,
+      qtAny = 0,
+      qtCompleted = 0;
+    for (const r of kpiRows) {
+      const cln = (r.canonical_class ?? "").toLowerCase();
+      const isMixed = cln.startsWith("mist") || isCpcMixed(r);
+      const isCpcNotice = isCpc(r);
+      if (!isMixed) unico++;
+      else misto++;
+      if (isCpcNotice) {
+        if (isMixed) cpcMix++;
+        else cpcPad++;
+      }
+      if (!isCpcNotice) outros++;
+      if (isQtAny(r)) {
+        qtAny++;
+        if (isQtCompleted(r)) qtCompleted++;
+      }
     }
+    const cpcUnifiedTotal = cpcPad + cpcMix;
+    const qtOther = qtAny - qtCompleted;
+    return {
+      total,
+      unico,
+      misto,
+      cpcPad,
+      cpcMix,
+      cpcUnifiedTotal,
+      outros,
+      qtAny,
+      qtCompleted,
+      qtOther,
+    };
+  }, [kpiRows]);
 
-    if (isQtAny(r)) qtAny++;
-  }
+  const kpiDuplicados = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rowsInWindow) {
+      const company = (r.company ?? "").trim();
+      const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+      const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+      if (!company || !root || !tipo) continue;
+      const k = `${company}|${root}|${tipo}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    let groups = 0;
+    let dupEvents = 0;
+    for (const c of counts.values()) {
+      if (c >= 2) {
+        groups++;
+        dupEvents += c - 1;
+      }
+    }
+    return { groups, dupEvents };
+  }, [rowsInWindow]);
 
-  const cpcUnifiedTotal = cpcPad + cpcMix;
-  return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny };
-}, [kpiRows]);
 
 
   const kpiEmpresas = useMemo(() => {
@@ -592,11 +581,7 @@ const kpiBoletins = useMemo(() => {
       if (arr.length === 1) {
         eq1++;
         const only = arr[0];
-        const cls = getCanonicalClass(only);
-        const isMixed =
-          cls === "misto" ||
-          (cls === "" && isCpcMixed(only)); // fallback para dados legados / sem classificação
-        if (isMixed) eq1_misto++;
+        if (isCpcMixed(only)) eq1_misto++;
         else eq1_unico++;
       } else if (arr.length >= 2) {
         ge2++;
@@ -673,11 +658,9 @@ const kpiBoletins = useMemo(() => {
     }
 
     
-    // Remover / mostrar somente duplicatas por tipo (opcional)
+    // Remover duplicatas por tipo (opcional)
     if (removeDupByType) {
       data = dedupByCompanyRootType(data);
-    } else if (onlyDupByType) {
-      data = filterOnlyDupByCompanyRootType(data);
     }
 return data;
   }, [
@@ -692,7 +675,6 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
-    onlyDupByType,
   ]);
 
   const tC = useDeferredValue(dfCompany);
@@ -827,10 +809,8 @@ return data;
       data = data.filter(isQtCompleted);
     }
 
-    if (removeDupByType) {
+        if (removeDupByType) {
       data = dedupByCompanyRootType(data);
-    } else if (onlyDupByType) {
-      data = filterOnlyDupByCompanyRootType(data);
     }
 
     return data.sort(
@@ -848,7 +828,6 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
-    onlyDupByType,
   ]);
 
   const chartData = useMemo(
@@ -1290,7 +1269,7 @@ return data;
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
 
             {/* BU — Total (com U/M) */}
-            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between min-h-[88px]">
               <div className="flex items-baseline gap-2">
                 <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.total}</div>
                 <div className="text-sm whitespace-nowrap">BU — Total</div>
@@ -1302,26 +1281,42 @@ return data;
               </div>
             </div>
 
-            {/* Boletins — QT */}
-            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-center min-h-[88px]">
-              <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny}</div>
-              <div className="text-sm mt-1">Boletins — QT</div>
+            {/* BU — CPC (unificado por canonical) */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcUnifiedTotal}</div>
+                <div className="text-sm whitespace-nowrap">BU — CPC</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>U: {kpiBoletins.cpcPad}</span>
+                <span>M: {kpiBoletins.cpcMix}</span>
+              </div>
             </div>
 
-            {/* BU — CPC (unificado por canonical) */}
-<div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow transition-shadow flex flex-col justify-between min-h-[88px]">
-  <div className="flex items-baseline gap-2">
-    <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.cpcUnifiedTotal}</div>
-    <div className="text-sm whitespace-nowrap">BU — CPC</div>
-  </div>
-  <div className="h-px bg-black/30 my-1" />
-  <div className="flex items-center gap-6 text-sm">
-    <span>U: {kpiBoletins.cpcPad}</span>
-    <span>M: {kpiBoletins.cpcMix}</span>
-  </div>
-</div>
-          </div>
+            {/* Boletins — QT */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="flex items-baseline gap-2">
+                <div className="text-2xl font-semibold tracking-tight">{kpiBoletins.qtAny}</div>
+                <div className="text-sm whitespace-nowrap">QT — Total</div>
+              </div>
+              <div className="h-px bg-black/30 my-1" />
+              <div className="flex items-center gap-6 text-sm">
+                <span>C: {kpiBoletins.qtCompleted}</span>
+                <span>O: {kpiBoletins.qtOther}</span>
+              </div>
+            </div>
 
+            {/* Eventos duplicados no dataset */}
+            <div className="rounded-lg border p-3 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between min-h-[88px]">
+              <div className="text-2xl font-semibold tracking-tight">{kpiDuplicados.dupEvents}</div>
+              <div className="text-sm mt-1">Eventos — duplicados</div>
+              <div className="text-xs mt-1 text-black/70">
+                Grupos: {kpiDuplicados.groups}
+              </div>
+            </div>
+
+          </div>
           {/* DEGRAU 2 — EMPRESAS */}
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
 
@@ -1422,14 +1417,6 @@ return data;
                 onChange={(e) => setRemoveDupByType(e.target.checked)}
               />
               Rem. Dupli.
-            </label>
-            <label className="flex items-center gap-1" title="Mostra apenas linhas que têm duplicata por Empresa×TickerRoot×Tipo">
-              <input
-                type="checkbox"
-                checked={onlyDupByType}
-                onChange={(e) => setOnlyDupByType(e.target.checked)}
-              />
-              Só Dupli.
             </label>
 
 
