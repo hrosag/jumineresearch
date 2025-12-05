@@ -63,6 +63,7 @@ export default function Sidebar() {
         {/* Links principais */}
         {[
           { href: "/", icon: LayoutDashboard, label: "Home" },
+          { href: "/overview", icon: FlaskConical, label: "Overview" },
           { href: "/database", icon: Database, label: "Database" },
           { href: "/datamining", icon: Pickaxe, label: "Data Mining" },
           { href: "/warnings", icon: AlertTriangle, label: "Database Warning" },
