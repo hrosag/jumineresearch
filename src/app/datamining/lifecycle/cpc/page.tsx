@@ -106,6 +106,31 @@ function dedupByCompanyRootType(rows: Row[]): Row[] {
   }
   return Array.from(best.values());
 }
+
+function filterOnlyDupByCompanyRootType(rows: Row[]): Row[] {
+  const counts = new Map<string, number>();
+
+  // Conta quantos registros existem por (Empresa|TickerRoot|Tipo)
+  for (const r of rows) {
+    const company = (r.company ?? "").trim();
+    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+    if (!company || !root || !tipo) continue;
+    const k = `${company}|${root}|${tipo}`;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+
+  // Mantém apenas registros que tenham pelo menos 2 ocorrências nesse grupo
+  return rows.filter((r) => {
+    const company = (r.company ?? "").trim();
+    const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+    const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+    if (!company || !root || !tipo) return false;
+    const k = `${company}|${root}|${tipo}`;
+    return (counts.get(k) ?? 0) >= 2;
+  });
+}
+
 function withBodyTextFilled(rows: Row[], map: Map<string, string>) {
   return rows.map((r) => {
     if (r.body_text || !r.composite_key) return r;
@@ -278,6 +303,8 @@ export default function Page() {
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
   // Remover duplicatas por Tipo
   const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
+  // Mostrar apenas linhas que possuem duplicata por Tipo
+  const [onlyDupByType, setOnlyDupByType] = useState<boolean>(false);
 
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
@@ -618,11 +645,13 @@ const kpiBoletins = useMemo(() => {
       data = data.filter(isQtCompleted);
     }
 
-    
-    // Remover duplicatas por tipo (opcional)
+    // Remover / filtrar duplicatas por tipo (opcional)
     if (removeDupByType) {
       data = dedupByCompanyRootType(data);
+    } else if (onlyDupByType) {
+      data = filterOnlyDupByCompanyRootType(data);
     }
+
 return data;
   }, [
     rowsInWindow,
@@ -636,6 +665,7 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
+    onlyDupByType,
   ]);
 
   const tC = useDeferredValue(dfCompany);
@@ -770,8 +800,11 @@ return data;
       data = data.filter(isQtCompleted);
     }
 
-        if (removeDupByType) {
+    // Remover / filtrar duplicatas por tipo (opcional)
+    if (removeDupByType) {
       data = dedupByCompanyRootType(data);
+    } else if (onlyDupByType) {
+      data = filterOnlyDupByCompanyRootType(data);
     }
 
     return data.sort(
@@ -789,6 +822,7 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
+    onlyDupByType,
   ]);
 
   const chartData = useMemo(
@@ -1362,6 +1396,18 @@ return data;
                 onChange={(e) => setRemoveDupByType(e.target.checked)}
               />
               Rem. Dupli.
+            </label>
+
+            <label
+              className="flex items-center gap-1"
+              title="Mostra apenas linhas que têm duplicata por Empresa×TickerRoot×Tipo"
+            >
+              <input
+                type="checkbox"
+                checked={onlyDupByType}
+                onChange={(e) => setOnlyDupByType(e.target.checked)}
+              />
+              Só Dupli.
             </label>
 
 
