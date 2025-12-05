@@ -106,7 +106,6 @@ function dedupByCompanyRootType(rows: Row[]): Row[] {
   }
   return Array.from(best.values());
 }
-
 function filterOnlyDupByCompanyRootType(rows: Row[]): Row[] {
   const counts = new Map<string, number>();
 
@@ -120,7 +119,7 @@ function filterOnlyDupByCompanyRootType(rows: Row[]): Row[] {
     counts.set(k, (counts.get(k) ?? 0) + 1);
   }
 
-  // Mantém apenas registros que tenham pelo menos 2 ocorrências nesse grupo
+  // Mantém apenas linhas que têm 2+ ocorrências no mesmo grupo
   return rows.filter((r) => {
     const company = (r.company ?? "").trim();
     const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
@@ -237,22 +236,38 @@ function isCpc(row: Row): boolean {
   const canon = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();
   return canon.includes(CPC_CANONICAL);
 }
+function getCanonicalClass(row: Row): string {
+  return (row.canonical_class ?? "").toString().trim().toLowerCase();
+}
+
 function isCpcMixed(row: Row): boolean {
+  if (!isCpc(row)) return false;
+
+  const cls = getCanonicalClass(row);
+  // Regra "oficial" pela view
+  if (cls === "misto") return true;
+  if (cls === "unico") return false;
+
+  // Fallback heurístico para dados legados / sem classificação
   const bt = (row.bulletin_type ?? "").toString();
   const canon = (row.canonical_type ?? row.bulletin_type ?? "").toString();
   const mixedFlag =
     typeof (row as unknown as { _mixed?: boolean })._mixed === "boolean"
       ? (row as unknown as { _mixed?: boolean })._mixed
       : false;
-  const byClass = (row.canonical_class ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .startsWith("mist");
-  return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
+
+  return mixedFlag || bt.includes(",") || canon.includes(",");
 }
+
 function isCpcPadrao(row: Row): boolean {
-  return isCpc(row) && !isCpcMixed(row);
+  if (!isCpc(row)) return false;
+
+  const cls = getCanonicalClass(row);
+  if (cls === "unico") return true;
+  if (cls === "misto") return false;
+
+  // Fallback: considera padrão quando não for classificado como misto
+  return !isCpcMixed(row);
 }
 
 function isQtAny(row: Row): boolean {
@@ -301,13 +316,11 @@ export default function Page() {
   const [flagCpcMixed, setFlagCpcMixed] = useState(false);
   // QT Completed
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
-  // Remover duplicatas por Tipo
+  // Remover / filtrar duplicatas por Tipo
   const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
-  // Mostrar apenas linhas que possuem duplicata por Tipo
   const [onlyDupByType, setOnlyDupByType] = useState<boolean>(false);
 
-
-  const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
+   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [fCompany, setFCompany] = useState("");
   const [fTicker, setFTicker] = useState("");
@@ -526,23 +539,33 @@ export default function Page() {
 const kpiBoletins = useMemo(() => {
   const total = kpiRows.length;
   let unico = 0,
-      misto = 0,
-      cpcPad = 0,
-      cpcMix = 0,
-      outros = 0,
-      qtAny = 0;
+    misto = 0,
+    cpcPad = 0,
+    cpcMix = 0,
+    outros = 0,
+    qtAny = 0;
+
   for (const r of kpiRows) {
-    const cln = (r.canonical_class ?? "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-    const isMixed = cln.startsWith("mist") || isCpcMixed(r);
+    const cls = getCanonicalClass(r);
+    const isMixed =
+      cls === "misto" ||
+      (cls === "" && isCpcMixed(r)); // fallback para dados legados / sem classificação
+
     const isCpcNotice = isCpc(r);
-    if (!isMixed) unico++; else misto++;
-    if (isCpcNotice) { if (isMixed) cpcMix++; else cpcPad++; }
-    if (!isCpcNotice) outros++;
+
+    if (isMixed) misto++;
+    else unico++;
+
+    if (isCpcNotice) {
+      if (isMixed) cpcMix++;
+      else cpcPad++;
+    } else {
+      outros++;
+    }
+
     if (isQtAny(r)) qtAny++;
   }
+
   const cpcUnifiedTotal = cpcPad + cpcMix;
   return { total, unico, misto, cpcPad, cpcMix, cpcUnifiedTotal, outros, qtAny };
 }, [kpiRows]);
@@ -569,7 +592,11 @@ const kpiBoletins = useMemo(() => {
       if (arr.length === 1) {
         eq1++;
         const only = arr[0];
-        if (isCpcMixed(only)) eq1_misto++;
+        const cls = getCanonicalClass(only);
+        const isMixed =
+          cls === "misto" ||
+          (cls === "" && isCpcMixed(only)); // fallback para dados legados / sem classificação
+        if (isMixed) eq1_misto++;
         else eq1_unico++;
       } else if (arr.length >= 2) {
         ge2++;
@@ -645,13 +672,13 @@ const kpiBoletins = useMemo(() => {
       data = data.filter(isQtCompleted);
     }
 
-    // Remover / filtrar duplicatas por tipo (opcional)
+    
+    // Remover / mostrar somente duplicatas por tipo (opcional)
     if (removeDupByType) {
       data = dedupByCompanyRootType(data);
     } else if (onlyDupByType) {
       data = filterOnlyDupByCompanyRootType(data);
     }
-
 return data;
   }, [
     rowsInWindow,
@@ -800,7 +827,6 @@ return data;
       data = data.filter(isQtCompleted);
     }
 
-    // Remover / filtrar duplicatas por tipo (opcional)
     if (removeDupByType) {
       data = dedupByCompanyRootType(data);
     } else if (onlyDupByType) {
@@ -1397,11 +1423,7 @@ return data;
               />
               Rem. Dupli.
             </label>
-
-            <label
-              className="flex items-center gap-1"
-              title="Mostra apenas linhas que têm duplicata por Empresa×TickerRoot×Tipo"
-            >
+            <label className="flex items-center gap-1" title="Mostra apenas linhas que têm duplicata por Empresa×TickerRoot×Tipo">
               <input
                 type="checkbox"
                 checked={onlyDupByType}
