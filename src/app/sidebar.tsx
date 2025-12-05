@@ -66,6 +66,7 @@ export default function Sidebar() {
           { href: "/overview", icon: FlaskConical, label: "Overview" },
           { href: "/database", icon: Database, label: "Database" },
           { href: "/datamining", icon: Pickaxe, label: "Data Mining" },
+          { href: "/datamart", icon: Database, label: "Data Mart" },
           { href: "/warnings", icon: AlertTriangle, label: "Database Warning" },
           { href: "/jrpedia", icon: BookOpenText, label: "JRpedia" },
         ].map(({ href, icon: Icon, label }) => {
