@@ -3,9 +3,9 @@
 export default function CPCUniversePage() {
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Capital Pool Company&apos;s</h1>
+      <h1 className="text-2xl font-bold">Capital Pool Company</h1>
       <p className="text-gray-600">
-        Data Mart dedicado ao universo de Capital Pool Company&apos;s (CPC).
+        Data Mart dedicado ao universo de Capital Pool Company (CPC).
         Esta tela deve consolidar resultados de data mining em um nível
         empresa/ticker, funcionando como um &quot;data mart&quot; entre o
         Data Mining bruto e os painéis de Overview.
