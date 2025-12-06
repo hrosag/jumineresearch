@@ -226,9 +226,6 @@ function isCpcMixed(row: Row): boolean {
     .startsWith("mist");
   return mixedFlag || byClass || bt.includes(",") || canon.includes(",");
 }
-function isCpcPadrao(row: Row): boolean {
-  return isCpc(row) && !isCpcMixed(row);
-}
 
 function isQtAny(row: Row): boolean {
   const t = (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase();

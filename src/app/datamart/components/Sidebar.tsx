@@ -35,7 +35,7 @@ export default function DataMartSidebar({
         </button>
       </div>
 
-      {/* Único item: Capital Pool Company's */}
+      {/* Único item: Capital Pool Company */}
       <nav className="flex-1 space-y-2 overflow-auto bg-[#1e2a38] px-2 py-2">
         <button
           onClick={() => setSelectedReport("cpc-universe")}
@@ -45,10 +45,10 @@ export default function DataMartSidebar({
               ? "bg-yellow-500 text-black"
               : "text-slate-200 hover:bg-slate-800")
           }
-          title="Capital Pool Company's"
+          title="Capital Pool Company"
         >
           {/* Texto resumido quando colapsado */}
-          {collapsed ? "CPC" : "Capital Pool Company&apos;s"}
+          {collapsed ? "CPC" : "Capital Pool Company"}
         </button>
       </nav>
     </div>
