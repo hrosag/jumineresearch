@@ -275,7 +275,8 @@ export default function Page() {
   const [flagQtCompleted, setFlagQtCompleted] = useState(false);
   // Remover duplicatas por Tipo
   const [removeDupByType, setRemoveDupByType] = useState<boolean>(false);
-
+  // Ver apenas duplicados por Empresa×TickerRoot×Tipo
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(false);
 
   const [sortKey, setSortKey] = useState<SortKey>("bulletin_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -600,6 +601,27 @@ export default function Page() {
       return true;
     });
 
+    // Ver apenas grupos duplicados por Empresa×TickerRoot×Tipo
+    if (showDuplicatesOnly) {
+      const counts = new Map<string, number>();
+      for (const r of data) {
+        const company = (r.company ?? "").trim();
+        const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+        const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+        if (!company || !root || !tipo) continue;
+        const k = `${company}|${root}|${tipo}`;
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      data = data.filter((r) => {
+        const company = (r.company ?? "").trim();
+        const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+        const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+        if (!company || !root || !tipo) return false;
+        const k = `${company}|${root}|${tipo}`;
+        return (counts.get(k) ?? 0) >= 2;
+      });
+    }
+
     // flags (=1, >=2, first/last)
     const flagsActive = onlyMulti || onlySingle || onlyFirst || onlyLast;
     if (flagsActive) {
@@ -672,6 +694,7 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
+    showDuplicatesOnly,
   ]);
 
   const tC = useDeferredValue(dfCompany);
@@ -756,6 +779,28 @@ return data;
       if (tset.size && (!tRoot || !tset.has(tRoot))) return false;
       return true;
     });
+
+    // Ver apenas grupos duplicados por Empresa×TickerRoot×Tipo
+    if (showDuplicatesOnly) {
+      const countsDup = new Map<string, number>();
+      for (const r of data) {
+        const company = (r.company ?? "").trim();
+        const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+        const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+        if (!company || !root || !tipo) continue;
+        const k = `${company}|${root}|${tipo}`;
+        countsDup.set(k, (countsDup.get(k) ?? 0) + 1);
+      }
+      data = data.filter((r) => {
+        const company = (r.company ?? "").trim();
+        const root = normalizeTicker((r.ticker ?? "").trim().toUpperCase());
+        const tipo = ((r.canonical_type ?? r.bulletin_type) ?? "").trim();
+        if (!company || !root || !tipo) return false;
+        const k = `${company}|${root}|${tipo}`;
+        return (countsDup.get(k) ?? 0) >= 2;
+      });
+    }
+
     const counts = new Map<string, number>();
     for (const r of data) {
       const root = normalizeTicker(r.ticker);
@@ -825,6 +870,7 @@ return data;
     flagCpcMixed,
     flagQtCompleted,
     removeDupByType,
+    showDuplicatesOnly,
   ]);
 
   const chartData = useMemo(
@@ -1411,9 +1457,23 @@ return data;
               <input
                 type="checkbox"
                 checked={removeDupByType}
-                onChange={(e) => setRemoveDupByType(e.target.checked)}
+                onChange={(e) => {
+                  setRemoveDupByType(e.target.checked);
+                  if (e.target.checked) setShowDuplicatesOnly(false);
+                }}
               />
               Rem. Dupli.
+            </label>
+            <label className="flex items-center gap-1" title="Ver apenas eventos duplicados por Empresa×TickerRoot×Tipo">
+              <input
+                type="checkbox"
+                checked={showDuplicatesOnly}
+                onChange={(e) => {
+                  setShowDuplicatesOnly(e.target.checked);
+                  if (e.target.checked) setRemoveDupByType(false);
+                }}
+              />
+              Ver dupl.
             </label>
 
 
