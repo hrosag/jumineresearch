@@ -293,7 +293,7 @@ def upsert_cpc_birth(rows: List[Dict[str, Any]]) -> None:
 
 
 def mark_done(ids: List[int]) -> None:
-    url = f"{SUPABASE_URL}/rest/v1/all_data}"
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
