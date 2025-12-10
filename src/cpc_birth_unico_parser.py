@@ -7,8 +7,8 @@ from typing import Iterable, List, Dict, Any
 import requests
 
 # 1) Constantes / config
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 VIEW_NAME = "vw_bulletins_with_canonical"
 TABLE_NAME = "cpc_birth"
 PARSE_VERSION = "cpc_birth_unico_v1"
@@ -257,44 +257,23 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     return normalize_row(row)
 
 
-def fetch_records_from_view() -> List[Dict[str, Any]]:
-    """
-    Busca na view vw_bulletins_with_canonical:
-      - canonical_type = 'NEW LISTING-CPC-SHARES'
-      - canonical_class = 'Unico'
-      - parser_status != 'done' (ou parser_status is null)
-    Retorna lista de dicts com os campos necessários.
-    """
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY não configurados")
-
+def fetch_marked_rows():
     url = f"{SUPABASE_URL}/rest/v1/{VIEW_NAME}"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
-
     params = {
-        "select": "company_name:company,ticker,composite_key,canonical_type,canonical_class,bulletin_date,tier,body_text,parser_status",
-        "canonical_type": "eq.NEW LISTING-CPC-SHARES",
-        "canonical_class": "eq.Unico",
-        "parser_status": "neq.done",
+        "select": "id,company,ticker,composite_key,canonical_type,canonical_class,bulletin_date,tier,body_text,parser_profile,parser_status",
+        "parser_profile": "eq.cpc_birth",
+        "parser_status": "eq.ready",
     }
-
     resp = requests.get(url, headers=headers, params=params, timeout=60)
     resp.raise_for_status()
     return resp.json()
 
 
 def upsert_cpc_birth(rows: List[Dict[str, Any]]) -> None:
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        print("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY não configurados; pulando upsert.")
-        return
-
-    if not rows:
-        print("Nenhuma linha para upsert.")
-        return
-
     url = f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}"
     headers = {
         "apikey": SUPABASE_KEY,
@@ -302,27 +281,48 @@ def upsert_cpc_birth(rows: List[Dict[str, Any]]) -> None:
         "Content-Type": "application/json",
         "Prefer": "resolution=merge-duplicates",
     }
+    resp = requests.post(url, headers=headers, data=json.dumps(rows), timeout=60)
+    resp.raise_for_status()
 
-    batch_size = 100
-    for i in range(0, len(rows), batch_size):
-        chunk = rows[i:i + batch_size]
-        resp = requests.post(url, headers=headers, data=json.dumps(chunk), timeout=60)
+
+def mark_done(ids: List[int]) -> None:
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    for id_ in ids:
+        payload = {
+            "parser_status": "done",
+            "parser_parsed_at": datetime.utcnow().isoformat(),
+            "parse_version": PARSE_VERSION,
+        }
+        resp = requests.patch(
+            f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60
+        )
         resp.raise_for_status()
-        print(f"Upsert cpc_birth {i}–{i + len(chunk) - 1} OK")
 
 
 def main() -> None:
-    records = fetch_records_from_view()
-    print(f"{len(records)} registros de entrada (CPC birth Unico, não parseados).")
+    records = fetch_marked_rows()
+    print(f"{len(records)} registros marcados para CPC birth Unico.")
 
-    rows: List[Dict[str, Any]] = []
+    rows_cpc: List[Dict[str, Any]] = []
+    ids: List[int] = []
     for rec in records:
         row = parse_cpc_birth_unico(rec)
         if row:
-            rows.append(row)
+            rows_cpc.append(row)
+            ids.append(rec["id"])
 
-    print(f"{len(rows)} linhas parseadas; enviando para Supabase...")
-    upsert_cpc_birth(rows)
+    if not rows_cpc:
+        print("Nada para inserir em cpc_birth.")
+        return
+
+    upsert_cpc_birth(rows_cpc)
+    mark_done(ids)
     print("Concluído.")
 
 
