@@ -2,6 +2,15 @@ name: CPC birth - parser Unico
 
 on:
   workflow_dispatch:
+    inputs:
+      composite_key:
+        description: Composite key do boletim a parsear
+        required: true
+        type: string
+      parser_profile:
+        description: Nome do parser (ex.: cpc_birth)
+        required: false
+        type: string
 
 jobs:
   run-cpc-birth-unico:
@@ -14,7 +23,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -26,5 +35,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          COMPOSITE_KEY: ${{ github.event.inputs.composite_key }}
+          PARSER_PROFILE: ${{ github.event.inputs.parser_profile }}
         run: |
           python src/cpc_birth_unico_parser.py
