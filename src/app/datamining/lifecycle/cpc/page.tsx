@@ -332,40 +332,22 @@ export default function Page() {
   const [parserLoadingId, setParserLoadingId] = useState<number | null>(null);
 
   async function setParserForRow(row: Row, parser: string | null) {
-    if (!row.id) return;
-    setParserLoadingId(row.id);
-    try {
-      const { error } = await supabase
-        .from("all_data")
-        .update({
-          parser_profile: parser,
-          parser_status: parser ? "ready" : "none",
-          parser_parsed_at: null,
-        })
-        .eq("id", row.id);
-
-      if (error) throw error;
-
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id
-            ? {
-                ...r,
-                parser_profile: parser,
-                parser_status: parser ? "ready" : "none",
-                parser_parsed_at: null,
-              }
-            : r,
-        ),
-      );
-    } catch (e) {
-      setErrorMsg(errMessage(e));
-    } finally {
-      setParserLoadingId(null);
-    }
+    // Apenas atualiza o estado local. A gravação "oficial" em all_data
+    // é feita na rota /api/cpc_birth_unico usando a service key.
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? {
+              ...r,
+              parser_profile: parser,
+              parser_status: parser ? "ready" : "none",
+              parser_parsed_at: null,
+            }
+          : r,
+      ),
+    );
   }
 
-  
   async function activateParserForRow(row: Row) {
     if (!row.id) return;
 
