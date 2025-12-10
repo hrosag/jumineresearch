@@ -316,10 +316,24 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     # -----------------------
     # Escrowed Shares
     # -----------------------
-    escrow = extract_field(body, ["Escrowed Shares"])
-    row["escrowed_shares"] = escrow
-    row["escrowed_shares_value"] = parse_integer_value(escrow)
-    row["escrowed_shares_class"] = parse_currency_class(escrow)
+    escrow_line = extract_field(body, ["Escrowed Shares"])
+    qty_str = None
+    escrow_class = None
+
+    if escrow_line:
+        # ex.: "2,340,000 common shares"
+        m_esc = re.search(r"([\d,]+)\s+(.+)", escrow_line)
+        if m_esc:
+            qty_str = m_esc.group(1)
+            escrow_class = m_esc.group(2).strip()
+        else:
+            qty_str = escrow_line
+
+    row["escrowed_shares"] = qty_str
+    row["escrowed_shares_value"] = parse_integer_value(qty_str)
+    row["escrowed_shares_class"] = escrow_class or (
+        parse_currency_class(escrow_line) if escrow_line else None
+    )
 
     # -----------------------
     # Transfer Agent / Trading Symbol / CUSIP / Sponsoring / Agent
@@ -361,17 +375,19 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
         )
         ao_block = ao_block_match.group(1) if ao_block_match else ""
 
-        row["agent_option"] = clean_space(ao_block) if ao_block else None
-
+        # quantidade de opções
         qty_match = re.search(
             r"([\d,]+)\s+(?:non[ -]?transferable|transferable)\s+"
             r"(?:stock options|options|Agent's Options)",
             ao_block,
             flags=re.IGNORECASE,
         )
-        qty = qty_match.group(1) if qty_match else None
-        row["agent_option_value"] = parse_integer_value(qty)
+        qty_str = qty_match.group(1) if qty_match else None
 
+        row["agent_option"] = qty_str
+        row["agent_option_value"] = parse_integer_value(qty_str)
+
+        # classe das opções
         klass_match = re.search(
             r"\b((?:non[ -]?transferable|transferable)\s+"
             r"(?:stock options|options|Agent's Options))",
@@ -382,6 +398,7 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
             klass_match.group(1).strip() if klass_match else None
         )
 
+        # preço por ação
         price_match = re.search(
             r"(?:one|each)\s+(?:common\s+)?share\s+"
             r"(?:at|at an exercise price of|exercisable at)\s*"
@@ -393,6 +410,7 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
             float(price_match.group(1)) if price_match else None
         )
 
+        # duração
         dur_match = re.search(
             r"(?:for|for a period of|for up to|up to|exercisable for)"
             r"(?:\s+a\s+period\s+of)?\s+(\d{1,3})\s*months?",
