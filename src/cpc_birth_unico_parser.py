@@ -89,6 +89,10 @@ def normalize_date(raw: str | None) -> str | None:
 
 
 def parse_numeric_value(text: str | None) -> float | None:
+    """
+    Conversão genérica para valores com casas decimais (ex.: preço por ação).
+    Não deve ser usada para campos que precisam ser inteiros (volume, proceeds).
+    """
     if not text:
         return None
 
@@ -273,7 +277,8 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     )
     gross_proceeds = gp_match.group(1) if gp_match else None
     row["gross_proceeds"] = gross_proceeds
-    row["gross_proceeds_value"] = parse_numeric_value(gross_proceeds)
+    # valor numérico inteiro, sem .0
+    row["gross_proceeds_value"] = parse_integer_value(gross_proceeds)
 
     sh_pr = re.search(
         r"\(([\d,]+)\s+common shares at \$?([\d\.]+)\s+per share\)",
@@ -282,14 +287,20 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     )
     if sh_pr:
         sh, pr = sh_pr.groups()
+        # sh vem como "3,050,600" → manter assim no class_volume (texto)
         row["gross_proceeds_class"] = "common shares"
-        row["gross_proceeds_class_volume"] = parse_integer_value(sh)
+        row["gross_proceeds_class_volume"] = clean_space(sh)
         row["gross_proceeds_volume_value"] = parse_integer_value(sh)
         row["gross_proceeds_value_per_share"] = parse_numeric_value(pr)
     else:
         row["gross_proceeds_class"] = parse_currency_class(gross_proceeds)
-        row["gross_proceeds_class_volume"] = parse_integer_value(gross_proceeds)
-        row["gross_proceeds_volume_value"] = parse_integer_value(gross_proceeds)
+        vol_int = parse_integer_value(gross_proceeds)
+        if vol_int is not None:
+            row["gross_proceeds_class_volume"] = f"{vol_int:,}"
+            row["gross_proceeds_volume_value"] = vol_int
+        else:
+            row["gross_proceeds_class_volume"] = None
+            row["gross_proceeds_volume_value"] = None
         row["gross_proceeds_value_per_share"] = extract_price_per_share(gross_proceeds)
 
     # -----------------------
@@ -305,12 +316,18 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     )
     if ios_match:
         ios = ios_match.group(1)
-        row["capitalization_volume"] = parse_integer_value(ios)
+        # ios vem como "5,390,600" → manter assim no volume (texto)
+        row["capitalization_volume"] = clean_space(ios)
         row["capitalization_volume_value"] = parse_integer_value(ios)
         row["capitalization_class"] = "common shares"
     else:
-        row["capitalization_volume"] = parse_integer_value(capitalization)
-        row["capitalization_volume_value"] = parse_integer_value(capitalization)
+        vol_int = parse_integer_value(capitalization)
+        if vol_int is not None:
+            row["capitalization_volume"] = f"{vol_int:,}"
+            row["capitalization_volume_value"] = vol_int
+        else:
+            row["capitalization_volume"] = None
+            row["capitalization_volume_value"] = None
         row["capitalization_class"] = parse_currency_class(capitalization)
 
     # -----------------------
