@@ -364,25 +364,40 @@ export default function Page() {
       setParserLoadingId(null);
     }
   }
-
-  
+ 
   async function activateParserForRow(row: Row) {
     if (!row.id) return;
-
+  
+    // sem composite_key não tem como saber qual boletim parsear
+    if (!row.composite_key) {
+      setErrorMsg("Linha sem composite_key — não dá para disparar o parser.");
+      return;
+    }
+  
+    // usa o que estiver em parser_profile ou a sugestão automática
     const parser = row.parser_profile ?? suggestedParserProfile(row);
     if (!parser) {
       setErrorMsg("Selecione um parser antes de ativar.");
       return;
     }
-
-    // garante que o parser_profile e parser_status = "ready"
+  
+    // marca na all_data que este boletim vai ser processado com esse parser
     await setParserForRow(row, parser);
-
+  
     try {
+      setParserLoadingId(row.id);
+  
       const res = await fetch("/api/cpc_birth_unico", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          composite_key: row.composite_key,
+          parser_profile: parser,
+        }),
       });
-
+  
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(
@@ -395,7 +410,7 @@ export default function Page() {
       setParserLoadingId(null);
     }
   }
-
+  
 // Âncoras (1º CPC por (company|ticker_root))
   const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
   const [anchorCompanies, setAnchorCompanies] = useState<string[]>([]);
