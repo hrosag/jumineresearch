@@ -1,3 +1,180 @@
+import os
+import re
+import json
+from datetime import datetime
+from typing import Iterable, List, Dict, Any
+
+import requests
+
+# 1) Constantes / config
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+VIEW_NAME = "vw_bulletins_with_canonical"
+TABLE_NAME = "cpc_birth"
+
+COMPOSITE_KEY = os.environ.get("COMPOSITE_KEY")
+PARSER_PROFILE_ENV = os.environ.get("PARSER_PROFILE") or "cpc_birth"
+
+FIELDS = [
+    "company_name",
+    "ticker",
+    "composite_key",
+    "canonical_type",
+    "bulletin_date",
+    "tier",
+    "prospectus_date",
+    "prospectus_date_iso",
+    "effective_date",
+    "effective_date_iso",
+    "gross_proceeds",
+    "gross_proceeds_value",
+    "gross_proceeds_class",
+    "gross_proceeds_class_volume",
+    "gross_proceeds_volume_value",
+    "gross_proceeds_value_per_share",
+    "commence_date",
+    "commence_date_iso",
+    "corporate_jurisdiction",
+    "capitalization",
+    "capitalization_volume",
+    "capitalization_volume_value",
+    "capitalization_class",
+    "escrowed_shares",
+    "escrowed_shares_value",
+    "escrowed_shares_class",
+    "transfer_agent",
+    "trading_symbol",
+    "cusip_number",
+    "sponsoring_member",
+    "agent",
+    "agent_option",
+    "agent_option_value",
+    "agent_option_class",
+    "agent_option_price_per_share",
+    "agents_options_duration_months",
+]
+
+
+def clean_space(value: str | None) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def normalize_date(raw: str | None) -> str | None:
+    if not raw:
+        return None
+
+    text = clean_space(raw)
+    patterns = [
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%d %B %Y",
+        "%d %b %Y",
+        "%Y-%m-%d",
+        "%d-%b-%Y",
+        "%d-%m-%Y",
+        "%m/%d/%Y",
+        "%m/%d/%y",
+    ]
+
+    for fmt in patterns:
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return None
+
+
+def parse_numeric_value(text: str | None) -> float | None:
+    if not text:
+        return None
+
+    cleaned = re.sub(r"[^0-9.\-]", "", text)
+    if cleaned in {"", ".", "-", "--"}:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def parse_integer_value(text: str | None) -> int | None:
+    if not text:
+        return None
+    cleaned = re.sub(r"[^0-9]", "", text)
+    if cleaned == "":
+        return None
+    try:
+        return int(cleaned)
+    except ValueError:
+        return None
+
+
+def parse_currency_class(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = re.search(r"\$[0-9,.]+\s+([^.;]+)", text)
+    if match:
+        return clean_space(match.group(1))
+    # fallback para texto depois do número
+    match = re.search(r"[0-9,.]+\s+([^.;]+)", text)
+    if match:
+        return clean_space(match.group(1))
+    return None
+
+
+def extract_field(body: str, labels: Iterable[str]) -> str | None:
+    for label in labels:
+        pattern = rf"{re.escape(label)}\s*[:\-–—]\s*(.+)"
+        match = re.search(pattern, body, re.IGNORECASE)
+        if match:
+            return clean_space(match.group(1))
+    return None
+
+
+def extract_price_per_share(text: str | None) -> float | None:
+    if not text:
+        return None
+    match = re.search(
+        r"\$\s*([0-9,.]+)\s*(?:per share|per common share)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        try:
+            return float(match.group(1).replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def extract_months(text: str | None) -> int | None:
+    if not text:
+        return None
+    match = re.search(r"(\d+)\s*month", text, re.IGNORECASE)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def normalize_row(row: dict) -> dict:
+    normalized: dict[str, Any] = {}
+    for field in FIELDS:
+        value = row.get(field)
+        if isinstance(value, str):
+            value = clean_space(value)
+            if value == "":
+                value = None
+        normalized[field] = value
+    return normalized
+
+
 def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     """
     Parser para NEW LISTING-CPC-SHARES 'Unico',
@@ -29,7 +206,7 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     # -----------------------
     # Prospectus / Effective
     # -----------------------
-    # Ex.: "Prospectus dated September 26, 2008"
+    # "Prospectus dated September 26, 2008"
     m_prosp = re.search(
         r"Prospectus(?:.*)? dated ([A-Za-z]+\s+\d{1,2},\s*\d{4})",
         body,
@@ -39,7 +216,7 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     row["prospectus_date"] = prospectus_date
     row["prospectus_date_iso"] = normalize_date(prospectus_date)
 
-    # Ex.: "... Commission effective September 29, 2008 ..."
+    # "... effective September 29, 2008 ..."
     effs = re.findall(
         r"effective\s+([A-Za-z]+\s+\d{1,2},\s*\d{4})",
         body,
@@ -52,13 +229,11 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     # -----------------------
     # Commence Date
     # -----------------------
-    # Linha inteira após "Commence Date:"
     line_m = re.search(r"(?mi)^\s*Commence Date:(.*)$", body)
     commence_date_raw: str | None = None
     if line_m:
         line = line_m.group(1)
 
-        # tenta extrair só o trecho "December 24, 2008"
         p1 = re.search(
             r"(?:on\s+)?(?:Mon|Tues|Tue|Wed|Thu|Thur|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?\s*,?\s*([A-Za-z]+\s+\d{1,2}(?:,\s*\d{4}| \d{4}))",
             line,
@@ -91,7 +266,6 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     # -----------------------
     # Gross Proceeds
     # -----------------------
-    # Ex.: "The gross proceeds ... were $305,060 (3,050,600 common shares at $0.10 per share)."
     gp_match = re.search(
         r"gross proceeds.*?(?:were|was)\s*(\$\s?[\d,]+(?:\.\d{2})?)",
         body,
@@ -108,13 +282,11 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     )
     if sh_pr:
         sh, pr = sh_pr.groups()
-        # classe / volume de ações da oferta
         row["gross_proceeds_class"] = "common shares"
         row["gross_proceeds_class_volume"] = parse_integer_value(sh)
         row["gross_proceeds_volume_value"] = parse_integer_value(sh)
         row["gross_proceeds_value_per_share"] = parse_numeric_value(pr)
     else:
-        # fallback genérico
         row["gross_proceeds_class"] = parse_currency_class(gross_proceeds)
         row["gross_proceeds_class_volume"] = parse_integer_value(gross_proceeds)
         row["gross_proceeds_volume_value"] = parse_integer_value(gross_proceeds)
@@ -152,39 +324,24 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     # -----------------------
     # Transfer Agent / Trading Symbol / CUSIP / Sponsoring / Agent
     # -----------------------
-    ta_raw = re.search(
-        r"(?mi)^\s*Transfer Agent:\s*(.+)$",
-        body,
-    )
+    ta_raw = re.search(r"(?mi)^\s*Transfer Agent:\s*(.+)$", body)
     ta = ta_raw.group(1).strip() if ta_raw else None
     if ta:
         ta = re.sub(r"\s*\(.*?\)\s*$", "", ta).strip()
     row["transfer_agent"] = ta
 
-    ts = re.search(
-        r"(?mi)^\s*Trading Symbol:\s*([A-Z0-9\.\-]+)",
-        body,
-    )
+    ts = re.search(r"(?mi)^\s*Trading Symbol:\s*([A-Z0-9\.\-]+)", body)
     row["trading_symbol"] = ts.group(1).strip() if ts else clean_space(
         rec.get("ticker", "")
     )
 
-    cu = re.search(
-        r"(?mi)^\s*CUSIP Number:\s*([A-Z0-9 ]+)",
-        body,
-    )
+    cu = re.search(r"(?mi)^\s*CUSIP Number:\s*([A-Z0-9 ]+)", body)
     row["cusip_number"] = cu.group(1).strip() if cu else None
 
-    sm = re.search(
-        r"(?mi)^\s*Sponsoring Member:\s*(.+)$",
-        body,
-    )
+    sm = re.search(r"(?mi)^\s*Sponsoring Member:\s*(.+)$", body)
     row["sponsoring_member"] = sm.group(1).strip() if sm else None
 
-    ag = re.search(
-        r"(?mi)^\s*Agent:\s*(.+)$",
-        body,
-    )
+    ag = re.search(r"(?mi)^\s*Agent:\s*(.+)$", body)
     row["agent"] = ag.group(1).strip() if ag else None
 
     # -----------------------
@@ -204,10 +361,8 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
         )
         ao_block = ao_block_match.group(1) if ao_block_match else ""
 
-        # texto completo, se quiser guardar
         row["agent_option"] = clean_space(ao_block) if ao_block else None
 
-        # quantidade de opções
         qty_match = re.search(
             r"([\d,]+)\s+(?:non[ -]?transferable|transferable)\s+"
             r"(?:stock options|options|Agent's Options)",
@@ -217,7 +372,6 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
         qty = qty_match.group(1) if qty_match else None
         row["agent_option_value"] = parse_integer_value(qty)
 
-        # classe das opções
         klass_match = re.search(
             r"\b((?:non[ -]?transferable|transferable)\s+"
             r"(?:stock options|options|Agent's Options))",
@@ -228,7 +382,6 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
             klass_match.group(1).strip() if klass_match else None
         )
 
-        # preço por ação
         price_match = re.search(
             r"(?:one|each)\s+(?:common\s+)?share\s+"
             r"(?:at|at an exercise price of|exercisable at)\s*"
@@ -240,7 +393,6 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
             float(price_match.group(1)) if price_match else None
         )
 
-        # duração (meses)
         dur_match = re.search(
             r"(?:for|for a period of|for up to|up to|exercisable for)"
             r"(?:\s+a\s+period\s+of)?\s+(\d{1,3})\s*months?",
@@ -254,5 +406,90 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
                 extract_months(ao_block) or extract_months(body)
             )
 
-    # normalização final (None vs strings vazias, etc.)
     return normalize_row(row)
+
+
+def fetch_marked_rows():
+    url = f"{SUPABASE_URL}/rest/v1/{VIEW_NAME}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    }
+    params: Dict[str, Any] = {
+        "select": "id,company,ticker,composite_key,canonical_type,canonical_class,bulletin_date,tier,body_text,parser_profile,parser_status",
+    }
+
+    if COMPOSITE_KEY:
+        params["composite_key"] = f"eq.{COMPOSITE_KEY}"
+
+    params["parser_profile"] = f"eq.{PARSER_PROFILE_ENV}"
+    params["parser_status"] = "eq.ready"
+
+    resp = requests.get(url, headers=headers, params=params, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def upsert_cpc_birth(rows: List[Dict[str, Any]]) -> None:
+    url = f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+    }
+    # se tiver unique em composite_key, isso evita 409
+    params = {"on_conflict": "composite_key"}
+    resp = requests.post(
+        url, headers=headers, params=params, data=json.dumps(rows), timeout=60
+    )
+
+    if not resp.ok:
+        print("Erro ao inserir em cpc_birth:", resp.status_code, resp.text)
+        resp.raise_for_status()
+
+
+def mark_done(ids: List[int]) -> None:
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    for id_ in ids:
+        payload = {
+            "parser_status": "done",
+            "parser_parsed_at": datetime.utcnow().isoformat(),
+        }
+        resp = requests.patch(
+            f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60
+        )
+        if not resp.ok:
+            print("Erro ao marcar done:", id_, resp.status_code, resp.text)
+            resp.raise_for_status()
+
+
+def main() -> None:
+    records = fetch_marked_rows()
+    print(f"{len(records)} registros marcados para CPC birth Unico.")
+
+    rows_cpc: List[Dict[str, Any]] = []
+    ids: List[int] = []
+    for rec in records:
+        row = parse_cpc_birth_unico(rec)
+        if row:
+            rows_cpc.append(row)
+            ids.append(rec["id"])
+
+    if not rows_cpc:
+        print("Nada para inserir em cpc_birth.")
+        return
+
+    upsert_cpc_birth(rows_cpc)
+    mark_done(ids)
+    print("Concluído.")
+
+
+if __name__ == "__main__":
+    main()
