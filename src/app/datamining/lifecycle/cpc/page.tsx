@@ -368,11 +368,16 @@ export default function Page() {
   
   async function activateParserForRow(row: Row) {
     if (!row.id) return;
-    if (!row.parser_profile) {
+
+    const parser = row.parser_profile ?? suggestedParserProfile(row);
+    if (!parser) {
       setErrorMsg("Selecione um parser antes de ativar.");
       return;
     }
-    setParserLoadingId(row.id);
+
+    // garante que o parser_profile e parser_status = "ready"
+    await setParserForRow(row, parser);
+
     try {
       const res = await fetch("/api/cpc_birth_unico", {
         method: "POST",
@@ -1859,7 +1864,7 @@ return data;
                       <div className="flex gap-2 items-center">
                         <select
                           className="border px-1 py-0.5 text-xs"
-                          value={suggestedParserProfile(row) ?? ""}
+                          value={row.parser_profile ?? ""}
                           disabled={parserLoadingId === row.id}
                           onChange={(e) => {
                             const value = e.target.value || null;
@@ -1877,7 +1882,11 @@ return data;
                         <button
                           type="button"
                           className="border px-2 py-0.5 text-xs"
-                          disabled={!row.parser_profile || parserLoadingId === row.id}
+                          disabled={
+                            (!row.parser_profile &&
+                              !suggestedParserProfile(row)) ||
+                            parserLoadingId === row.id
+                          }
                           onClick={() => activateParserForRow(row)}
                         >
                           {parserLoadingId === row.id ? "Salvando..." : "Ativar"}
