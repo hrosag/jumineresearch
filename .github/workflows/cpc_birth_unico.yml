@@ -2,15 +2,6 @@ name: CPC birth - parser Unico
 
 on:
   workflow_dispatch:
-    inputs:
-      composite_key:
-        description: Composite key do boletim a parsear
-        required: true
-        type: string
-      parser_profile:
-        description: Nome do parser (ex.: cpc_birth)
-        required: false
-        type: string
 
 jobs:
   run-cpc-birth-unico:
