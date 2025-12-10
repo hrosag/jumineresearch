@@ -8,7 +8,7 @@ import requests
 
 # 1) Constantes / config
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 VIEW_NAME = "vw_bulletins_with_canonical"
 TABLE_NAME = "cpc_birth"
 PARSE_VERSION = "cpc_birth_unico_v1"
