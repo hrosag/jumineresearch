@@ -13,6 +13,9 @@ VIEW_NAME = "vw_bulletins_with_canonical"
 TABLE_NAME = "cpc_birth"
 PARSE_VERSION = "cpc_birth_unico_v1"
 
+COMPOSITE_KEY = os.environ.get("COMPOSITE_KEY")
+PARSER_PROFILE_ENV = os.environ.get("PARSER_PROFILE") or "cpc_birth"
+
 FIELDS = [
     "company_name",
     "ticker",
@@ -137,7 +140,9 @@ def extract_field(body: str, labels: Iterable[str]) -> str | None:
 def extract_price_per_share(text: str | None) -> float | None:
     if not text:
         return None
-    match = re.search(r"\$\s*([0-9,.]+)\s*(?:per share|per common share)", text, re.IGNORECASE)
+    match = re.search(
+        r"\$\s*([0-9,.]+)\s*(?:per share|per common share)", text, re.IGNORECASE
+    )
     if match:
         try:
             return float(match.group(1).replace(",", ""))
@@ -173,17 +178,6 @@ def normalize_row(row: dict) -> dict:
 def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     """
     rec vem da view vw_bulletins_with_canonical.
-
-    Campos mínimos esperados em rec:
-      - company_name ou company
-      - ticker
-      - composite_key
-      - canonical_type
-      - canonical_class
-      - bulletin_date
-      - tier
-      - body_text
-      - parser_status (opcional)
     """
 
     ctype = (rec.get("canonical_type") or "").upper()
@@ -194,7 +188,9 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
 
     row = {f: None for f in FIELDS}
 
-    row["company_name"] = clean_space(rec.get("company_name", "") or rec.get("company", ""))
+    row["company_name"] = clean_space(
+        rec.get("company_name", "") or rec.get("company", "")
+    )
     row["ticker"] = clean_space(rec.get("ticker", ""))
     row["composite_key"] = rec["composite_key"]
     row["canonical_type"] = "NEW LISTING-CPC-SHARES"
@@ -217,7 +213,9 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
 
     row["corporate_jurisdiction"] = extract_field(body, ["Corporate Jurisdiction"])
 
-    gross_proceeds = extract_field(body, ["Gross Proceeds", "Gross Proceeds to the Company"])
+    gross_proceeds = extract_field(
+        body, ["Gross Proceeds", "Gross Proceeds to the Company"]
+    )
     row["gross_proceeds"] = gross_proceeds
     row["gross_proceeds_value"] = parse_numeric_value(gross_proceeds)
     row["gross_proceeds_class"] = parse_currency_class(gross_proceeds)
@@ -243,7 +241,9 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
 
     agent = extract_field(body, ["Agent"])
     row["agent"] = agent
-    agent_option = extract_field(body, ["Agent Option", "Agent's Option", "Agents Option"])
+    agent_option = extract_field(
+        body, ["Agent Option", "Agent's Option", "Agents Option"]
+    )
     row["agent_option"] = agent_option
     row["agent_option_value"] = parse_numeric_value(agent_option)
     row["agent_option_class"] = parse_currency_class(agent_option)
@@ -260,14 +260,21 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
 def fetch_marked_rows():
     url = f"{SUPABASE_URL}/rest/v1/{VIEW_NAME}"
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+      "apikey": SUPABASE_KEY,
+      "Authorization": f"Bearer {SUPABASE_KEY}",
     }
-    params = {
+    params: Dict[str, Any] = {
         "select": "id,company,ticker,composite_key,canonical_type,canonical_class,bulletin_date,tier,body_text,parser_profile,parser_status",
-        "parser_profile": "eq.cpc_birth",
-        "parser_status": "eq.ready",
     }
+
+    # se veio composite_key do workflow, filtra por ela
+    if COMPOSITE_KEY:
+        params["composite_key"] = f"eq.{COMPOSITE_KEY}"
+
+    # exige que esteja marcado com o parser certo e em ready
+    params["parser_profile"] = f"eq.{PARSER_PROFILE_ENV}"
+    params["parser_status"] = "eq.ready"
+
     resp = requests.get(url, headers=headers, params=params, timeout=60)
     resp.raise_for_status()
     return resp.json()
@@ -286,7 +293,7 @@ def upsert_cpc_birth(rows: List[Dict[str, Any]]) -> None:
 
 
 def mark_done(ids: List[int]) -> None:
-    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    url = f"{SUPABASE_URL}/rest/v1/all_data}"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
