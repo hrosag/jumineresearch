@@ -59,6 +59,8 @@ type SortKey =
   | "canonical_type";
 type SortDir = "asc" | "desc";
 
+const PARSER_OPTIONS = ["cpc_birth"] as const;
+
 // ---------- helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
 function toDateNum(iso: string | null | undefined): number {
@@ -249,17 +251,26 @@ function isCpcByBody(row: Row): boolean {
   return re.test(body);
 }
 
-function suggestParser(row: Row) {
+function suggestedParserProfile(row: Row): string | null {
+  const manual = (row.parser_profile ?? "").trim();
+  if (manual) return manual;
+
   const t = (row.canonical_type ?? "").toUpperCase();
-  if (t.includes("NEW LISTING-CPC-SHARES")) return "cpc_birth";
-  return row.parser_profile ?? "—";
+  const klass = (row.canonical_class ?? "").toUpperCase();
+
+  if (t.includes("NEW LISTING-CPC-SHARES") && klass === "UNICO") {
+    return "cpc_birth";
+  }
+  return null;
 }
 
-function parserStatusLabel(row: Row) {
+function parserStatusLabel(row: Row): string {
   const s = (row.parser_status ?? "").toLowerCase();
+  if (!s || s === "none") return "Pendente";
+  if (s === "ready") return "Pronto";
+  if (s === "running") return "Rodando";
   if (s === "done") return "Concluído";
   if (s === "error") return "Erro";
-  if (s === "none" || !s) return "Pendente";
   return s;
 }
 
@@ -317,6 +328,42 @@ export default function Page() {
 
   const [showChart, setShowChart] = useState(true);
   const [showStats, setShowStats] = useState(true);
+
+  const [parserLoadingId, setParserLoadingId] = useState<number | null>(null);
+
+  async function setParserForRow(row: Row, parser: string | null) {
+    if (!row.id) return;
+    setParserLoadingId(row.id);
+    try {
+      const { error } = await supabase
+        .from("all_data")
+        .update({
+          parser_profile: parser,
+          parser_status: parser ? "ready" : "none",
+          parser_parsed_at: null,
+        })
+        .eq("id", row.id);
+
+      if (error) throw error;
+
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                parser_profile: parser,
+                parser_status: parser ? "ready" : "none",
+                parser_parsed_at: null,
+              }
+            : r,
+        ),
+      );
+    } catch (e) {
+      setErrorMsg(errMessage(e));
+    } finally {
+      setParserLoadingId(null);
+    }
+  }
 
   // Âncoras (1º CPC por (company|ticker_root))
   const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
@@ -1781,12 +1828,47 @@ return data;
                   <td className="p-2">
                     {row.canonical_type ?? row.bulletin_type ?? "—"}
                   </td>
-                  <td className="p-2">{suggestParser(row)}</td>
-                  <td className="p-2">{parserStatusLabel(row)}</td>
                   <td className="p-2">
-                    {row.parser_parsed_at
-                      ? new Date(row.parser_parsed_at).toLocaleDateString()
-                      : "—"}
+                    {isCpc(row) && row.canonical_class === "Unico" ? (
+                      <div className="flex gap-2 items-center">
+                        <select
+                          className="border px-1 py-0.5 text-xs"
+                          value={suggestedParserProfile(row) ?? ""}
+                          disabled={parserLoadingId === row.id}
+                          onChange={(e) => {
+                            const value = e.target.value || null;
+                            setParserForRow(row, value);
+                          }}
+                        >
+                          <option value="">—</option>
+                          {PARSER_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          type="button"
+                          className="border px-2 py-0.5 text-xs"
+                          disabled={!row.parser_profile || parserLoadingId === row.id}
+                          onClick={() =>
+                            setParserForRow(
+                              row,
+                              row.parser_profile ?? suggestedParserProfile(row),
+                            )
+                          }
+                        >
+                          {parserLoadingId === row.id ? "Salvando..." : "Ativar"}
+                        </button>
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="p-2 text-xs">{parserStatusLabel(row)}</td>
+                  <td className="p-2 text-xs">
+                    {row.parser_parsed_at ? row.parser_parsed_at.slice(0, 10) : "—"}
                   </td>
                 </tr>
               ))}
