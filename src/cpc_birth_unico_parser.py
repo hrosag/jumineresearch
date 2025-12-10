@@ -11,7 +11,6 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 VIEW_NAME = "vw_bulletins_with_canonical"
 TABLE_NAME = "cpc_birth"
-PARSE_VERSION = "cpc_birth_unico_v1"
 
 COMPOSITE_KEY = os.environ.get("COMPOSITE_KEY")
 PARSER_PROFILE_ENV = os.environ.get("PARSER_PROFILE") or "cpc_birth"
@@ -53,7 +52,6 @@ FIELDS = [
     "agent_option_class",
     "agent_option_price_per_share",
     "agents_options_duration_months",
-    "parse_version",
 ]
 
 
@@ -252,16 +250,14 @@ def parse_cpc_birth_unico(rec: Dict[str, Any]) -> Dict[str, Any] | None:
     duration_months = extract_months(agent_option) or extract_months(body)
     row["agents_options_duration_months"] = duration_months
 
-    row["parse_version"] = PARSE_VERSION
-
     return normalize_row(row)
 
 
 def fetch_marked_rows():
     url = f"{SUPABASE_URL}/rest/v1/{VIEW_NAME}"
     headers = {
-      "apikey": SUPABASE_KEY,
-      "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
     }
     params: Dict[str, Any] = {
         "select": "id,company,ticker,composite_key,canonical_type,canonical_class,bulletin_date,tier,body_text,parser_profile,parser_status",
