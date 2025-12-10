@@ -29,6 +29,9 @@ type Row = {
   bulletin_date: string | null;
   composite_key?: string | null;
   body_text: string | null;
+  parser_profile?: string | null;
+  parser_status?: string | null;
+  parser_parsed_at?: string | null;
 };
 
 type ScatterDatum = {
@@ -244,6 +247,20 @@ function isCpcByBody(row: Row): boolean {
   const re =
     /(new\s*listing\s*[-–—]?\s*cpc\s*[-–—]?\s*shares?)|new[-\s]?cpc[-\s]?share(s)?/i;
   return re.test(body);
+}
+
+function suggestParser(row: Row) {
+  const t = (row.canonical_type ?? "").toUpperCase();
+  if (t.includes("NEW LISTING-CPC-SHARES")) return "cpc_birth";
+  return row.parser_profile ?? "—";
+}
+
+function parserStatusLabel(row: Row) {
+  const s = (row.parser_status ?? "").toLowerCase();
+  if (s === "done") return "Concluído";
+  if (s === "error") return "Erro";
+  if (s === "none" || !s) return "Pendente";
+  return s;
 }
 
 // =========================================================
@@ -1223,7 +1240,7 @@ return data;
                   const query = supabase
                     .from("vw_bulletins_with_canonical")
                     .select(
-                      "id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, composite_key, body_text",
+                      "id, source_file, company, ticker, bulletin_type, canonical_type, canonical_class, bulletin_date, tier, body_text, composite_key, parser_profile, parser_status, parser_parsed_at",
                     )
                     .in("company", companies)
                     .gte("bulletin_date", chunkMin)
@@ -1732,6 +1749,9 @@ return data;
                     onChange={(e) => setFType(e.target.value)}
                   />
                 </th>
+                <th className="p-2 text-left">Parser</th>
+                <th className="p-2 text-left">Status</th>
+                <th className="p-2 text-left">Parsed em</th>
               </tr>
             </thead>
             <tbody>
@@ -1761,11 +1781,18 @@ return data;
                   <td className="p-2">
                     {row.canonical_type ?? row.bulletin_type ?? "—"}
                   </td>
+                  <td className="p-2">{suggestParser(row)}</td>
+                  <td className="p-2">{parserStatusLabel(row)}</td>
+                  <td className="p-2">
+                    {row.parser_parsed_at
+                      ? new Date(row.parser_parsed_at).toLocaleDateString()
+                      : "—"}
+                  </td>
                 </tr>
               ))}
               {tableRowsPage.length === 0 && (
                 <tr>
-                  <td className="p-2 text-gray-600" colSpan={5}>
+                  <td className="p-2 text-gray-600" colSpan={8}>
                     Nenhum registro encontrado.
                   </td>
                 </tr>
