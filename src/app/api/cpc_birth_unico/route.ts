@@ -23,12 +23,16 @@ export async function POST(req: Request) {
 
     if (!supabaseUrl || !serviceKey || !githubToken) {
       return NextResponse.json(
-        { success: false, error: "Variáveis de ambiente faltando (SUPABASE_URL / SUPABASE_SERVICE_KEY / GITHUB_TOKEN)." },
+        {
+          success: false,
+          error:
+            "Variáveis de ambiente faltando (SUPABASE_URL / SUPABASE_SERVICE_KEY / GITHUB_TOKEN).",
+        },
         { status: 500 },
       );
     }
 
-    // 1) Marca no Supabase que esse boletim será parseado com esse parser
+    // 1) Atualiza all_data no Supabase
     const supabaseResp = await fetch(
       `${supabaseUrl}/rest/v1/all_data?composite_key=eq.${encodeURIComponent(
         composite_key,
@@ -60,13 +64,49 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2) Dispara o workflow no GitHub Actions
+    // 2) Descobre o ID numérico do workflow no GitHub
+    const wfResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: "application/vnd.github+json",
+        },
+      },
+    );
+
+    if (!wfResp.ok) {
+      const txt = await wfResp.text();
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Erro ao obter workflow (${WORKFLOW_FILE}): ${txt}`,
+        },
+        { status: 500 },
+      );
+    }
+
+    const wfData = await wfResp.json();
+    const workflowId = wfData.id;
+    if (!workflowId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Não foi possível obter o ID do workflow no GitHub.",
+        },
+        { status: 500 },
+      );
+    }
+
+    // 3) Dispara o workflow pelo ID
     const ghResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${workflowId}/dispatches`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${githubToken}`,
+          Accept: "application/vnd.github+json",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -87,7 +127,10 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      workflow_id: workflowId,
+    });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: String(err) },
