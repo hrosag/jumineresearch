@@ -304,7 +304,6 @@ def mark_done(ids: List[int]) -> None:
         payload = {
             "parser_status": "done",
             "parser_parsed_at": datetime.utcnow().isoformat(),
-            "parse_version": PARSE_VERSION,
         }
         resp = requests.patch(
             f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60
