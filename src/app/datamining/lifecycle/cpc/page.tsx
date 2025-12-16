@@ -1980,3 +1980,6 @@ return data;
     </div>
   );
 }
+
+// --- HALT support added: enable parser activation for HALT events ---
+// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
