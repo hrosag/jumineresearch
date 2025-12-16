@@ -26,7 +26,7 @@ jobs:
       - run: pip install requests
 
       - name: Run HALT parser
-        run: python scripts/cpc_events_halt_parser_v1.py
+        run: python src/cpc_events_halt_parser_v1.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
