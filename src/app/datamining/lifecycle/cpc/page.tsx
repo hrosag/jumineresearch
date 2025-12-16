@@ -1861,7 +1861,7 @@ return data;
                     {row.canonical_type ?? row.bulletin_type ?? "—"}
                   </td>
                   <td className="p-2">
-                    {isCpc(row) && row.canonical_class === "Unico" ? (
+                    {(isCpc(row) && row.canonical_class === "Unico") || ((row.canonical_type ?? row.bulletin_type ?? "").toUpperCase() === "HALT") ? (
                       <div className="flex gap-2 items-center">
                         <select
                           className="border px-1 py-0.5 text-xs"
