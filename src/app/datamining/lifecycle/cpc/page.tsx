@@ -1,3 +1,9 @@
+
+function routeForParser(parser) {
+  if (parser === "events_halt_v1") return "/api/cpc_events_halt";
+  return "/api/cpc_birth_unico";
+}
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
@@ -261,6 +267,7 @@ function suggestedParserProfile(row: Row): string | null {
   if (t.includes("NEW LISTING-CPC-SHARES") && klass === "UNICO") {
     return "cpc_birth";
   }
+  if (type === "HALT") return "events_halt_v1";
   return null;
 }
 
