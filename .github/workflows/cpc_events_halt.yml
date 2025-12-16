@@ -1,0 +1,34 @@
+name: CPC Events HALT
+
+on:
+  workflow_dispatch:
+    inputs:
+      composite_key:
+        description: "Composite key do boletim (ex.: n20080926.txt-3)"
+        required: true
+        type: string
+      parser_profile:
+        description: "Parser profile (default events_halt_v1)"
+        required: false
+        default: "events_halt_v1"
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: Run HALT parser
+        run: python scripts/cpc_events_halt_parser_v1.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          COMPOSITE_KEY: ${{ inputs.composite_key }}
+          PARSER_PROFILE: ${{ inputs.parser_profile }}
