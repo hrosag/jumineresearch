@@ -1,9 +1,3 @@
-
-function routeForParser(parser) {
-  if (parser === "events_halt_v1") return "/api/cpc_events_halt";
-  return "/api/cpc_birth_unico";
-}
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
@@ -65,7 +59,7 @@ type SortKey =
   | "canonical_type";
 type SortDir = "asc" | "desc";
 
-const PARSER_OPTIONS = ["cpc_birth"] as const;
+const PARSER_OPTIONS = ["cpc_birth", "events_halt_v1"] as const;
 
 // ---------- helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
@@ -267,8 +261,12 @@ function suggestedParserProfile(row: Row): string | null {
   if (t.includes("NEW LISTING-CPC-SHARES") && klass === "UNICO") {
     return "cpc_birth";
   }
-  if (type === "HALT") return "events_halt_v1";
   return null;
+}
+
+function routeForParser(parser: string) {
+  if (parser === "events_halt_v1") return "/api/cpc_events_halt";
+  return "/api/cpc_birth_unico";
 }
 
 function parserStatusLabel(row: Row): string {
@@ -375,7 +373,7 @@ export default function Page() {
     try {
       setParserLoadingId(row.id);
 
-      const res = await fetch("/api/cpc_birth_unico", {
+      const res = await fetch(routeForParser(parser), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
