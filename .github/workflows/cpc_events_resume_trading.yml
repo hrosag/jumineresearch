@@ -36,4 +36,4 @@ jobs:
           COMPOSITE_KEY: ${{ github.event.inputs.composite_key }}
           PARSER_PROFILE: ${{ github.event.inputs.parser_profile }}
         run: |
-          python src/app/cpc_events_resume_trading_parser_v1.py
+          python src/cpc_events_resume_trading_parser_v1.py
