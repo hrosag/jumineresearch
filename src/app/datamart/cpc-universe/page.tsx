@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
 import {
@@ -11,8 +11,9 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  type TooltipProps,
+  TooltipProps,
 } from "recharts";
+import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,7 +28,7 @@ type Row = {
   ticker: string | null;
 
   commence_date: string | null; // YYYY-MM-DD
-  capitalization_volume: number | string | null; // bigint pode vir string
+  capitalization_volume: number | string | null; // bigint pode vir como string
 
   halt_date: string | null; // YYYY-MM-DD
   resume_trading_date: string | null; // YYYY-MM-DD
@@ -35,22 +36,24 @@ type Row = {
 
 type Opt = { value: string; label: string };
 
-type ScatterPoint = {
-  company_name: string;
-  ticker: string;
-  ticker_root: string;
+type PointKind = "LISTING" | "HALT" | "RESUME";
 
-  point_kind: "LISTING" | "HALT" | "RESUME";
-  date_iso: string; // YYYY-MM-DD
-  date_num: number; // UTC ms
+type ScatterDatum = {
+  ticker_root: string;
+  dateNum: number;
+  dateISO: string;
+
+  company: string;
+  ticker: string;
+
+  kind: PointKind;
 };
 
 function normalizeTickerRoot(t?: string | null) {
   return (t ?? "").trim().toUpperCase().split(".")[0];
 }
 
-function toDateNum(iso?: string | null) {
-  if (!iso) return Number.NaN;
+function toDateNum(iso: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
   if (!m) return Number.NaN;
   const y = Number(m[1]);
@@ -113,7 +116,6 @@ function makeTicksAdaptive(domain: [number, number]) {
     return { ticks: [] as number[], formatter: (v: number) => new Date(v).toISOString().slice(0, 10) };
   }
   const span = max - min;
-
   const fYear = new Intl.DateTimeFormat("pt-BR", { year: "numeric", timeZone: "UTC" });
   const fMonY = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
   const fMon = new Intl.DateTimeFormat("pt-BR", { month: "short", timeZone: "UTC" });
@@ -145,28 +147,18 @@ function makeTicksAdaptive(domain: [number, number]) {
   }
 }
 
-function isScatterClickPayload(x: unknown): x is { payload?: ScatterPoint } {
-  if (!x || typeof x !== "object") return false;
-  if (!("payload" in x)) return false;
-  return true;
-}
-
-function ScatterTip(props: TooltipProps<number, string>) {
-  const p0 = props.payload?.[0];
-  const sp = (p0?.payload ?? null) as ScatterPoint | null;
-
-  if (!props.active || !sp) return null;
-
-  const kindLabel =
-    sp.point_kind === "LISTING" ? "Listing" :
-    sp.point_kind === "HALT" ? "Halt" :
-    "Resume Trading";
+function CustomTooltip(props: TooltipProps<ValueType, NameType>) {
+  if (!props.active || !props.payload || !props.payload.length) return null;
+  const p0 = props.payload[0];
+  const d = p0 && (p0.payload as unknown as ScatterDatum | undefined);
+  if (!d) return null;
 
   return (
-    <div className="bg-white border rounded px-3 py-2 text-sm shadow">
-      <div className="font-semibold">{sp.company_name}</div>
-      <div className="text-xs text-black/70">{sp.ticker} • {sp.ticker_root}</div>
-      <div className="mt-1">{kindLabel}: {fmtDateBR(sp.date_iso)}</div>
+    <div className="bg-white border rounded shadow-sm p-2 text-xs">
+      <div className="font-semibold">
+        {d.company} ({d.ticker})
+      </div>
+      <div>{d.kind} • {fmtDateBR(d.dateISO)}</div>
     </div>
   );
 }
@@ -176,50 +168,47 @@ export default function Page() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
 
-  const [autoPeriod, setAutoPeriod] = useState(true);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+
+  const [autoPeriod, setAutoPeriod] = useState(true);
 
   const [selCompanies, setSelCompanies] = useState<Opt[]>([]);
   const [selTickers, setSelTickers] = useState<Opt[]>([]);
 
-  const [search, setSearch] = useState("");
-  const dfSearch = useDeferredValue(search);
-
-  const [showKpis, setShowKpis] = useState(true);
-  const [showScatter, setShowScatter] = useState(true);
-
   const [yLimit, setYLimit] = useState<number>(18);
 
-  const tableRef = useRef<HTMLDivElement | null>(null);
+  async function fetchMinMaxCommence() {
+    const { data: dMin, error: eMin } = await supabase
+      .from(VIEW_NAME)
+      .select("commence_date")
+      .order("commence_date", { ascending: true })
+      .limit(1);
+    if (eMin) throw eMin;
 
-  async function applyAutoPeriod() {
-    try {
-      const { data: dMin, error: eMin } = await supabase
-        .from(VIEW_NAME)
-        .select("commence_date")
-        .order("commence_date", { ascending: true })
-        .limit(1);
-      if (eMin) throw eMin;
+    const { data: dMax, error: eMax } = await supabase
+      .from(VIEW_NAME)
+      .select("commence_date")
+      .order("commence_date", { ascending: false })
+      .limit(1);
+    if (eMax) throw eMax;
 
-      const { data: dMax, error: eMax } = await supabase
-        .from(VIEW_NAME)
-        .select("commence_date")
-        .order("commence_date", { ascending: false })
-        .limit(1);
-      if (eMax) throw eMax;
-
-      const minDate = ((dMin as { commence_date: string }[] | null)?.[0]?.commence_date) || "";
-      const maxDate = ((dMax as { commence_date: string }[] | null)?.[0]?.commence_date) || "";
-      if (minDate) setStartDate(minDate);
-      if (maxDate) setEndDate(maxDate);
-    } catch {
-      // ignore
-    }
+    const minDate = ((dMin as { commence_date: string }[] | null)?.[0]?.commence_date) || "";
+    const maxDate = ((dMax as { commence_date: string }[] | null)?.[0]?.commence_date) || "";
+    return { minDate, maxDate };
   }
 
   useEffect(() => {
-    if (autoPeriod) void applyAutoPeriod();
+    (async () => {
+      try {
+        if (!autoPeriod) return;
+        const { minDate, maxDate } = await fetchMinMaxCommence();
+        if (minDate) setStartDate(minDate);
+        if (maxDate) setEndDate(maxDate);
+      } catch {
+        // ignore
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPeriod]);
 
@@ -227,10 +216,21 @@ export default function Page() {
     if (startDate && endDate && startDate > endDate) setEndDate(startDate);
   }, [startDate, endDate]);
 
+  function clearFilters() {
+    setSelCompanies([]);
+    setSelTickers([]);
+  }
+
   async function load() {
     setLoading(true);
     setErrorMsg(null);
     try {
+      if (autoPeriod) {
+        const { minDate, maxDate } = await fetchMinMaxCommence();
+        if (minDate) setStartDate(minDate);
+        if (maxDate) setEndDate(maxDate);
+      }
+
       const q = supabase
         .from(VIEW_NAME)
         .select("company_name,ticker,commence_date,capitalization_volume,halt_date,resume_trading_date")
@@ -248,15 +248,6 @@ export default function Page() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function clearFilters() {
-    setSelCompanies([]);
-    setSelTickers([]);
-    setSearch("");
-    setYLimit(18);
-    if (autoPeriod) void applyAutoPeriod();
-    setTimeout(() => tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   const rowsInWindow = useMemo(() => {
@@ -287,24 +278,13 @@ export default function Page() {
     const cset = new Set(selCompanies.map((o) => o.value));
     const tset = new Set(selTickers.map((o) => o.value));
 
-    let data = rowsInWindow.filter((r) => {
+    return rowsInWindow.filter((r) => {
       const root = normalizeTickerRoot(r.ticker);
       if (cset.size && (!r.company_name || !cset.has(r.company_name))) return false;
       if (tset.size && (!root || !tset.has(root))) return false;
       return true;
     });
-
-    const q = dfSearch.trim().toLowerCase();
-    if (q) {
-      data = data.filter((r) => {
-        const c = (r.company_name ?? "").toLowerCase();
-        const t = (r.ticker ?? "").toLowerCase();
-        return c.includes(q) || t.includes(q);
-      });
-    }
-
-    return data;
-  }, [rowsInWindow, selCompanies, selTickers, dfSearch]);
+  }, [rowsInWindow, selCompanies, selTickers]);
 
   const kpis = useMemo(() => {
     const total = rowsFiltered.length;
@@ -314,67 +294,73 @@ export default function Page() {
     return { total, withHalt, withResume, haltedAndResumed };
   }, [rowsFiltered]);
 
-  const scatterData = useMemo<ScatterPoint[]>(() => {
-    const out: ScatterPoint[] = [];
+  const chartPoints = useMemo<ScatterDatum[]>(() => {
+    const pts: ScatterDatum[] = [];
     for (const r of rowsFiltered) {
       if (!r.company_name || !r.ticker) continue;
       const root = normalizeTickerRoot(r.ticker);
+      if (!root) continue;
 
       if (r.commence_date) {
-        out.push({
-          company_name: r.company_name,
-          ticker: r.ticker,
+        pts.push({
           ticker_root: root,
-          point_kind: "LISTING",
-          date_iso: r.commence_date,
-          date_num: toDateNum(r.commence_date),
+          dateISO: r.commence_date,
+          dateNum: toDateNum(r.commence_date),
+          company: r.company_name,
+          ticker: r.ticker,
+          kind: "LISTING",
         });
       }
       if (r.halt_date) {
-        out.push({
-          company_name: r.company_name,
-          ticker: r.ticker,
+        pts.push({
           ticker_root: root,
-          point_kind: "HALT",
-          date_iso: r.halt_date,
-          date_num: toDateNum(r.halt_date),
+          dateISO: r.halt_date,
+          dateNum: toDateNum(r.halt_date),
+          company: r.company_name,
+          ticker: r.ticker,
+          kind: "HALT",
         });
       }
       if (r.resume_trading_date) {
-        out.push({
-          company_name: r.company_name,
-          ticker: r.ticker,
+        pts.push({
           ticker_root: root,
-          point_kind: "RESUME",
-          date_iso: r.resume_trading_date,
-          date_num: toDateNum(r.resume_trading_date),
+          dateISO: r.resume_trading_date,
+          dateNum: toDateNum(r.resume_trading_date),
+          company: r.company_name,
+          ticker: r.ticker,
+          kind: "RESUME",
         });
       }
     }
-    return out.filter((p) => Number.isFinite(p.date_num));
+    return pts.filter((p) => Number.isFinite(p.dateNum));
   }, [rowsFiltered]);
 
   const xDomain = useMemo<[number | "auto", number | "auto"]>(() => {
-    const times = scatterData.map((d) => d.date_num).filter((v) => Number.isFinite(v)) as number[];
+    const times = chartPoints.map((d) => d.dateNum).filter((v) => Number.isFinite(v)) as number[];
     if (!times.length) return ["auto", "auto"];
     const min = Math.min(...times);
     const max = Math.max(...times);
     return [min - 5 * DAY, max + 5 * DAY];
-  }, [scatterData]);
+  }, [chartPoints]);
 
   const xTicksMemo = useMemo(() => {
-    if (xDomain[0] === "auto") return { ticks: [] as number[], formatter: (v: number) => new Date(v).toISOString().slice(0, 10) };
+    if (xDomain[0] === "auto") {
+      return {
+        ticks: [] as number[],
+        formatter: (v: number) => new Date(v).toISOString().slice(0, 10),
+      };
+    }
     return makeTicksAdaptive([xDomain[0] as number, xDomain[1] as number]);
   }, [xDomain]);
 
   const tickerOrder = useMemo<string[]>(() => {
     const first = new Map<string, number>();
-    for (const d of scatterData) {
+    for (const d of chartPoints) {
       const prev = first.get(d.ticker_root);
-      if (Number.isFinite(d.date_num) && (prev === undefined || d.date_num < prev)) first.set(d.ticker_root, d.date_num);
+      if (prev === undefined || d.dateNum < prev) first.set(d.ticker_root, d.dateNum);
     }
     return Array.from(first.entries()).sort((a, b) => a[1] - b[1]).map(([t]) => t);
-  }, [scatterData]);
+  }, [chartPoints]);
 
   useEffect(() => {
     if (tickerOrder.length && yLimit > tickerOrder.length) setYLimit(tickerOrder.length);
@@ -384,26 +370,18 @@ export default function Page() {
     () => tickerOrder.slice(0, Math.max(1, Math.min(yLimit, tickerOrder.length || 1))),
     [tickerOrder, yLimit],
   );
-  const scatterVis = useMemo(
-    () => scatterData.filter((d) => visibleTickers.includes(d.ticker_root)),
-    [scatterData, visibleTickers],
+
+  const chartDataVis = useMemo(
+    () => chartPoints.filter((d) => visibleTickers.includes(d.ticker_root)),
+    [chartPoints, visibleTickers],
   );
+
   const chartHeight = useMemo(
-    () => Math.min(1200, Math.max(280, 70 + visibleTickers.length * 26)),
-    [visibleTickers],
+    () => Math.min(1200, Math.max(300, 70 + visibleTickers.length * 26)),
+    [visibleTickers.length],
   );
 
-  function onScatterClick(x: unknown) {
-    if (!isScatterClickPayload(x)) return;
-    const p = x.payload;
-    if (!p) return;
-
-    setSelCompanies([{ value: p.company_name, label: p.company_name }]);
-    setSelTickers([{ value: p.ticker_root, label: p.ticker_root }]);
-    setTimeout(() => tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-  }
-
-  async function exportRowsToXlsx(baseRows: Row[], filenameBase: string) {
+  async function exportTableXlsx(baseRows: Row[]) {
     if (!baseRows.length) {
       alert("Nada a exportar.");
       return;
@@ -416,13 +394,14 @@ export default function Page() {
       halt_date: r.halt_date ?? "",
       resume_trading_date: r.resume_trading_date ?? "",
     }));
+
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.json_to_sheet(rowsPlain);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "CPC_Universe");
     const s = startDate ? startDate.replaceAll("-", "") : "inicio";
     const e = endDate ? endDate.replaceAll("-", "") : "fim";
-    XLSX.writeFile(wb, `${filenameBase}_${s}_${e}.xlsx`);
+    XLSX.writeFile(wb, `cpc_universe_${s}_${e}.xlsx`);
   }
 
   return (
@@ -432,21 +411,22 @@ export default function Page() {
 
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={() => exportTableXlsx(rowsFiltered)}
+            disabled={!rowsFiltered.length}
+            className="px-3 h-10 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60"
+            title="Exportar tabela (.xlsx)"
+            aria-label="Exportar tabela (.xlsx)"
+          >
+            📄 .xlsx
+          </button>
+
+          <button
             onClick={clearFilters}
             className="border rounded px-3 h-10 font-semibold"
             title="Limpar filtros"
             aria-label="Limpar filtros"
           >
             🧹
-          </button>
-
-          <button
-            onClick={async () => exportRowsToXlsx(rowsFiltered, "cpc_universe")}
-            disabled={!rowsFiltered.length}
-            className="px-4 h-10 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-60 font-semibold"
-            title="Exportar tabela (.xlsx)"
-          >
-            📄 Exportar (.xlsx)
           </button>
 
           <button
@@ -514,6 +494,7 @@ export default function Page() {
             value={selCompanies}
             onChange={(v: MultiValue<Opt>) => setSelCompanies(v as Opt[])}
             classNamePrefix="cpc-select"
+            placeholder="Select..."
           />
         </div>
         <div>
@@ -524,116 +505,110 @@ export default function Page() {
             value={selTickers}
             onChange={(v: MultiValue<Opt>) => setSelTickers(v as Opt[])}
             classNamePrefix="cpc-select"
+            placeholder="Select..."
           />
         </div>
       </div>
 
-      <div className="max-w-[520px]">
-        <label className="block text-sm">Search (Company ou Ticker)</label>
-        <input
-          className="border rounded px-2 h-10 w-full"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="contém..."
-        />
-      </div>
-
-      <div className="space-y-3">
-        <div className="border rounded">
-          <button
-            className="w-full text-left px-3 py-2 border-b font-semibold"
-            onClick={() => setShowKpis((v) => !v)}
-          >
-            {showKpis ? "▾" : "▸"} KPIs
-          </button>
-          {showKpis && (
-            <div className="p-3">
-              <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
-                <div className="rounded-lg border p-3 bg-white shadow-sm">
-                  <div className="text-2xl font-semibold tracking-tight">{kpis.total}</div>
-                  <div className="text-sm mt-1">CPCs (filtrado)</div>
-                </div>
-                <div className="rounded-lg border p-3 bg-white shadow-sm">
-                  <div className="text-2xl font-semibold tracking-tight">{kpis.withHalt}</div>
-                  <div className="text-sm mt-1">Com HALT</div>
-                </div>
-                <div className="rounded-lg border p-3 bg-white shadow-sm">
-                  <div className="text-2xl font-semibold tracking-tight">{kpis.withResume}</div>
-                  <div className="text-sm mt-1">Com RESUME</div>
-                </div>
-                <div className="rounded-lg border p-3 bg-white shadow-sm">
-                  <div className="text-2xl font-semibold tracking-tight">{kpis.haltedAndResumed}</div>
-                  <div className="text-sm mt-1">HALT + RESUME</div>
-                </div>
-              </div>
+      <details open className="border rounded">
+        <summary className="cursor-pointer px-3 py-2 border-b text-sm font-semibold select-none">
+          KPIs
+        </summary>
+        <div className="p-3">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+            <div className="rounded-lg border p-3 bg-white shadow-sm">
+              <div className="text-2xl font-semibold tracking-tight">{kpis.total}</div>
+              <div className="text-sm mt-1">CPCs (filtrado)</div>
             </div>
-          )}
+            <div className="rounded-lg border p-3 bg-white shadow-sm">
+              <div className="text-2xl font-semibold tracking-tight">{kpis.withHalt}</div>
+              <div className="text-sm mt-1">Com HALT</div>
+            </div>
+            <div className="rounded-lg border p-3 bg-white shadow-sm">
+              <div className="text-2xl font-semibold tracking-tight">{kpis.withResume}</div>
+              <div className="text-sm mt-1">Com RESUME</div>
+            </div>
+            <div className="rounded-lg border p-3 bg-white shadow-sm">
+              <div className="text-2xl font-semibold tracking-tight">{kpis.haltedAndResumed}</div>
+              <div className="text-sm mt-1">HALT + RESUME</div>
+            </div>
+          </div>
         </div>
+      </details>
 
-        <div className="border rounded overflow-hidden">
+      <details open className="border rounded">
+        <summary className="cursor-pointer px-3 py-2 border-b text-sm font-semibold select-none">
+          Scatter
+        </summary>
+
+        <div className="px-3 py-2 border-b flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-xs text-black/70">Tickers visíveis:</span>
+
           <button
-            className="w-full text-left px-3 py-2 border-b font-semibold"
-            onClick={() => setShowScatter((v) => !v)}
+            className="border rounded px-2 h-8"
+            onClick={() => setYLimit((v) => Math.max(1, v - 10))}
+            aria-label="-10"
+            title="-10"
           >
-            {showScatter ? "▾" : "▸"} Scatter
+            −10
+          </button>
+          <button
+            className="border rounded px-2 h-8"
+            onClick={() => setYLimit((v) => Math.min(tickerOrder.length || v + 10, v + 10))}
+            aria-label="+10"
+            title="+10"
+          >
+            +10
+          </button>
+          <button
+            className="border rounded px-2 h-8"
+            onClick={() => setYLimit(Math.max(1, tickerOrder.length))}
+            aria-label="Todos"
+            title="Todos"
+          >
+            Todos
           </button>
 
-          {showScatter && (
-            <>
-              <div className="px-3 py-2 border-b flex flex-wrap items-center gap-3 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-black/70">Tickers visíveis:</span>
-                  <input
-                    type="number"
-                    className="border rounded px-2 h-8 w-20"
-                    value={yLimit}
-                    min={1}
-                    onChange={(e) => setYLimit(Number(e.target.value || "1"))}
-                  />
-                </div>
-                <div className="text-xs text-black/60">
-                  Clique no ponto → filtra Company/Ticker
-                </div>
-              </div>
-
-              <div style={{ height: chartHeight }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 18, right: 16, bottom: 18, left: 14 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      type="number"
-                      dataKey="date_num"
-                      domain={xDomain as [number | "auto", number | "auto"]}
-                      ticks={xTicksMemo.ticks}
-                      tickFormatter={xTicksMemo.formatter}
-                      tick={{ fontSize: 12 }}
-                    />
-                    <YAxis
-                      type="category"
-                      dataKey="ticker_root"
-                      width={100}
-                      tick={{ fontSize: 12 }}
-                      allowDuplicatedCategory={false}
-                    />
-                    <Tooltip content={<ScatterTip />} />
-                    <Scatter data={scatterVis} onClick={onScatterClick} />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            </>
-          )}
+          <span className="text-xs text-black/60 ml-auto">
+            Pontos: Listing / Halt / Resume
+          </span>
         </div>
-      </div>
 
-      <div ref={tableRef} className="w-full border rounded overflow-hidden">
-        <div className="px-3 py-2 border-b text-sm flex items-center gap-3">
+        <div className="w-full" style={{ height: chartHeight }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={{ top: 18, right: 16, bottom: 18, left: 14 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                type="number"
+                dataKey="dateNum"
+                domain={xDomain as unknown as [number, number]}
+                ticks={xTicksMemo.ticks}
+                tickFormatter={xTicksMemo.formatter as unknown as (value: number) => string}
+                tick={{ fontSize: 12 }}
+              />
+              <YAxis
+                type="category"
+                dataKey="ticker_root"
+                width={110}
+                tick={{ fontSize: 12 }}
+                allowDuplicatedCategory={false}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Scatter data={chartDataVis} />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      </details>
+
+      <div className="w-full border rounded overflow-hidden">
+        <div className="px-3 py-2 border-b text-sm flex items-center">
           <span className="font-semibold">Tabela</span>
-          {loading && <span className="text-xs text-black/60">carregando...</span>}
+          {loading && <span className="ml-3 text-xs text-black/60">carregando...</span>}
           <span className="ml-auto text-xs text-black/60">Linhas: {rowsFiltered.length}</span>
         </div>
 
         <div className="overflow-auto">
-          <table className="min-w-[1150px] w-full text-sm">
+          <table className="min-w-[1100px] w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
                 <th className="text-left p-2 border-b">Company</th>
@@ -668,7 +643,7 @@ export default function Page() {
       </div>
 
       <div className="text-xs text-black/60 leading-relaxed">
-        Fonte: <span className="font-mono">{VIEW_NAME}</span>. Datas e números formatados no front (pt-BR).
+        Fonte: <span className="font-mono">{VIEW_NAME}</span>.
       </div>
     </div>
   );
