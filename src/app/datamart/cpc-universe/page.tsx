@@ -496,6 +496,15 @@ export default function Page() {
               <button
                 type="button"
                 className="h-9 w-9 rounded border text-sm"
+                title="Aplicar auto-período (min→max) agora"
+                onClick={applyAutoPeriod}
+              >
+                🖌
+              </button>
+
+              <button
+                type="button"
+                className="h-9 w-9 rounded border text-sm"
                 title="Limpar filtros"
                 onClick={clearAll}
               >
@@ -507,7 +516,7 @@ export default function Page() {
               <input
                 type="checkbox"
                 checked={autoPeriod}
-                onChange={(e) => setAutoPeriod(e.target.checked)}
+                onChange={(e) => { const v = e.target.checked; setAutoPeriod(v); if (v) applyAutoPeriod(); }}
               />
               Auto-período (min→max) na view
             </label>
