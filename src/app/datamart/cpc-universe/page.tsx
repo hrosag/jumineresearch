@@ -77,7 +77,15 @@ function ScatterTip(props: ScatterTipProps) {
   const p0 = props.payload?.[0]?.payload;
   if (!props.active || !p0) return null;
 
-  return (
+  
+  /* autoPeriod sync */
+  useEffect(() => {
+    if (autoPeriod && minDate && maxDate) {
+      setStart(minDate);
+      setEnd(maxDate);
+    }
+  }, [autoPeriod, minDate, maxDate]);
+return (
     <div className="rounded border bg-white px-3 py-2 text-xs shadow">
       <div className="font-semibold">{p0.company_name}</div>
       <div className="text-muted-foreground">{p0.ticker}</div>
@@ -103,7 +111,8 @@ function clamp(n: number, min: number, max: number) {
 }
 
 export default function Page() {
-  const [loading, setLoading] = useState(false);
+  \1
+  const [runRequested, setRunRequested] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   // base data
@@ -128,6 +137,10 @@ export default function Page() {
   const [fShares, setFShares] = useState(""); // substring on formatted number or raw
   const [fHalt, setFHalt] = useState("");
   const [fResume, setFResume] = useState("");
+
+  const PAGE = 50;
+  const [tableLimit, setTableLimit] = useState(PAGE);
+
 
   const dCompany = useDeferredValue(fCompany);
   const dTicker = useDeferredValue(fTicker);
@@ -197,9 +210,9 @@ export default function Page() {
     setFShares("");
     setFHalt("");
     setFResume("");
-    if (minDate) setStart(minDate);
-    if (maxDate) setEnd(maxDate);
-    setAutoPeriod(true);
+    setStart("");
+    setEnd("");
+    setAutoPeriod(false);
   }
 
   // load min/max from view (commence_date)
@@ -207,6 +220,7 @@ export default function Page() {
     let alive = true;
 
     async function run() {
+      if (!runRequested) return;
       setErr(null);
       const { data, error } = await supabase
         .from(VIEW_NAME)
@@ -294,6 +308,7 @@ export default function Page() {
       }
 
       setLoading(false);
+      setRunRequested(false);
     }
 
     run();
@@ -358,7 +373,11 @@ export default function Page() {
     });
   }, [rows, dCompany, dTicker, dListing, dShares, dHalt, dResume]);
 
-  const kpis = useMemo(() => {
+  
+
+  const tableRowsPage = useMemo(() => filtered.slice(0, tableLimit), [filtered, tableLimit]);
+  useEffect(() => { setTableLimit(PAGE); }, [filtered.length]);
+const kpis = useMemo(() => {
     const total = filtered.length;
     let withHalt = 0;
     let withResume = 0;
@@ -485,10 +504,7 @@ export default function Page() {
                 type="button"
                 className="h-9 w-9 rounded border text-sm"
                 title="Aplicar auto-período (min→max)"
-                onClick={() => {
-                  setAutoPeriod(true);
-                  applyAutoPeriod();
-                }}
+                onClick={() => { setRunRequested(true); }}
               >
                 ⚡
               </button>
@@ -507,7 +523,7 @@ export default function Page() {
               <input
                 type="checkbox"
                 checked={autoPeriod}
-                onChange={(e) => setAutoPeriod(e.target.checked)}
+                onChange={(e) => { const v = e.target.checked; setAutoPeriod(v); if (v && minDate && maxDate) { setStart(minDate); setEnd(maxDate); } }}
               />
               Auto-período (min→max) na view
             </label>
@@ -605,7 +621,7 @@ export default function Page() {
                     return `${dd}/${mm}/${yy}`;
                   }}
                 />
-                <YAxis type="number" dataKey="y" tickFormatter={(v) => numBR(v)} />
+                <YAxis type="category" dataKey="ticker" />
                 <Tooltip content={<ScatterTip />} />
                 <Scatter
                   data={scatterData}
@@ -726,7 +742,7 @@ export default function Page() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((r, idx) => (
+                tableRowsPage.map((r, idx) => (
                   <tr key={idx} className="border-b last:border-b-0">
                     <td className="px-2 py-2" style={{ width: colW.company }}>
                       {r.company_name ?? ""}
@@ -751,6 +767,12 @@ export default function Page() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="flex items-center gap-2 px-3 py-2 text-xs">
+          <button className="border rounded px-3 py-1" onClick={() => setTableLimit((v) => Math.min(filtered.length, v + 50))} disabled={tableRowsPage.length >= filtered.length} title="Mostrar mais 50 linhas">Mostrar +50</button>
+          <button className="border rounded px-3 py-1" onClick={() => setTableLimit(filtered.length)} disabled={tableRowsPage.length >= filtered.length} title="Mostrar todas as linhas">Mostrar tudo</button>
+          <span className="text-muted-foreground">{tableRowsPage.length} / {filtered.length}</span>
         </div>
 
         <div className="px-3 py-2 text-xs text-muted-foreground">
