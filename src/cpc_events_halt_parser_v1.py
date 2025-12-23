@@ -127,6 +127,27 @@ def mark_done(ids: List[int]) -> None:
             print("Erro ao marcar done:", id_, resp.status_code, resp.text)
             resp.raise_for_status()
 
+def mark_running(ids: List[int]) -> None:
+    """Marca registros como 'running' (início do processamento)."""
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    headers = {**sb_headers(), "Content-Type": "application/json", "Prefer": "return=representation"}
+    payload = {"parser_status": "running"}
+    for id_ in ids:
+        resp = requests.patch(f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60)
+        if not resp.ok:
+            print("Erro ao marcar running:", id_, resp.status_code, resp.text)
+            resp.raise_for_status()
+
+def mark_error(id_: int) -> None:
+    """Marca um registro como 'error' (sem mensagem, pois all_data não tem parser_error)."""
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    headers = {**sb_headers(), "Content-Type": "application/json", "Prefer": "return=representation"}
+    payload = {"parser_status": "error"}
+    resp = requests.patch(f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60)
+    if not resp.ok:
+        print("Erro ao marcar error:", id_, resp.status_code, resp.text)
+        resp.raise_for_status()
+
 # --- Parser HALT ---
 def parse_event_halt(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
@@ -187,19 +208,38 @@ def main() -> None:
     print(f"{len(records)} registros marcados para HALT (profile={PARSER_PROFILE_ENV}).")
 
     rows: List[Dict[str, Any]] = []
-    ids: List[int] = []
+    ids_done: List[int] = []
+    ids_all: List[int] = [r.get("id") for r in records if r.get("id") is not None]
+
+    if ids_all:
+        # Marca como running assim que o job começa a processar
+        mark_running(ids_all)
+
     for rec in records:
-        row = parse_event_halt(rec)
-        if row:
-            rows.append(row)
-            ids.append(rec["id"])
+        rid = rec.get("id")
+        try:
+            row = parse_event_halt(rec)
+            if row:
+                rows.append(row)
+                if rid is not None:
+                    ids_done.append(rid)
+            else:
+                # Não conseguiu parsear: marca como error para não ficar preso em ready/running
+                if rid is not None:
+                    print("Registro não parseado; marcando error:", rid)
+                    mark_error(int(rid))
+        except Exception as e:
+            if rid is not None:
+                print("Erro ao processar registro; marcando error:", rid, str(e))
+                mark_error(int(rid))
+
 
     if not rows:
         print("Nada para inserir em cpc_events.")
         return
 
     upsert_events(rows)
-    mark_done(ids)
+    mark_done(ids_done)
     print("Concluído.")
 
 if __name__ == "__main__":
