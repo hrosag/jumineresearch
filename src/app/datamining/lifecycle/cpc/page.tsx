@@ -34,6 +34,14 @@ type Row = {
   parser_parsed_at?: string | null;
 };
 
+type ParserStatusRow = {
+  composite_key: string;
+  parser_profile: string | null;
+  parser_status: "ready" | "running" | "done" | "error" | null;
+  parser_parsed_at: string | null;
+};
+
+
 type ScatterDatum = {
   company: string;
   ticker: string;
@@ -403,6 +411,67 @@ export default function Page() {
       setParserLoadingId(null);
     }
   }
+
+  // ===== Polling de parser_status (F5 inteligente via all_data) =====
+  // A UI NÃO acompanha GitHub Actions diretamente. Ela apenas reconsulta os campos
+  // parser_* no Supabase enquanto existir alguma linha em ready/running.
+  const pendingKeySig = useMemo(() => {
+    const ks = rows
+      .filter(
+        (r) =>
+          (r.parser_status ?? "").toLowerCase() === "ready" ||
+          (r.parser_status ?? "").toLowerCase() === "running",
+      )
+      .map((r) => r.composite_key)
+      .filter((k): k is string => typeof k === "string" && k.length > 0);
+
+    ks.sort();
+    return ks.join("|");
+  }, [rows]);
+
+  useEffect(() => {
+    if (!pendingKeySig) return;
+
+    let alive = true;
+
+    const refresh = async () => {
+      const keys = pendingKeySig.split("|").filter(Boolean);
+      if (!keys.length) return;
+
+      const { data, error } = await supabase
+        .from("all_data")
+        .select("composite_key, parser_profile, parser_status, parser_parsed_at")
+        .in("composite_key", keys);
+
+      if (!alive) return;
+
+      if (error) {
+        console.warn("Polling parser_status falhou:", error);
+        return;
+      }
+
+      const updates = (data ?? []) as ParserStatusRow[];
+      if (!updates.length) return;
+
+      setRows((prev) =>
+        prev.map((r) => {
+          if (!r.composite_key) return r;
+          const u = updates.find((x) => x.composite_key === r.composite_key);
+          return u ? { ...r, ...u } : r;
+        }),
+      );
+    };
+
+    // refresh imediato + interval
+    void refresh();
+    const id = window.setInterval(() => void refresh(), 4000);
+
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [pendingKeySig]);
+
 
 // Âncoras (1º CPC por (company|ticker_root))
   const [anchors, setAnchors] = useState<Map<string, string>>(new Map());
@@ -1992,6 +2061,3 @@ return data;
     </div>
   );
 }
-
-// --- HALT support added: enable parser activation for HALT events ---
-// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
