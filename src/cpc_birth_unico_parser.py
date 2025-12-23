@@ -504,19 +504,51 @@ def mark_done(ids: List[int]) -> None:
             print("Erro ao marcar done:", id_, resp.status_code, resp.text)
             resp.raise_for_status()
 
+def mark_running(ids: List[int]) -> None:
+    """Marca registros como 'running' (início do processamento)."""
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    headers = {**sb_headers(), "Content-Type": "application/json", "Prefer": "return=representation"}
+    payload = {"parser_status": "running"}
+    for id_ in ids:
+        resp = requests.patch(f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60)
+        if not resp.ok:
+            print("Erro ao marcar running:", id_, resp.status_code, resp.text)
+            resp.raise_for_status()
+
+def mark_error(id_: int) -> None:
+    """Marca um registro como 'error' (sem mensagem, pois all_data não tem parser_error)."""
+    url = f"{SUPABASE_URL}/rest/v1/all_data"
+    headers = {**sb_headers(), "Content-Type": "application/json", "Prefer": "return=representation"}
+    payload = {"parser_status": "error"}
+    resp = requests.patch(f"{url}?id=eq.{id_}", headers=headers, data=json.dumps(payload), timeout=60)
+    if not resp.ok:
+        print("Erro ao marcar error:", id_, resp.status_code, resp.text)
+        resp.raise_for_status()
+
 
 def main() -> None:
     records = fetch_marked_rows()
+    ids_all: List[int] = [r.get(\"id\") for r in records if r.get(\"id\") is not None]
+
+    if ids_all:
+        mark_running([int(x) for x in ids_all])
+
     print(f"{len(records)} registros marcados para CPC birth Unico.")
 
     rows_cpc: List[Dict[str, Any]] = []
     ids: List[int] = []
     for rec in records:
-        row = parse_cpc_birth_unico(rec)
-        if row:
-            rows_cpc.append(row)
-            ids.append(rec["id"])
+        rid = rec.get("id")
+        try:
+            row = parse_cpc_birth_unico(rec)
+            if row:
+                rows_cpc.append(row)
+                ids.append(rec["id"])
 
+        except Exception as e:
+            if rid is not None:
+                print("Erro ao processar registro; marcando error:", rid, str(e))
+                mark_error(int(rid))
     if not rows_cpc:
         print("Nada para inserir em cpc_birth.")
         return
@@ -524,7 +556,6 @@ def main() -> None:
     upsert_cpc_birth(rows_cpc)
     mark_done(ids)
     print("Concluído.")
-
 
 if __name__ == "__main__":
     main()
