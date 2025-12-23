@@ -294,6 +294,87 @@ export default function Page() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [rows, setRows] = useState<Row[]>([]);
+  // Polling (F5 inteligente) para acompanhar parsers via Supabase.
+  // UI NÃO acompanha GitHub Actions diretamente; acompanha parser_status na all_data.
+  const POLL_MS = 4000;
+
+  const pendingKeys = useMemo(() => {
+    return rows
+      .filter(
+        (r) =>
+          !!r.composite_key &&
+          (r.parser_status === "ready" || r.parser_status === "running"),
+      )
+      .map((r) => r.composite_key as string);
+  }, [rows]);
+
+  const pendingKeySig = useMemo(() => {
+    if (pendingKeys.length === 0) return "";
+    // ordena para evitar reiniciar polling por variação de ordem
+    return [...pendingKeys].sort().join("|");
+  }, [pendingKeys]);
+
+  useEffect(() => {
+    if (!pendingKeySig) return;
+
+    let alive = true;
+
+    async function refreshStatus() {
+      if (!alive) return;
+      if (pendingKeys.length === 0) return;
+
+      const { data, error } = await supabase
+        .from("all_data")
+        .select(
+          "composite_key,parser_profile,parser_status,parser_parsed_at",
+        )
+        .in("composite_key", pendingKeys);
+
+      if (!alive) return;
+      if (error || !data) return;
+
+      // merge por composite_key, atualizando apenas campos de status
+      const byKey = new Map<
+        string,
+        {
+          composite_key: string;
+          parser_profile?: string | null;
+          parser_status?: string | null;
+          parser_parsed_at?: string | null;
+        }
+      >();
+      for (const d of data as any[]) {
+        if (d?.composite_key) byKey.set(d.composite_key, d);
+      }
+
+      setRows((prev) =>
+        prev.map((r) => {
+          const k = r.composite_key ?? "";
+          const u = byKey.get(k);
+          if (!u) return r;
+          return {
+            ...r,
+            parser_profile:
+              u.parser_profile ?? r.parser_profile ?? null,
+            parser_status: u.parser_status ?? r.parser_status ?? null,
+            parser_parsed_at:
+              u.parser_parsed_at ?? r.parser_parsed_at ?? null,
+          };
+        }),
+      );
+    }
+
+    // roda uma vez imediatamente e depois intervalado
+    refreshStatus();
+    const id = window.setInterval(refreshStatus, POLL_MS);
+
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingKeySig]);
+
 
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -1992,6 +2073,3 @@ return data;
     </div>
   );
 }
-
-// --- HALT support added: enable parser activation for HALT events ---
-// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
