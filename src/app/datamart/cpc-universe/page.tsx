@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
@@ -36,14 +37,16 @@ type Opt = { value: string; label: string };
 type ScatterPoint = {
   company_name: string;
   ticker: string;
+  ticker_root: string;
   kind: "LISTING" | "HALT" | "RESUME";
   date: string; // YYYY-MM-DD
   x: number; // epoch ms
-  y: number; // capitalization_volume
+  y: number; // ticker index
+  shares: number; // capitalization_volume numeric (for tooltip)
 };
 
 function toEpoch(dateYYYYMMDD: string) {
-  // date string "YYYY-MM-DD" -> epoch (local midnight). Good enough for scatter axis in this context.
+  // YYYY-MM-DD -> epoch local midnight (ok for scatter)
   const [y, m, d] = dateYYYYMMDD.split("-").map((v) => parseInt(v, 10));
   return new Date(y, (m ?? 1) - 1, d ?? 1).getTime();
 }
@@ -68,6 +71,10 @@ function numBR(v: unknown) {
   return n.toLocaleString("pt-BR");
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
 /** Tooltip renderer: keep it minimally typed to avoid breaking changes between recharts TS defs. */
 type ScatterTipProps = {
   active?: boolean;
@@ -80,10 +87,14 @@ function ScatterTip(props: ScatterTipProps) {
   return (
     <div className="rounded border bg-white px-3 py-2 text-xs shadow">
       <div className="font-semibold">{p0.company_name}</div>
-      <div className="text-muted-foreground">{p0.ticker}</div>
+      <div className="text-muted-foreground">
+        {p0.ticker_root}
+        {p0.ticker ? ` (${p0.ticker})` : ""}
+      </div>
       <div className="mt-1">
         <span className="font-medium">{p0.kind}</span> — {fmtBR(p0.date)}
       </div>
+      <div className="mt-1 text-muted-foreground">O/S Shares: {numBR(p0.shares)}</div>
     </div>
   );
 }
@@ -98,8 +109,12 @@ const COLS: Array<{ key: ColKey; label: string; align?: "left" | "right" | "cent
   { key: "resume", label: "Resume Trading", align: "left" },
 ];
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+type SortDir = "asc" | "desc";
+
+function tickerRootOf(ticker: string | null) {
+  const t = (ticker ?? "").trim();
+  if (!t) return "";
+  return t.includes(".") ? t.split(".")[0] : t;
 }
 
 export default function Page() {
@@ -109,12 +124,15 @@ export default function Page() {
   // base data
   const [rows, setRows] = useState<Row[]>([]);
 
+  // do not auto-load table data on page open
+  const [applied, setApplied] = useState(false);
+
   // auto-period (min->max)
   const [autoPeriod, setAutoPeriod] = useState(true);
   const [minDate, setMinDate] = useState<string | null>(null);
   const [maxDate, setMaxDate] = useState<string | null>(null);
 
-  // global filters (top) - keep consistent with CPC-Notices
+  // global filters (top)
   const [start, setStart] = useState<string>("");
   const [end, setEnd] = useState<string>("");
 
@@ -135,6 +153,28 @@ export default function Page() {
   const dShares = useDeferredValue(fShares);
   const dHalt = useDeferredValue(fHalt);
   const dResume = useDeferredValue(fResume);
+
+  // table sort (match CPC-Notices)
+  const [sortKey, setSortKey] = useState<ColKey>("listing");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  function toggleSort(k: ColKey) {
+    setSortKey((prevK) => {
+      if (prevK !== k) {
+        setSortDir("asc");
+        return k;
+      }
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return k;
+    });
+  }
+
+  // table pagination (match CPC-Notices)
+  const PAGE = 50;
+  const [tableLimit, setTableLimit] = useState(PAGE);
+  useEffect(() => {
+    setTableLimit(PAGE);
+  }, [dCompany, dTicker, dListing, dShares, dHalt, dResume, sortKey, sortDir, applied]);
 
   // table column widths (resizable)
   const [colW, setColW] = useState<Record<ColKey, number>>({
@@ -183,7 +223,7 @@ export default function Page() {
     window.addEventListener("pointerup", onUp);
   }
 
-  function applyAutoPeriod() {
+  function applyAutoPeriodToPickers() {
     if (minDate) setStart(minDate);
     if (maxDate) setEnd(maxDate);
   }
@@ -200,9 +240,11 @@ export default function Page() {
     if (minDate) setStart(minDate);
     if (maxDate) setEnd(maxDate);
     setAutoPeriod(true);
+    setSortKey("listing");
+    setSortDir("asc");
   }
 
-  // load min/max from view (commence_date)
+  // load min/max from view (commence_date) - light query
   useEffect(() => {
     let alive = true;
 
@@ -235,7 +277,7 @@ export default function Page() {
       setMinDate(mn);
       setMaxDate(mx);
 
-      // initialize the pickers
+      // initialize pickers (but DO NOT load rows automatically)
       if (mn && !start) setStart(mn);
       if (mx && !end) setEnd(mx);
     }
@@ -253,14 +295,16 @@ export default function Page() {
     if (minDate && maxDate) {
       setStart(minDate);
       setEnd(maxDate);
+      // do not auto-apply
     }
   }, [autoPeriod, minDate, maxDate]);
 
-  // load table rows for selected period (and global filters)
+  // load rows ONLY when applied=true
   useEffect(() => {
     let alive = true;
 
     async function run() {
+      if (!applied) return;
       if (!start || !end) return;
 
       setLoading(true);
@@ -268,7 +312,9 @@ export default function Page() {
 
       const q = supabase
         .from(VIEW_NAME)
-        .select("company_name,ticker,commence_date,capitalization_volume,halt_date,resume_trading_date")
+        .select(
+          "company_name,ticker,commence_date,capitalization_volume,halt_date,resume_trading_date",
+        )
         .gte("commence_date", start)
         .lte("commence_date", end);
 
@@ -276,9 +322,7 @@ export default function Page() {
 
       if (tickerRoots.length > 0) {
         // or condition: ticker ilike 'ROOT.%'
-        const ors = tickerRoots
-          .map((o) => `ticker.ilike.${o.value}.%`)
-          .join(",");
+        const ors = tickerRoots.map((o) => `ticker.ilike.${o.value}.%`).join(",");
         q.or(ors);
       }
 
@@ -300,13 +344,12 @@ export default function Page() {
     return () => {
       alive = false;
     };
-  }, [start, end, companyOpt, tickerRoots]);
+  }, [applied, start, end, companyOpt, tickerRoots]);
 
+  // options are derived from loaded rows (after ⚡)
   const companyOptions = useMemo<Opt[]>(() => {
     const s = new Set<string>();
-    for (const r of rows) {
-      if (r.company_name) s.add(r.company_name);
-    }
+    for (const r of rows) if (r.company_name) s.add(r.company_name);
     return Array.from(s)
       .sort((a, b) => a.localeCompare(b))
       .map((v) => ({ value: v, label: v }));
@@ -315,8 +358,7 @@ export default function Page() {
   const tickerRootOptions = useMemo<Opt[]>(() => {
     const s = new Set<string>();
     for (const r of rows) {
-      const t = r.ticker ?? "";
-      const root = t.includes(".") ? t.split(".")[0] : t;
+      const root = tickerRootOf(r.ticker);
       if (root) s.add(root);
     }
     return Array.from(s)
@@ -324,7 +366,10 @@ export default function Page() {
       .map((v) => ({ value: v, label: v }));
   }, [rows]);
 
+  // filter table rows (only when applied; otherwise keep empty)
   const filtered = useMemo(() => {
+    if (!applied) return [] as Row[];
+
     const fc = dCompany.trim().toLowerCase();
     const ft = dTicker.trim().toLowerCase();
     const fl = dListing.trim();
@@ -356,7 +401,7 @@ export default function Page() {
 
       return true;
     });
-  }, [rows, dCompany, dTicker, dListing, dShares, dHalt, dResume]);
+  }, [rows, applied, dCompany, dTicker, dListing, dShares, dHalt, dResume]);
 
   const kpis = useMemo(() => {
     const total = filtered.length;
@@ -375,48 +420,81 @@ export default function Page() {
     return { total, withHalt, withResume, withBoth };
   }, [filtered]);
 
+  // ticker order + index for Y axis
+  const tickerOrder = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of filtered) {
+      const root = tickerRootOf(r.ticker);
+      if (root) s.add(root);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [filtered]);
+
+  const tickerIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    tickerOrder.forEach((t, i) => m.set(t, i));
+    return m;
+  }, [tickerOrder]);
+
   const scatterData = useMemo<ScatterPoint[]>(() => {
+    if (!applied) return [];
+
     const pts: ScatterPoint[] = [];
 
     for (const r of filtered) {
       const company_name = r.company_name ?? "";
       const ticker = r.ticker ?? "";
-      const y = typeof r.capitalization_volume === "number" ? r.capitalization_volume : Number(r.capitalization_volume ?? 0);
+      const ticker_root = tickerRootOf(r.ticker);
+      if (!ticker_root) continue;
+
+      const y = tickerIndex.get(ticker_root);
+      if (y == null) continue;
+
+      const shares =
+        typeof r.capitalization_volume === "number"
+          ? r.capitalization_volume
+          : Number(r.capitalization_volume ?? 0);
 
       if (r.commence_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root,
           kind: "LISTING",
           date: r.commence_date,
           x: toEpoch(r.commence_date),
           y,
+          shares,
         });
       }
       if (r.halt_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root,
           kind: "HALT",
           date: r.halt_date,
           x: toEpoch(r.halt_date),
           y,
+          shares,
         });
       }
       if (r.resume_trading_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root,
           kind: "RESUME",
           date: r.resume_trading_date,
           x: toEpoch(r.resume_trading_date),
           y,
+          shares,
         });
       }
     }
 
     return pts;
-  }, [filtered]);
+  }, [filtered, applied, tickerIndex]);
 
   const xDomain = useMemo<[number, number]>(() => {
     if (scatterData.length === 0) return [0, 0];
@@ -430,8 +508,44 @@ export default function Page() {
     return [mn - DAY, mx + DAY];
   }, [scatterData]);
 
+  const sortedRows = useMemo(() => {
+    const arr = [...filtered];
+
+    const getVal = (r: Row, k: ColKey) => {
+      if (k === "company") return (r.company_name ?? "").toLowerCase();
+      if (k === "ticker") return (r.ticker ?? "").toLowerCase();
+      if (k === "listing") return r.commence_date ?? "";
+      if (k === "halt") return r.halt_date ?? "";
+      if (k === "resume") return r.resume_trading_date ?? "";
+      // shares
+      const raw = r.capitalization_volume;
+      const n = typeof raw === "number" ? raw : Number(raw ?? NaN);
+      return Number.isFinite(n) ? n : -Infinity;
+    };
+
+    arr.sort((a, b) => {
+      const va = getVal(a, sortKey);
+      const vb = getVal(b, sortKey);
+      if (va < vb) return sortDir === "asc" ? -1 : 1;
+      if (va > vb) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const tableRowsPage = useMemo(
+    () => sortedRows.slice(0, tableLimit),
+    [sortedRows, tableLimit],
+  );
+
+  const sortIndicator = (k: ColKey) =>
+    sortKey === k ? (
+      <span className="ml-1 text-xs">{sortDir === "asc" ? "▲" : "▼"}</span>
+    ) : null;
+
   function exportXlsx() {
-    const data = filtered.map((r) => ({
+    const data = sortedRows.map((r) => ({
       Company: r.company_name ?? "",
       Ticker: r.ticker ?? "",
       "Date of Listing": r.commence_date ?? "",
@@ -463,6 +577,7 @@ export default function Page() {
                   onChange={(e) => {
                     setAutoPeriod(false);
                     setStart(e.target.value);
+                    setApplied(false);
                   }}
                 />
               </label>
@@ -476,6 +591,7 @@ export default function Page() {
                   onChange={(e) => {
                     setAutoPeriod(false);
                     setEnd(e.target.value);
+                    setApplied(false);
                   }}
                 />
               </label>
@@ -484,10 +600,11 @@ export default function Page() {
               <button
                 type="button"
                 className="h-9 w-9 rounded border text-sm"
-                title="Aplicar auto-período (min→max)"
+                title="Aplicar auto-período (min→max) e executar"
                 onClick={() => {
                   setAutoPeriod(true);
-                  applyAutoPeriod();
+                  applyAutoPeriodToPickers(); // sets start/end
+                  setApplied(true); // triggers load
                 }}
               >
                 ⚡
@@ -497,7 +614,12 @@ export default function Page() {
                 type="button"
                 className="h-9 w-9 rounded border text-sm"
                 title="Limpar filtros"
-                onClick={clearAll}
+                onClick={() => {
+                  clearAll();
+                  setRows([]);
+                  setErr(null);
+                  setApplied(false);
+                }}
               >
                 🧹
               </button>
@@ -507,7 +629,10 @@ export default function Page() {
               <input
                 type="checkbox"
                 checked={autoPeriod}
-                onChange={(e) => setAutoPeriod(e.target.checked)}
+                onChange={(e) => {
+                  setAutoPeriod(e.target.checked);
+                  setApplied(false);
+                }}
               />
               Auto-período (min→max) na view
             </label>
@@ -520,9 +645,13 @@ export default function Page() {
                 instanceId="company"
                 isClearable
                 value={companyOpt}
-                onChange={(v) => setCompanyOpt((v as Opt) ?? null)}
+                onChange={(v) => {
+                  setCompanyOpt((v as Opt) ?? null);
+                  setApplied(false);
+                }}
                 options={companyOptions}
-                placeholder="Select..."
+                placeholder={applied ? "Select..." : "Execute (⚡) para carregar opções"}
+                isDisabled={!applied && rows.length === 0}
               />
             </div>
 
@@ -532,20 +661,31 @@ export default function Page() {
                 instanceId="tickerRoot"
                 isMulti
                 value={tickerRoots}
-                onChange={(v) => setTickerRoots(v)}
+                onChange={(v) => {
+                  setTickerRoots(v);
+                  setApplied(false);
+                }}
                 options={tickerRootOptions}
-                placeholder="Select..."
+                placeholder={applied ? "Select..." : "Execute (⚡) para carregar opções"}
+                isDisabled={!applied && rows.length === 0}
               />
             </div>
           </div>
+
+          {!applied ? (
+            <div className="text-xs text-muted-foreground">
+              Dica: clique em ⚡ para carregar os dados do período selecionado.
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="h-9 rounded bg-indigo-600 px-3 text-sm font-medium text-white"
+            className="h-9 rounded bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-60"
             onClick={exportXlsx}
             title="Exportar (.xlsx)"
+            disabled={!sortedRows.length}
           >
             Exportar (.xlsx)
           </button>
@@ -558,7 +698,7 @@ export default function Page() {
         </div>
       ) : null}
 
-      {/* KPIs */}
+      {/* KPIs (closed by default, like Notices preference) */}
       <details className="rounded border">
         <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">
           KPIs
@@ -583,8 +723,8 @@ export default function Page() {
         </div>
       </details>
 
-      {/* Scatter */}
-      <details className="rounded border" open>
+      {/* Scatter (closed by default) */}
+      <details className="rounded border">
         <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">
           Scatter
         </summary>
@@ -605,7 +745,13 @@ export default function Page() {
                     return `${dd}/${mm}/${yy}`;
                   }}
                 />
-                <YAxis type="number" dataKey="y" tickFormatter={(v) => numBR(v)} />
+                <YAxis
+                  type="number"
+                  dataKey="y"
+                  domain={[-1, Math.max(1, tickerOrder.length)]}
+                  tickFormatter={(v) => tickerOrder[v as number] ?? ""}
+                  interval={0}
+                />
                 <Tooltip content={<ScatterTip />} />
                 <Scatter
                   data={scatterData}
@@ -613,28 +759,22 @@ export default function Page() {
                     const sp = (p as unknown as { payload?: ScatterPoint }).payload;
                     if (!sp) return;
                     if (sp.company_name) setCompanyOpt({ value: sp.company_name, label: sp.company_name });
-                    const root = sp.ticker?.includes(".") ? sp.ticker.split(".")[0] : sp.ticker;
-                    if (root) setTickerRoots([{ value: root, label: root }]);
+                    if (sp.ticker_root) setTickerRoots([{ value: sp.ticker_root, label: sp.ticker_root }]);
+                    // user can click ⚡ again to re-run with those filters
+                    setApplied(false);
                   }}
                 />
               </ScatterChart>
             </ResponsiveContainer>
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            Dica: clique em um ponto para filtrar Company e Ticker (root).
+            Dica: clique em um ponto para preencher Company e Ticker (root). Depois clique em ⚡.
           </div>
         </div>
       </details>
 
-      {/* Table */}
+      {/* Table (no "Tabela" label, no line count) */}
       <div className="rounded border">
-        <div className="flex items-center justify-between px-3 py-2">
-          <div className="text-sm font-medium">Tabela</div>
-          <div className="text-xs text-muted-foreground">
-            Linhas: {loading ? "…" : filtered.length}
-          </div>
-        </div>
-
         {/* horizontal scroll + resizable columns */}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] border-collapse text-sm">
@@ -643,31 +783,32 @@ export default function Page() {
                 {COLS.map((c) => (
                   <th
                     key={c.key}
-                    className="relative border-b px-2 py-2 text-left font-semibold"
-                    style={{
-                      width: colW[c.key],
-                      minWidth: 90,
-                      textAlign: c.align ?? "left",
-                      whiteSpace: "nowrap",
-                    }}
+                    className="relative border-b px-2 py-2 text-left font-semibold select-none"
+                    style={{ width: colW[c.key], minWidth: colW[c.key] }}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span>{c.label}</span>
-                      <span
-                        role="separator"
-                        aria-orientation="vertical"
-                        className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
-                        onPointerDown={(e) => beginResize(e, c.key)}
-                        title="Arraste para redimensionar"
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex items-center"
+                      onClick={() => toggleSort(c.key)}
+                      title="Ordenar"
+                    >
+                      {c.label}
+                      {sortIndicator(c.key)}
+                    </button>
+
+                    {/* resize handle */}
+                    <span
+                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize"
+                      onPointerDown={(e) => beginResize(e, c.key)}
+                      title="Arraste para redimensionar"
+                    />
                   </th>
                 ))}
               </tr>
 
-              {/* filters row (like CPC-Notices) */}
-              <tr>
-                <th className="border-b px-2 py-2">
+              {/* filter row */}
+              <tr className="bg-white">
+                <th className="border-b px-2 py-2" style={{ width: colW.company }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="Filtrar"
@@ -675,7 +816,7 @@ export default function Page() {
                     onChange={(e) => setFCompany(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2">
+                <th className="border-b px-2 py-2" style={{ width: colW.ticker }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="Filtrar"
@@ -683,7 +824,7 @@ export default function Page() {
                     onChange={(e) => setFTicker(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2">
+                <th className="border-b px-2 py-2" style={{ width: colW.listing }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD"
@@ -691,7 +832,7 @@ export default function Page() {
                     onChange={(e) => setFListing(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2">
+                <th className="border-b px-2 py-2" style={{ width: colW.shares }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs text-right"
                     placeholder="Filtrar"
@@ -699,7 +840,7 @@ export default function Page() {
                     onChange={(e) => setFShares(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2">
+                <th className="border-b px-2 py-2" style={{ width: colW.halt }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY-MM-DD"
@@ -707,7 +848,7 @@ export default function Page() {
                     onChange={(e) => setFHalt(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2">
+                <th className="border-b px-2 py-2" style={{ width: colW.resume }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY-MM-DD"
@@ -719,31 +860,43 @@ export default function Page() {
             </thead>
 
             <tbody>
-              {filtered.length === 0 ? (
+              {loading ? (
                 <tr>
-                  <td colSpan={COLS.length} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                    {loading ? "Carregando..." : "Nenhum registro encontrado."}
+                  <td className="px-2 py-3 text-xs text-muted-foreground" colSpan={COLS.length}>
+                    Carregando...
+                  </td>
+                </tr>
+              ) : !applied ? (
+                <tr>
+                  <td className="px-2 py-3 text-xs text-muted-foreground" colSpan={COLS.length}>
+                    Clique em ⚡ para carregar os dados.
+                  </td>
+                </tr>
+              ) : tableRowsPage.length === 0 ? (
+                <tr>
+                  <td className="px-2 py-3 text-xs text-muted-foreground" colSpan={COLS.length}>
+                    Nenhum resultado com os filtros atuais.
                   </td>
                 </tr>
               ) : (
-                filtered.map((r, idx) => (
-                  <tr key={idx} className="border-b last:border-b-0">
-                    <td className="px-2 py-2" style={{ width: colW.company }}>
+                tableRowsPage.map((r, idx) => (
+                  <tr key={`${r.ticker ?? ""}-${r.commence_date ?? ""}-${idx}`} className="hover:bg-muted/30">
+                    <td className="border-b px-2 py-2" style={{ width: colW.company }}>
                       {r.company_name ?? ""}
                     </td>
-                    <td className="px-2 py-2" style={{ width: colW.ticker }}>
+                    <td className="border-b px-2 py-2" style={{ width: colW.ticker }}>
                       {r.ticker ?? ""}
                     </td>
-                    <td className="px-2 py-2" style={{ width: colW.listing }}>
+                    <td className="border-b px-2 py-2" style={{ width: colW.listing }}>
                       {fmtBR(r.commence_date)}
                     </td>
-                    <td className="px-2 py-2 text-right" style={{ width: colW.shares }}>
+                    <td className="border-b px-2 py-2 text-right" style={{ width: colW.shares }}>
                       {numBR(r.capitalization_volume)}
                     </td>
-                    <td className="px-2 py-2" style={{ width: colW.halt }}>
+                    <td className="border-b px-2 py-2" style={{ width: colW.halt }}>
                       {fmtBR(r.halt_date)}
                     </td>
-                    <td className="px-2 py-2" style={{ width: colW.resume }}>
+                    <td className="border-b px-2 py-2" style={{ width: colW.resume }}>
                       {fmtBR(r.resume_trading_date)}
                     </td>
                   </tr>
@@ -753,9 +906,20 @@ export default function Page() {
           </table>
         </div>
 
-        <div className="px-3 py-2 text-xs text-muted-foreground">
-          Fonte: {VIEW_NAME}. Datas e números formatados no front (pt-BR). Arraste o lado direito do header para redimensionar colunas.
-        </div>
+        {/* paginator like Notices (show more) */}
+        {applied && sortedRows.length > 0 ? (
+          <div className="flex items-center justify-end gap-2 px-3 py-2">
+            <button
+              type="button"
+              className="rounded border px-3 py-1 text-xs disabled:opacity-60"
+              onClick={() => setTableLimit((v) => Math.max(PAGE, v + PAGE))}
+              disabled={tableLimit >= sortedRows.length}
+              title="Mostrar mais"
+            >
+              Mostrar mais
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
