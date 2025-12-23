@@ -36,10 +36,12 @@ type Opt = { value: string; label: string };
 type ScatterPoint = {
   company_name: string;
   ticker: string;
+  ticker_root: string;
   kind: "LISTING" | "HALT" | "RESUME";
   date: string; // YYYY-MM-DD
   x: number; // epoch ms
-  y: number; // capitalization_volume
+  y: number; // ticker index (categorical axis)
+  shares?: number; // optional payload for tooltip
 };
 
 function toEpoch(dateYYYYMMDD: string) {
@@ -108,6 +110,10 @@ export default function Page() {
 
   // base data
   const [rows, setRows] = useState<Row[]>([]);
+
+  // gate: only load data when user explicitly applies (⚡)
+  const [applied, setApplied] = useState(false);
+  const applyingRef = useRef(false);
 
   // auto-period (min->max)
   const [autoPeriod, setAutoPeriod] = useState(true);
@@ -200,7 +206,13 @@ export default function Page() {
     if (minDate) setStart(minDate);
     if (maxDate) setEnd(maxDate);
     setAutoPeriod(true);
+
+    // reset results/state (workspace behavior)
+    setRows([]);
+    setErr(null);
+    setApplied(false);
   }
+
 
   // load min/max from view (commence_date)
   useEffect(() => {
@@ -256,11 +268,18 @@ export default function Page() {
     }
   }, [autoPeriod, minDate, maxDate]);
 
+  // any change in global filters requires explicit re-apply (⚡)
+  useEffect(() => {
+    setApplied(false);
+  }, [applied, start, end, companyOpt, tickerRoots]);
+
+
   // load table rows for selected period (and global filters)
   useEffect(() => {
     let alive = true;
 
     async function run() {
+      if (!applied) return;
       if (!start || !end) return;
 
       setLoading(true);
@@ -300,7 +319,7 @@ export default function Page() {
     return () => {
       alive = false;
     };
-  }, [start, end, companyOpt, tickerRoots]);
+  }, [applied, start, end, companyOpt, tickerRoots]);
 
   const companyOptions = useMemo<Opt[]>(() => {
     const s = new Set<string>();
@@ -375,48 +394,80 @@ export default function Page() {
     return { total, withHalt, withResume, withBoth };
   }, [filtered]);
 
+  
+  const tickerOrder = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of filtered) {
+      const t = (r.ticker ?? "").trim();
+      const root = t.includes(".") ? t.split(".")[0] : t;
+      if (root) s.add(root);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [filtered]);
+
+  const tickerIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    tickerOrder.forEach((t, i) => m.set(t, i));
+    return m;
+  }, [tickerOrder]);
+
   const scatterData = useMemo<ScatterPoint[]>(() => {
     const pts: ScatterPoint[] = [];
 
     for (const r of filtered) {
       const company_name = r.company_name ?? "";
       const ticker = r.ticker ?? "";
-      const y = typeof r.capitalization_volume === "number" ? r.capitalization_volume : Number(r.capitalization_volume ?? 0);
+      const root = ticker.includes(".") ? ticker.split(".")[0] : ticker;
+      if (!root) continue;
+
+      const y = tickerIndex.get(root);
+      if (y == null) continue;
+
+      const shares =
+        typeof r.capitalization_volume === "number"
+          ? r.capitalization_volume
+          : Number(r.capitalization_volume ?? 0);
 
       if (r.commence_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root: root,
           kind: "LISTING",
           date: r.commence_date,
           x: toEpoch(r.commence_date),
           y,
+          shares,
         });
       }
       if (r.halt_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root: root,
           kind: "HALT",
           date: r.halt_date,
           x: toEpoch(r.halt_date),
           y,
+          shares,
         });
       }
       if (r.resume_trading_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root: root,
           kind: "RESUME",
           date: r.resume_trading_date,
           x: toEpoch(r.resume_trading_date),
           y,
+          shares,
         });
       }
     }
 
     return pts;
-  }, [filtered]);
+  }, [filtered, tickerIndex]);
 
   const xDomain = useMemo<[number, number]>(() => {
     if (scatterData.length === 0) return [0, 0];
@@ -486,8 +537,10 @@ export default function Page() {
                 className="h-9 w-9 rounded border text-sm"
                 title="Aplicar auto-período (min→max)"
                 onClick={() => {
+                  applyingRef.current = true;
                   setAutoPeriod(true);
                   applyAutoPeriod();
+                  setApplied(true);
                 }}
               >
                 ⚡
@@ -605,7 +658,12 @@ export default function Page() {
                     return `${dd}/${mm}/${yy}`;
                   }}
                 />
-                <YAxis type="number" dataKey="y" tickFormatter={(v) => numBR(v)} />
+                <YAxis
+                  type="number"
+                  dataKey="y"
+                  domain={[-1, tickerOrder.length]}
+                  tickFormatter={(v) => tickerOrder[v as number] ?? ""}
+                />
                 <Tooltip content={<ScatterTip />} />
                 <Scatter
                   data={scatterData}
