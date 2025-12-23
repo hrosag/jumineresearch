@@ -4,16 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       composite_key:
-        description: "Composite key do boletim a parsear"
+        description: "Composite key do boletim a parsear (ex.: n20080130.txt-9). Se vazio, processa todos em status=ready."
         required: false
         type: string
       parser_profile:
-        description: "Nome do parser (ex.: cpc_birth)"
+        description: "Nome do parser_profile a processar"
         required: false
+        default: "cpc_birth"
         type: string
 
 jobs:
-  run-cpc-birth-unico:
+  run_cpc_birth_unico:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,13 +30,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install requests
 
-      - name: Run CPC birth Unico parser
+      - name: Run parser
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          COMPOSITE_KEY: ${{ github.event.inputs.composite_key }}
-          PARSER_PROFILE: ${{ github.event.inputs.parser_profile }}
+          COMPOSITE_KEY: ${{ inputs.composite_key }}
+          PARSER_PROFILE: ${{ inputs.parser_profile }}
         run: |
           python src/cpc_birth_unico_parser.py
