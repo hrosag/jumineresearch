@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
+import React, { useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import Select, { MultiValue } from "react-select";
 import {
@@ -36,14 +36,15 @@ type Opt = { value: string; label: string };
 type ScatterPoint = {
   company_name: string;
   ticker: string;
+  ticker_root: string;
   kind: "LISTING" | "HALT" | "RESUME";
   date: string; // YYYY-MM-DD
   x: number; // epoch ms
-  y: number; // capitalization_volume
+  y: number; // ticker index (for Y axis)
+  shares: number; // keep in payload for tooltip
 };
 
 function toEpoch(dateYYYYMMDD: string) {
-  // date string "YYYY-MM-DD" -> epoch (local midnight). Good enough for scatter axis in this context.
   const [y, m, d] = dateYYYYMMDD.split("-").map((v) => parseInt(v, 10));
   return new Date(y, (m ?? 1) - 1, d ?? 1).getTime();
 }
@@ -84,6 +85,9 @@ function ScatterTip(props: ScatterTipProps) {
       <div className="mt-1">
         <span className="font-medium">{p0.kind}</span> — {fmtBR(p0.date)}
       </div>
+      <div className="mt-1 text-muted-foreground">
+        O/S Shares: {numBR(p0.shares) || "—"}
+      </div>
     </div>
   );
 }
@@ -109,19 +113,22 @@ export default function Page() {
   // base data
   const [rows, setRows] = useState<Row[]>([]);
 
+  // workspace gate: only load when user clicks ⚡
+  const [applied, setApplied] = useState(false);
+
   // auto-period (min->max)
   const [autoPeriod, setAutoPeriod] = useState(true);
   const [minDate, setMinDate] = useState<string | null>(null);
   const [maxDate, setMaxDate] = useState<string | null>(null);
 
-  // global filters (top) - keep consistent with CPC-Notices
+  // global filters (top)
   const [start, setStart] = useState<string>("");
   const [end, setEnd] = useState<string>("");
 
   const [companyOpt, setCompanyOpt] = useState<Opt | null>(null);
   const [tickerRoots, setTickerRoots] = useState<MultiValue<Opt>>([]);
 
-  // table header filters (like CPC-Notices)
+  // table header filters
   const [fCompany, setFCompany] = useState("");
   const [fTicker, setFTicker] = useState("");
   const [fListing, setFListing] = useState(""); // YYYY or YYYY-MM or YYYY-MM-DD
@@ -202,12 +209,13 @@ export default function Page() {
     setAutoPeriod(true);
   }
 
-  // load min/max from view (commence_date)
+  // load min/max from view (commence_date) - OK to run on mount
   useEffect(() => {
     let alive = true;
 
     async function run() {
       setErr(null);
+
       const { data, error } = await supabase
         .from(VIEW_NAME)
         .select("commence_date")
@@ -235,7 +243,7 @@ export default function Page() {
       setMinDate(mn);
       setMaxDate(mx);
 
-      // initialize the pickers
+      // initialize pickers (but do NOT load data)
       if (mn && !start) setStart(mn);
       if (mx && !end) setEnd(mx);
     }
@@ -247,7 +255,7 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // enforce autoPeriod when toggled on
+  // enforce autoPeriod when toggled on (still no auto-load)
   useEffect(() => {
     if (!autoPeriod) return;
     if (minDate && maxDate) {
@@ -256,11 +264,12 @@ export default function Page() {
     }
   }, [autoPeriod, minDate, maxDate]);
 
-  // load table rows for selected period (and global filters)
+  // load table rows ONLY when applied=true
   useEffect(() => {
     let alive = true;
 
     async function run() {
+      if (!applied) return;
       if (!start || !end) return;
 
       setLoading(true);
@@ -275,10 +284,7 @@ export default function Page() {
       if (companyOpt?.value) q.eq("company_name", companyOpt.value);
 
       if (tickerRoots.length > 0) {
-        // or condition: ticker ilike 'ROOT.%'
-        const ors = tickerRoots
-          .map((o) => `ticker.ilike.${o.value}.%`)
-          .join(",");
+        const ors = tickerRoots.map((o) => `ticker.ilike.${o.value}.%`).join(",");
         q.or(ors);
       }
 
@@ -300,7 +306,7 @@ export default function Page() {
     return () => {
       alive = false;
     };
-  }, [start, end, companyOpt, tickerRoots]);
+  }, [applied, start, end, companyOpt, tickerRoots]);
 
   const companyOptions = useMemo<Opt[]>(() => {
     const s = new Set<string>();
@@ -375,48 +381,80 @@ export default function Page() {
     return { total, withHalt, withResume, withBoth };
   }, [filtered]);
 
+  // Y axis: tickers (root)
+  const tickerOrder = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of filtered) {
+      const t = (r.ticker ?? "").trim();
+      const root = t.includes(".") ? t.split(".")[0] : t;
+      if (root) s.add(root);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [filtered]);
+
+  const tickerIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    tickerOrder.forEach((t, i) => m.set(t, i));
+    return m;
+  }, [tickerOrder]);
+
   const scatterData = useMemo<ScatterPoint[]>(() => {
     const pts: ScatterPoint[] = [];
 
     for (const r of filtered) {
       const company_name = r.company_name ?? "";
       const ticker = r.ticker ?? "";
-      const y = typeof r.capitalization_volume === "number" ? r.capitalization_volume : Number(r.capitalization_volume ?? 0);
+      const root = ticker.includes(".") ? ticker.split(".")[0] : ticker;
+      if (!root) continue;
+
+      const y = tickerIndex.get(root);
+      if (y == null) continue;
+
+      const shares =
+        typeof r.capitalization_volume === "number"
+          ? r.capitalization_volume
+          : Number(r.capitalization_volume ?? 0);
 
       if (r.commence_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root: root,
           kind: "LISTING",
           date: r.commence_date,
           x: toEpoch(r.commence_date),
           y,
+          shares,
         });
       }
       if (r.halt_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root: root,
           kind: "HALT",
           date: r.halt_date,
           x: toEpoch(r.halt_date),
           y,
+          shares,
         });
       }
       if (r.resume_trading_date) {
         pts.push({
           company_name,
           ticker,
+          ticker_root: root,
           kind: "RESUME",
           date: r.resume_trading_date,
           x: toEpoch(r.resume_trading_date),
           y,
+          shares,
         });
       }
     }
 
     return pts;
-  }, [filtered]);
+  }, [filtered, tickerIndex]);
 
   const xDomain = useMemo<[number, number]>(() => {
     if (scatterData.length === 0) return [0, 0];
@@ -426,7 +464,6 @@ export default function Page() {
       mn = Math.min(mn, p.x);
       mx = Math.max(mx, p.x);
     }
-    // padding 1 day
     return [mn - DAY, mx + DAY];
   }, [scatterData]);
 
@@ -443,6 +480,22 @@ export default function Page() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "CPC Universe");
     XLSX.writeFile(wb, "cpc-universe.xlsx");
+  }
+
+  // actions
+  function onClickRunAutoPeriod() {
+    setAutoPeriod(true);
+    applyAutoPeriod();
+    // Ensure we "run" after period updates are enqueued
+    // (this avoids any rare batched-order surprises)
+    queueMicrotask(() => setApplied(true));
+  }
+
+  function onClickClear() {
+    clearAll();
+    setRows([]);
+    setErr(null);
+    setApplied(false);
   }
 
   return (
@@ -463,6 +516,7 @@ export default function Page() {
                   onChange={(e) => {
                     setAutoPeriod(false);
                     setStart(e.target.value);
+                    setApplied(false);
                   }}
                 />
               </label>
@@ -476,6 +530,7 @@ export default function Page() {
                   onChange={(e) => {
                     setAutoPeriod(false);
                     setEnd(e.target.value);
+                    setApplied(false);
                   }}
                 />
               </label>
@@ -484,11 +539,8 @@ export default function Page() {
               <button
                 type="button"
                 className="h-9 w-9 rounded border text-sm"
-                title="Aplicar auto-período (min→max)"
-                onClick={() => {
-                  setAutoPeriod(true);
-                  applyAutoPeriod();
-                }}
+                title="Aplicar auto-período (min→max) e executar"
+                onClick={onClickRunAutoPeriod}
               >
                 ⚡
               </button>
@@ -497,7 +549,7 @@ export default function Page() {
                 type="button"
                 className="h-9 w-9 rounded border text-sm"
                 title="Limpar filtros"
-                onClick={clearAll}
+                onClick={onClickClear}
               >
                 🧹
               </button>
@@ -507,10 +559,24 @@ export default function Page() {
               <input
                 type="checkbox"
                 checked={autoPeriod}
-                onChange={(e) => setAutoPeriod(e.target.checked)}
+                onChange={(e) => {
+                  setAutoPeriod(e.target.checked);
+                  setApplied(false);
+                }}
               />
               Auto-período (min→max) na view
             </label>
+
+            {/* Optional explicit "Executar" button (keeps the UX clear) */}
+            <button
+              type="button"
+              className="h-9 rounded border px-3 text-sm"
+              title="Executar busca com filtros atuais"
+              onClick={() => setApplied(true)}
+              disabled={!start || !end}
+            >
+              Executar
+            </button>
           </div>
 
           <div className="flex flex-wrap gap-3">
@@ -520,7 +586,10 @@ export default function Page() {
                 instanceId="company"
                 isClearable
                 value={companyOpt}
-                onChange={(v) => setCompanyOpt((v as Opt) ?? null)}
+                onChange={(v) => {
+                  setCompanyOpt((v as Opt) ?? null);
+                  setApplied(false);
+                }}
                 options={companyOptions}
                 placeholder="Select..."
               />
@@ -532,20 +601,30 @@ export default function Page() {
                 instanceId="tickerRoot"
                 isMulti
                 value={tickerRoots}
-                onChange={(v) => setTickerRoots(v)}
+                onChange={(v) => {
+                  setTickerRoots(v);
+                  setApplied(false);
+                }}
                 options={tickerRootOptions}
                 placeholder="Select..."
               />
             </div>
           </div>
+
+          {!applied ? (
+            <div className="text-xs text-muted-foreground">
+              Ajuste os filtros e clique em <strong>Executar</strong> (ou ⚡) para carregar os dados.
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="h-9 rounded bg-indigo-600 px-3 text-sm font-medium text-white"
+            className="h-9 rounded bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-60"
             onClick={exportXlsx}
             title="Exportar (.xlsx)"
+            disabled={filtered.length === 0}
           >
             Exportar (.xlsx)
           </button>
@@ -558,7 +637,7 @@ export default function Page() {
         </div>
       ) : null}
 
-      {/* KPIs */}
+      {/* KPIs (default closed like your current behavior) */}
       <details className="rounded border">
         <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">
           KPIs
@@ -583,8 +662,8 @@ export default function Page() {
         </div>
       </details>
 
-      {/* Scatter */}
-      <details className="rounded border" open>
+      {/* Scatter (default CLOSED, same as KPI) */}
+      <details className="rounded border">
         <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">
           Scatter
         </summary>
@@ -605,23 +684,33 @@ export default function Page() {
                     return `${dd}/${mm}/${yy}`;
                   }}
                 />
-                <YAxis type="number" dataKey="y" tickFormatter={(v) => numBR(v)} />
+                <YAxis
+                  type="number"
+                  dataKey="y"
+                  domain={[-1, Math.max(0, tickerOrder.length - 1)]}
+                  tickFormatter={(v) => tickerOrder[v as number] ?? ""}
+                  allowDecimals={false}
+                />
                 <Tooltip content={<ScatterTip />} />
                 <Scatter
                   data={scatterData}
                   onClick={(p) => {
                     const sp = (p as unknown as { payload?: ScatterPoint }).payload;
                     if (!sp) return;
-                    if (sp.company_name) setCompanyOpt({ value: sp.company_name, label: sp.company_name });
-                    const root = sp.ticker?.includes(".") ? sp.ticker.split(".")[0] : sp.ticker;
-                    if (root) setTickerRoots([{ value: root, label: root }]);
+                    if (sp.company_name) {
+                      setCompanyOpt({ value: sp.company_name, label: sp.company_name });
+                    }
+                    if (sp.ticker_root) {
+                      setTickerRoots([{ value: sp.ticker_root, label: sp.ticker_root }]);
+                    }
+                    setApplied(false);
                   }}
                 />
               </ScatterChart>
             </ResponsiveContainer>
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            Dica: clique em um ponto para filtrar Company e Ticker (root).
+            Dica: clique em um ponto para preencher Company e Ticker (root). Depois clique em Executar.
           </div>
         </div>
       </details>
@@ -631,7 +720,11 @@ export default function Page() {
         <div className="flex items-center justify-between px-3 py-2">
           <div className="text-sm font-medium">Tabela</div>
           <div className="text-xs text-muted-foreground">
-            Linhas: {loading ? "…" : filtered.length}
+            {applied ? (
+              <>Linhas: {loading ? "…" : filtered.length}</>
+            ) : (
+              <>Aguardando execução</>
+            )}
           </div>
         </div>
 
@@ -665,7 +758,7 @@ export default function Page() {
                 ))}
               </tr>
 
-              {/* filters row (like CPC-Notices) */}
+              {/* filters row */}
               <tr>
                 <th className="border-b px-2 py-2">
                   <input
@@ -722,23 +815,23 @@ export default function Page() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={COLS.length} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                    {loading ? "Carregando..." : "Nenhum registro encontrado."}
+                    {!applied ? "Clique em Executar para carregar dados." : loading ? "Carregando..." : "Nenhum registro encontrado."}
                   </td>
                 </tr>
               ) : (
                 filtered.map((r, idx) => (
-                  <tr key={idx} className="border-b last:border-b-0">
+                  <tr key={`${r.ticker ?? "t"}-${r.commence_date ?? "d"}-${idx}`} className="border-b hover:bg-muted/20">
                     <td className="px-2 py-2" style={{ width: colW.company }}>
-                      {r.company_name ?? ""}
+                      {r.company_name ?? "—"}
                     </td>
                     <td className="px-2 py-2" style={{ width: colW.ticker }}>
-                      {r.ticker ?? ""}
+                      {r.ticker ?? "—"}
                     </td>
                     <td className="px-2 py-2" style={{ width: colW.listing }}>
                       {fmtBR(r.commence_date)}
                     </td>
                     <td className="px-2 py-2 text-right" style={{ width: colW.shares }}>
-                      {numBR(r.capitalization_volume)}
+                      {numBR(r.capitalization_volume) || "—"}
                     </td>
                     <td className="px-2 py-2" style={{ width: colW.halt }}>
                       {fmtBR(r.halt_date)}
@@ -751,10 +844,6 @@ export default function Page() {
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="px-3 py-2 text-xs text-muted-foreground">
-          Fonte: {VIEW_NAME}. Datas e números formatados no front (pt-BR). Arraste o lado direito do header para redimensionar colunas.
         </div>
       </div>
     </div>
