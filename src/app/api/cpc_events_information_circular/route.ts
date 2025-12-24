@@ -14,6 +14,15 @@ function requiredEnv(name: string): string {
   return v;
 }
 
+function errMessage(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e) {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  return "Erro desconhecido";
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
@@ -77,6 +86,7 @@ export async function POST(req: Request) {
 
     if (!ghRes.ok) {
       const txt = await ghRes.text();
+
       // rollback to ready (optional)
       await supabase.from("all_data").upsert(
         {
@@ -95,11 +105,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true });
-
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Erro desconhecido" },
-      { status: 500 },
-    );
+  } catch (e: unknown) {
+    return NextResponse.json({ error: errMessage(e) }, { status: 500 });
   }
 }
