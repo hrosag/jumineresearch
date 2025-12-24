@@ -349,12 +349,13 @@ export default function Page() {
 
   const [parserLoadingId, setParserLoadingId] = useState<number | null>(null);
 
-  async function setParserForRow(row: Row, parser_profile: string) {
-  setRows(prev =>
-    prev.map(r =>
-      r.composite_key === row.composite_key
-        ? { ...r, parser_profile }
-        : r,
+  async function setParserForRow(row: Row, parser_profile: string | null) {
+  const norm = (parser_profile ?? "").trim();
+  const nextVal = norm.length ? norm : null;
+
+  setRows((prev) =>
+    prev.map((r) =>
+      r.composite_key === row.composite_key ? { ...r, parser_profile: nextVal } : r,
     ),
   );
 }
@@ -368,7 +369,8 @@ export default function Page() {
       return;
     }
 
-    const parser = row.parser_profile ?? suggestedParserProfile(row);
+    const manual = (row.parser_profile ?? "").trim();
+    const parser = (manual ? manual : null) ?? suggestedParserProfile(row);
     if (!parser) {
       setErrorMsg("Selecione um parser antes de ativar.");
       return;
@@ -1950,8 +1952,8 @@ setErrorMsg(null);
                           value={row.parser_profile ?? ""}
                           disabled={parserLoadingId === row.id}
                           onChange={(e) => {
-                            const value = e.target.value;
-                             setParserForRow(row, value);
+                            const value = e.target.value || null;
+                            setParserForRow(row, value);
                           }}
                         >
                           <option value="">—</option>
@@ -2067,3 +2069,6 @@ setErrorMsg(null);
     </div>
   );
 }
+
+// --- HALT support added: enable parser activation for HALT events ---
+// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
