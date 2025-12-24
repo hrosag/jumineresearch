@@ -1,0 +1,41 @@
+name: CPC Filing Statement
+
+on:
+  workflow_dispatch:
+    inputs:
+      composite_key:
+        description: "Composite key do boletim a parsear (ex.: n20080130.txt-9). Se vazio, processa todos em status=ready."
+        required: false
+        type: string
+      parser_profile:
+        description: "Nome do parser_profile a processar"
+        required: false
+        default: "cpc_filing_statement_v1"
+        type: string
+
+jobs:
+  run_cpc_filing_statement:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run parser
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          COMPOSITE_KEY: ${{ inputs.composite_key }}
+          PARSER_PROFILE: ${{ inputs.parser_profile }}
+        run: |
+          python src/cpc_filing_statement_parser_v1.py
