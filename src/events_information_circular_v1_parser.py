@@ -11,21 +11,18 @@ import requests
 # Target table: cpc_events
 # Event type: INFORMATION_CIRCULAR
 #
-# Notes:
-# - Compatible with repo padrão (SUPABASE_SERVICE_KEY) e também com SUPABASE_SERVICE_ROLE_KEY.
-# - all_data status: marca "running" no início e "done"/"error" no final (parser-side).
+# IMPORTANT (padrão do repo):
+# - NÃO atualizar all_data aqui.
+# - all_data é marcado como READY no route.ts (API) antes de disparar o workflow.
 # =========================
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-
-# Accept both env names (repo padrão usa SUPABASE_SERVICE_KEY nos workflows que funcionam)
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_KEY:
-    raise RuntimeError("Missing env: SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY")
+    raise RuntimeError("Missing env: SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY")
 
 VIEW_NAME = os.environ.get("VIEW_NAME") or "vw_bulletins_with_canonical"
 TABLE_EVENTS = os.environ.get("TABLE_EVENTS") or "cpc_events"
-TABLE_ALL_DATA = os.environ.get("TABLE_ALL_DATA") or "all_data"
 TABLE_CPC_BIRTH = os.environ.get("TABLE_CPC_BIRTH") or "cpc_birth"
 
 COMPOSITE_KEY = os.environ.get("COMPOSITE_KEY")
@@ -131,27 +128,6 @@ def parse_information_circular(body_text: str) -> Tuple[Optional[str], Optional[
     return circular_date_iso, purpose
 
 
-def upsert_all_data_status(
-    composite_key: str,
-    parser_profile: str,
-    status: str,
-    parsed_at: Optional[str],
-    error: Optional[str],
-) -> None:
-    payload = {
-        "composite_key": composite_key,
-        "parser_profile": parser_profile,
-        "parser_status": status,
-        "parser_parsed_at": parsed_at,
-        "parser_error": error,
-    }
-    params = {"on_conflict": "composite_key"}
-    headers = dict(HEADERS)
-    headers["Prefer"] = "resolution=merge-duplicates"
-    r = requests.post(_sb_url(TABLE_ALL_DATA), headers=headers, params=params, json=payload, timeout=60)
-    r.raise_for_status()
-
-
 def insert_event(row: Dict[str, Any]) -> None:
     headers = dict(HEADERS)
     headers["Prefer"] = "return=minimal"
@@ -164,57 +140,41 @@ def main() -> None:
         raise RuntimeError("COMPOSITE_KEY env não informado.")
     composite_key = COMPOSITE_KEY.strip()
 
-    # Mark running (parser-side)
-    upsert_all_data_status(composite_key, PARSER_PROFILE, "running", None, None)
+    b = fetch_bulletin_by_key(composite_key)
 
-    try:
-        b = fetch_bulletin_by_key(composite_key)
+    company = b.get("company") or ""
+    ticker = b.get("ticker") or ""
+    bulletin_date = b.get("bulletin_date")  # ISO already in view
 
-        company = b.get("company") or ""
-        ticker = b.get("ticker") or ""
-        bulletin_date = b.get("bulletin_date")  # ISO already in view
+    body_text = b.get("body_text") or ""
+    if not body_text.strip():
+        raise RuntimeError("body_text vazio — não há o que parsear.")
 
-        body_text = b.get("body_text") or ""
-        if not body_text.strip():
-            raise RuntimeError("body_text vazio — não há o que parsear.")
+    circular_date_iso, purpose = parse_information_circular(body_text)
 
-        circular_date_iso, purpose = parse_information_circular(body_text)
+    cpc_birth_id = find_cpc_birth_id(company, ticker)
+    if not cpc_birth_id:
+        raise RuntimeError(f"Não encontrei cpc_birth_id para company='{company}' ticker='{ticker}'.")
 
-        cpc_birth_id = find_cpc_birth_id(company, ticker)
-        if not cpc_birth_id:
-            raise RuntimeError(f"Não encontrei cpc_birth_id para company='{company}' ticker='{ticker}'.")
+    summary = "CPC Information Circular accepted for filing."
+    if circular_date_iso:
+        summary = f"CPC Information Circular accepted for filing (circular dated {circular_date_iso})."
 
-        summary = "CPC Information Circular accepted for filing."
-        if circular_date_iso:
-            summary = f"CPC Information Circular accepted for filing (circular dated {circular_date_iso})."
+    event_row = {
+        "cpc_birth_id": cpc_birth_id,
+        "event_composite_key": composite_key,
+        "event_type": "INFORMATION_CIRCULAR",
+        "bulletin_date": bulletin_date,
+        "event_effective_date": circular_date_iso or bulletin_date,
+        "event_effective_time": None,
+        "event_effective_text": purpose,
+        "event_summary": summary,
+        "event_body_raw": body_text,
+        "parse_version": PARSER_PROFILE,
+        "source_hash": _sha1(body_text),
+    }
 
-        event_row = {
-            "cpc_birth_id": cpc_birth_id,
-            "event_composite_key": composite_key,
-            "event_type": "INFORMATION_CIRCULAR",
-            "bulletin_date": bulletin_date,
-            "event_effective_date": circular_date_iso or bulletin_date,
-            "event_effective_time": None,
-            "event_effective_text": purpose,
-            "event_summary": summary,
-            "event_body_raw": body_text,
-            "parse_version": PARSER_PROFILE,
-            "source_hash": _sha1(body_text),
-        }
-
-        insert_event(event_row)
-
-        upsert_all_data_status(
-            composite_key,
-            PARSER_PROFILE,
-            "done",
-            datetime.utcnow().isoformat() + "Z",
-            None,
-        )
-
-    except Exception as e:
-        upsert_all_data_status(composite_key, PARSER_PROFILE, "error", None, str(e))
-        raise
+    insert_event(event_row)
 
 
 if __name__ == "__main__":
