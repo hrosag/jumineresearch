@@ -1950,8 +1950,8 @@ setErrorMsg(null);
                           value={row.parser_profile ?? ""}
                           disabled={parserLoadingId === row.id}
                           onChange={(e) => {
-                            const value = e.target.value || null;
-                            setParserForRow(row, value);
+                            const value = e.target.value;
+                             setParserForRow(row, value);
                           }}
                         >
                           <option value="">—</option>
