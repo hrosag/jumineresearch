@@ -1,22 +1,22 @@
-name: cpc_events_information_circular
+name: CPC Events Information Circular
 
 on:
   workflow_dispatch:
     inputs:
       composite_key:
-        description: "Composite key (e.g., n20081111.txt-2)"
-        required: true
+        description: "Composite key do boletim a parsear (ex.: n20081111.txt-2). Se vazio, processa todos em status=ready."
+        required: false
         type: string
       parser_profile:
-        description: "Parser profile name"
+        description: "Nome do parser_profile a processar"
         required: false
         default: "events_information_circular_v1"
         type: string
 
 jobs:
-  run-parser:
+  run_cpc_events_information_circular:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,15 +26,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip show requests >/dev/null 2>&1 || pip install requests
 
       - name: Run parser
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           COMPOSITE_KEY: ${{ inputs.composite_key }}
           PARSER_PROFILE: ${{ inputs.parser_profile }}
         run: |
