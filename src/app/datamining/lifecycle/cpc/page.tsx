@@ -59,8 +59,12 @@ type SortKey =
   | "canonical_type";
 type SortDir = "asc" | "desc";
 
-const PARSER_OPTIONS = ["cpc_birth", "events_halt_v1", "events_resume_trading_v1"] as const;
+const PARSER_OPTIONS = [
+  "cpc_birth",
+  "events_halt_v1",
+  "events_resume_trading_v1",
   "cpc_filing_statement_v1",
+] as const;
 
 // ---------- helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
@@ -390,16 +394,28 @@ export default function Page() {
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(
-          txt || `Erro ao disparar workflow (status ${res.status}
-  setRows(prev => prev.map(r => (r.composite_key === row.composite_key ? { ...r, parser_status: \"ready\", parser_parsed_at: null } : r)));
-  setWatchKeys(prev => {
-    const next = new Set(prev);
-    next.add(row.composite_key);
-    return next;
-  });
-)`,
+          txt || `Erro ao disparar workflow (status ${res.status})`,
         );
       }
+
+      // Otimista: marca como ready e inicia polling
+      setRows((prev) =>
+        prev.map((r) =>
+          r.composite_key === row.composite_key
+            ? {
+                ...r,
+                parser_profile: parser,
+                parser_status: "ready",
+                parser_parsed_at: null,
+              }
+            : r,
+        ),
+      );
+      setWatchKeys((prev) => {
+        const next = new Set(prev);
+        next.add(row.composite_key!);
+        return next;
+      });
     } catch (e) {
       setErrorMsg(errMessage(e));
     } finally {
@@ -2051,6 +2067,3 @@ setErrorMsg(null);
     </div>
   );
 }
-
-// --- HALT support added: enable parser activation for HALT events ---
-// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
