@@ -64,6 +64,7 @@ const PARSER_OPTIONS = [
   "events_halt_v1",
   "events_resume_trading_v1",
   "cpc_filing_statement_v1",
+  "events_information_circular_v1",
 ] as const;
 
 // ---------- helpers ----------
@@ -275,6 +276,9 @@ function suggestedParserProfile(row: Row): string | null {
   // CPC Filing Statement
   if (t.includes("CPC-FILING STATEMENT")) return "cpc_filing_statement_v1";
 
+  // CPC Information Circular
+  if (t.includes("CPC-INFORMATION CIRCULAR")) return "events_information_circular_v1";
+
   return null;
 }
 
@@ -282,6 +286,7 @@ function routeForParser(parser: string) {
   if (parser === "events_halt_v1") return "/api/cpc_events_halt";
   if (parser === "events_resume_trading_v1") return "/api/cpc_events_resume_trading";
   if (parser === "cpc_filing_statement_v1") return "/api/cpc_filing_statement";
+  if (parser === "events_information_circular_v1") return "/api/cpc_events_information_circular";
   return "/api/cpc_birth_unico";
 }
 
@@ -2073,6 +2078,3 @@ setErrorMsg(null);
     </div>
   );
 }
-
-// --- HALT support added: enable parser activation for HALT events ---
-// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
