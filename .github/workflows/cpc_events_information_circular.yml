@@ -10,7 +10,7 @@ on:
       parser_profile:
         description: "Nome do parser_profile a processar"
         required: false
-        default: "events_information_circular_v1"
+        default: "cpc_events_information_circular_v1"
         type: string
 
 jobs:
