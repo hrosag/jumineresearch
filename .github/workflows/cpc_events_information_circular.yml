@@ -39,4 +39,4 @@ jobs:
           COMPOSITE_KEY: ${{ inputs.composite_key }}
           PARSER_PROFILE: ${{ inputs.parser_profile }}
         run: |
-          python src/events_information_circular_v1_parser.py
+          python src/cpc_events_information_circular_v1_parser.py
