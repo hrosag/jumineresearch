@@ -11,24 +11,17 @@ import requests
 # Target table: cpc_events
 # Event type: INFORMATION_CIRCULAR
 #
-# Expected cpc_events schema (example row):
-# - cpc_birth_id (uuid)
-# - event_composite_key (text)
-# - event_type (text)
-# - bulletin_date (date)
-# - event_effective_date (date)
-# - event_effective_time (text|null)
-# - event_effective_text (text|null)
-# - event_summary (text|null)
-# - event_body_raw (text)
-# - parse_version (text)
-# - parsed_at (timestamptz)
-# - source_hash (text)
-# (See sample in uploaded cpc_events_rows JSON.)  # noqa
+# Notes:
+# - Compatible with repo padrão (SUPABASE_SERVICE_KEY) e também com SUPABASE_SERVICE_ROLE_KEY.
+# - all_data status: marca "running" no início e "done"/"error" no final (parser-side).
 # =========================
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+# Accept both env names (repo padrão usa SUPABASE_SERVICE_KEY nos workflows que funcionam)
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
+if not SUPABASE_KEY:
+    raise RuntimeError("Missing env: SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY")
 
 VIEW_NAME = os.environ.get("VIEW_NAME") or "vw_bulletins_with_canonical"
 TABLE_EVENTS = os.environ.get("TABLE_EVENTS") or "cpc_events"
@@ -55,21 +48,12 @@ def _sha1(text: str) -> str:
 
 
 def _parse_long_date(s: str) -> Optional[str]:
-    """
-    Accepts formats like:
-      October 29, 2008
-      Nov 21, 2008
-    Returns ISO YYYY-MM-DD or None.
-    """
+    """Parses: 'October 29, 2008' or 'Nov 21, 2008' -> YYYY-MM-DD"""
     s = (s or "").strip()
     if not s:
         return None
-
-    # Normalize multiple spaces
     s = re.sub(r"\s+", " ", s)
-
-    fmts = ["%B %d, %Y", "%b %d, %Y"]
-    for f in fmts:
+    for f in ("%B %d, %Y", "%b %d, %Y"):
         try:
             return datetime.strptime(s, f).date().isoformat()
         except ValueError:
@@ -78,7 +62,6 @@ def _parse_long_date(s: str) -> Optional[str]:
 
 
 def fetch_bulletin_by_key(composite_key: str) -> Dict[str, Any]:
-    # Select only what we need
     params = {
         "select": "company,ticker,bulletin_date,canonical_type,bulletin_type,body_text",
         "composite_key": f"eq.{composite_key}",
@@ -93,11 +76,7 @@ def fetch_bulletin_by_key(composite_key: str) -> Dict[str, Any]:
 
 
 def find_cpc_birth_id(company: str, ticker: str) -> Optional[str]:
-    """
-    Best-effort:
-    - match by ticker (exact), else by company (ilike)
-    - pick earliest bulletin_date (birth) if multiple
-    """
+    """Best-effort: match by ticker exact; else company ilike; earliest bulletin_date."""
     company = (company or "").strip()
     ticker = (ticker or "").strip()
 
@@ -107,15 +86,20 @@ def find_cpc_birth_id(company: str, ticker: str) -> Optional[str]:
         r.raise_for_status()
         rows = r.json()
         if rows:
-            return rows[0]["id"]
+            return rows[0].get("id")
 
     if company:
-        params = {"select": "id,bulletin_date", "company_name": f"ilike.%{company}%", "order": "bulletin_date.asc", "limit": "1"}
+        params = {
+            "select": "id,bulletin_date",
+            "company_name": f"ilike.%{company}%",
+            "order": "bulletin_date.asc",
+            "limit": "1",
+        }
         r = requests.get(_sb_url(TABLE_CPC_BIRTH), headers=HEADERS, params=params, timeout=60)
         r.raise_for_status()
         rows = r.json()
         if rows:
-            return rows[0]["id"]
+            return rows[0].get("id")
 
     return None
 
@@ -128,7 +112,6 @@ def parse_information_circular(body_text: str) -> Tuple[Optional[str], Optional[
     """
     body = body_text or ""
 
-    # Date
     m = re.search(
         r"cpc\s+information\s+circular\s+dated\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})",
         body,
@@ -136,20 +119,25 @@ def parse_information_circular(body_text: str) -> Tuple[Optional[str], Optional[
     )
     circular_date_iso = _parse_long_date(m.group(1)) if m else None
 
-    # Purpose (multi-line friendly)
-    m2 = re.search(r"for\s+the\s+purpose\s+of\s+(.+?)(?:\.\s|$)", body, flags=re.IGNORECASE | re.DOTALL)
+    m2 = re.search(
+        r"for\s+the\s+purpose\s+of\s+(.+?)(?:\.\s|$)",
+        body,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     purpose = None
     if m2:
-        purpose = re.sub(r"\s+", " ", m2.group(1)).strip()
-        if purpose:
-            # remove trailing period if captured
-            purpose = purpose.rstrip(".")
+        purpose = re.sub(r"\s+", " ", m2.group(1)).strip().rstrip(".") or None
 
     return circular_date_iso, purpose
 
 
-def upsert_all_data_status(composite_key: str, parser_profile: str, status: str, parsed_at: Optional[str], error: Optional[str]) -> None:
-    # Upsert by composite_key (assumes unique in all_data)
+def upsert_all_data_status(
+    composite_key: str,
+    parser_profile: str,
+    status: str,
+    parsed_at: Optional[str],
+    error: Optional[str],
+) -> None:
     payload = {
         "composite_key": composite_key,
         "parser_profile": parser_profile,
@@ -174,10 +162,9 @@ def insert_event(row: Dict[str, Any]) -> None:
 def main() -> None:
     if not COMPOSITE_KEY:
         raise RuntimeError("COMPOSITE_KEY env não informado.")
-
     composite_key = COMPOSITE_KEY.strip()
 
-    # Mark running
+    # Mark running (parser-side)
     upsert_all_data_status(composite_key, PARSER_PROFILE, "running", None, None)
 
     try:
@@ -217,11 +204,15 @@ def main() -> None:
 
         insert_event(event_row)
 
-        # Mark done
-        upsert_all_data_status(composite_key, PARSER_PROFILE, "done", datetime.utcnow().isoformat() + "Z", None)
+        upsert_all_data_status(
+            composite_key,
+            PARSER_PROFILE,
+            "done",
+            datetime.utcnow().isoformat() + "Z",
+            None,
+        )
 
     except Exception as e:
-        # Mark error
         upsert_all_data_status(composite_key, PARSER_PROFILE, "error", None, str(e))
         raise
 
