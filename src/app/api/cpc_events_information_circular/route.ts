@@ -55,7 +55,6 @@ export async function POST(req: Request) {
           parser_profile,
           parser_status: "ready",
           parser_parsed_at: null,
-          parser_error: null,
         }),
       },
     );
