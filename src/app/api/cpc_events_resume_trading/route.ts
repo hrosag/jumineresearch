@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
 
 const GITHUB_REPO = "hrosag/jumineresearch";
-const WORKFLOW_FILE = "cpc_events_resume_trading.yml";
+const WORKFLOW_FILE = "cpc_events_information_circular.yml";
+
+type Body = {
+  composite_key?: string;
+  parser_profile?: string;
+};
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const composite_key = body?.composite_key as string | undefined;
+    const body = (await req.json().catch(() => ({}))) as Body;
+
+    const composite_key = (body?.composite_key || "").trim();
     const parser_profile =
-      (body?.parser_profile as string | undefined) ?? "events_resume_trading_v1";
+      (body?.parser_profile || "events_information_circular_v1").trim();
 
     if (!composite_key) {
       return NextResponse.json(
@@ -32,7 +38,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1) Atualiza all_data no Supabase
+    // 1) Atualiza all_data no Supabase (marca READY, igual os parsers que funcionam)
     const supabaseResp = await fetch(
       `${supabaseUrl}/rest/v1/all_data?composite_key=eq.${encodeURIComponent(
         composite_key,
@@ -49,6 +55,7 @@ export async function POST(req: Request) {
           parser_profile,
           parser_status: "ready",
           parser_parsed_at: null,
+          parser_error: null,
         }),
       },
     );
@@ -81,7 +88,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const wfData = await wfResp.json();
+    const wfData = (await wfResp.json()) as { id?: number };
     const workflowId = wfData.id;
     if (!workflowId) {
       return NextResponse.json(
@@ -116,7 +123,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true, workflow_id: workflowId });
-  } catch (err) {
+  } catch (err: unknown) {
     return NextResponse.json(
       { success: false, error: String(err) },
       { status: 500 },
