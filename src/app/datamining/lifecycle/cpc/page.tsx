@@ -67,7 +67,7 @@ type SortKey =
   | "canonical_type";
 type SortDir = "asc" | "desc";
 
-const PARSER_OPTIONS = ["cpc_birth", "events_halt_v1", "events_resume_trading_v1"] as const;
+const PARSER_OPTIONS = ["cpc_birth", "cpc_filing_statement_v1", "events_halt_v1", "events_resume_trading_v1"] as const;
 
 // ---------- helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
@@ -275,12 +275,18 @@ function suggestedParserProfile(row: Row): string | null {
   if (t === "HALT") return "events_halt_v1";
   if (t === "RESUME TRADING") return "events_resume_trading_v1";
 
-  return null;
+  
+  // CPC Filing Statement
+  if (t.includes("CPC-FILING STATEMENT") || t.includes("CPC FILING STATEMENT")) {
+    return "cpc_filing_statement_v1";
+  }
+return null;
 }
 
 function routeForParser(parser: string) {
   if (parser === "events_halt_v1") return "/api/cpc_events_halt";
   if (parser === "events_resume_trading_v1") return "/api/cpc_events_resume_trading";
+  if (parser === "cpc_filing_statement_v1") return "/api/cpc_filing_statement";
   return "/api/cpc_birth_unico";
 }
 
@@ -1937,7 +1943,7 @@ return data;
                     {row.canonical_type ?? row.bulletin_type ?? "—"}
                   </td>
                   <td className="p-2">
-                    {(isCpc(row) && row.canonical_class === "Unico") || ((row.canonical_type ?? row.bulletin_type ?? "").toUpperCase() === "HALT" || (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase() === "RESUME TRADING") ? (
+                    {(row.parser_profile ?? suggestedParserProfile(row)) ? (
                       <div className="flex gap-2 items-center">
                         <select
                           className="border px-1 py-0.5 text-xs"
