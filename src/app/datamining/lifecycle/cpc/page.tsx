@@ -34,14 +34,6 @@ type Row = {
   parser_parsed_at?: string | null;
 };
 
-type ParserStatusRow = {
-  composite_key: string;
-  parser_profile: string | null;
-  parser_status: "ready" | "running" | "done" | "error" | null;
-  parser_parsed_at: string | null;
-};
-
-
 type ScatterDatum = {
   company: string;
   ticker: string;
@@ -67,7 +59,8 @@ type SortKey =
   | "canonical_type";
 type SortDir = "asc" | "desc";
 
-const PARSER_OPTIONS = ["cpc_birth", "cpc_filing_statement_v1", "events_halt_v1", "events_resume_trading_v1"] as const;
+const PARSER_OPTIONS = ["cpc_birth", "events_halt_v1", "events_resume_trading_v1"] as const;
+  "cpc_filing_statement_v1",
 
 // ---------- helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
@@ -275,18 +268,12 @@ function suggestedParserProfile(row: Row): string | null {
   if (t === "HALT") return "events_halt_v1";
   if (t === "RESUME TRADING") return "events_resume_trading_v1";
 
-  
-  // CPC Filing Statement
-  if (t.includes("CPC-FILING STATEMENT") || t.includes("CPC FILING STATEMENT")) {
-    return "cpc_filing_statement_v1";
-  }
-return null;
+  return null;
 }
 
 function routeForParser(parser: string) {
   if (parser === "events_halt_v1") return "/api/cpc_events_halt";
   if (parser === "events_resume_trading_v1") return "/api/cpc_events_resume_trading";
-  if (parser === "cpc_filing_statement_v1") return "/api/cpc_filing_statement";
   return "/api/cpc_birth_unico";
 }
 
@@ -309,6 +296,7 @@ export default function Page() {
 
   const [rows, setRows] = useState<Row[]>([]);
 
+  const [watchKeys, setWatchKeys] = useState<Set<string>>(new Set());
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
 
@@ -357,37 +345,17 @@ export default function Page() {
 
   const [parserLoadingId, setParserLoadingId] = useState<number | null>(null);
 
-  function setParserSelectionForRow(row: Row, parser: string | null) {
-    // Seleção no dropdown: apenas reflete no estado local.
-    // NÃO muda parser_status (senão inicia polling e pode "voltar" para --- antes de ativar).
-    setRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id
-          ? {
-              ...r,
-              parser_profile: parser,
-            }
-          : r,
-      ),
-    );
-  }
+  async function setParserForRow(row: Row, parser_profile: string) {
+  setRows(prev =>
+    prev.map(r =>
+      r.composite_key === row.composite_key
+        ? { ...r, parser_profile }
+        : r,
+    ),
+  );
+}
 
-  function markRowReadyForParser(row: Row, parser: string) {
-    // Ao clicar em "Ativar": marca localmente como ready (UX imediata),
-    // enquanto a rota /api/* grava oficialmente em all_data com service key.
-    setRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id
-          ? {
-              ...r,
-              parser_profile: parser,
-              parser_status: "ready",
-              parser_parsed_at: null,
-            }
-          : r,
-      ),
-    );
-  }
+
   async function activateParserForRow(row: Row) {
     if (!row.id) return;
 
@@ -402,15 +370,17 @@ export default function Page() {
       return;
     }
 
-    // UX imediata: marca localmente como ready. A gravação oficial ocorre na rota /api/*
-    markRowReadyForParser(row, parser);
+    // marca na all_data o parser e deixa em ready
+    await setParserForRow(row, parser);
 
     try {
       setParserLoadingId(row.id);
 
       const res = await fetch(routeForParser(parser), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           composite_key: row.composite_key,
           parser_profile: parser,
@@ -419,7 +389,16 @@ export default function Page() {
 
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(txt || `Erro ao disparar workflow (status ${res.status})`);
+        throw new Error(
+          txt || `Erro ao disparar workflow (status ${res.status}
+  setRows(prev => prev.map(r => (r.composite_key === row.composite_key ? { ...r, parser_status: \"ready\", parser_parsed_at: null } : r)));
+  setWatchKeys(prev => {
+    const next = new Set(prev);
+    next.add(row.composite_key);
+    return next;
+  });
+)`,
+        );
       }
     } catch (e) {
       setErrorMsg(errMessage(e));
@@ -427,66 +406,60 @@ export default function Page() {
       setParserLoadingId(null);
     }
   }
+useEffect(() => {
+  if (watchKeys.size === 0) return;
 
-  // ===== Polling de parser_status (F5 inteligente via all_data) =====
-  // A UI NÃO acompanha GitHub Actions diretamente. Ela apenas reconsulta os campos
-  // parser_* no Supabase enquanto existir alguma linha em ready/running.
-  const pendingKeySig = useMemo(() => {
-    const ks = rows
-      .filter(
-        (r) =>
-          (r.parser_status ?? "").toLowerCase() === "ready" ||
-          (r.parser_status ?? "").toLowerCase() === "running",
-      )
-      .map((r) => r.composite_key)
-      .filter((k): k is string => typeof k === "string" && k.length > 0);
+  let cancelled = false;
 
-    ks.sort();
-    return ks.join("|");
-  }, [rows]);
+  const tick = async () => {
+    const keys = Array.from(watchKeys);
+    if (keys.length === 0) return;
 
-  useEffect(() => {
-    if (!pendingKeySig) return;
+    const { data, error } = await supabase
+      .from("all_data")
+      .select("composite_key, parser_profile, parser_status, parser_parsed_at")
+      .in("composite_key", keys);
 
-    let alive = true;
+    if (cancelled) return;
+    if (error || !data) return;
 
-    const refresh = async () => {
-      const keys = pendingKeySig.split("|").filter(Boolean);
-      if (!keys.length) return;
+    setRows(prev =>
+      prev.map(r => {
+        const u = data.find(d => d.composite_key === r.composite_key);
+        return u
+          ? {
+              ...r,
+              parser_profile: u.parser_profile ?? r.parser_profile,
+              parser_status: u.parser_status ?? r.parser_status,
+              parser_parsed_at: u.parser_parsed_at ?? r.parser_parsed_at,
+            }
+          : r;
+      }),
+    );
 
-      const { data, error } = await supabase
-        .from("all_data")
-        .select("composite_key, parser_profile, parser_status, parser_parsed_at")
-        .in("composite_key", keys);
-
-      if (!alive) return;
-
-      if (error) {
-        console.warn("Polling parser_status falhou:", error);
-        return;
+    setWatchKeys(prev => {
+      const next = new Set(prev);
+      for (const u of data) {
+        if (
+          u?.composite_key &&
+          (u.parser_status === "done" || u.parser_status === "error")
+        ) {
+          next.delete(u.composite_key);
+        }
       }
+      return next;
+    });
+  };
 
-      const updates = (data ?? []) as ParserStatusRow[];
-      if (!updates.length) return;
+  tick();
+  const id = setInterval(tick, 4000);
 
-      setRows((prev) =>
-        prev.map((r) => {
-          if (!r.composite_key) return r;
-          const u = updates.find((x) => x.composite_key === r.composite_key);
-          return u ? { ...r, ...u, parser_profile: u.parser_profile ?? r.parser_profile } : r;
-        }),
-      );
-    };
+  return () => {
+    cancelled = true;
+    clearInterval(id);
+  };
+}, [watchKeys]);
 
-    // refresh imediato + interval
-    void refresh();
-    const id = window.setInterval(() => void refresh(), 4000);
-
-    return () => {
-      alive = false;
-      window.clearInterval(id);
-    };
-  }, [pendingKeySig]);
 
 
 // Âncoras (1º CPC por (company|ticker_root))
@@ -1160,7 +1133,8 @@ return data;
     setAutoPeriod(true);
     setRemoveDupByType(false);
     setRows([]);
-    setErrorMsg(null);
+  setWatchKeys(new Set());
+setErrorMsg(null);
     setSelectedBulletin(null);
 
     setSelCompanies([]);
@@ -1953,7 +1927,7 @@ return data;
                     {row.canonical_type ?? row.bulletin_type ?? "—"}
                   </td>
                   <td className="p-2">
-                    {(row.parser_profile ?? suggestedParserProfile(row)) ? (
+                    {(isCpc(row) && row.canonical_class === "Unico") || ((row.canonical_type ?? row.bulletin_type ?? "").toUpperCase() === "HALT" || (row.canonical_type ?? row.bulletin_type ?? "").toUpperCase() === "RESUME TRADING") ? (
                       <div className="flex gap-2 items-center">
                         <select
                           className="border px-1 py-0.5 text-xs"
@@ -1961,7 +1935,7 @@ return data;
                           disabled={parserLoadingId === row.id}
                           onChange={(e) => {
                             const value = e.target.value || null;
-                            setParserSelectionForRow(row, value);
+                            setParserForRow(row, value);
                           }}
                         >
                           <option value="">—</option>
@@ -2077,3 +2051,6 @@ return data;
     </div>
   );
 }
+
+// --- HALT support added: enable parser activation for HALT events ---
+// If canonical_type === 'HALT', show Activate button and call /api/cpc_events_halt
