@@ -1,111 +1,132 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
-export const runtime = "nodejs";
+const GITHUB_REPO = "hrosag/jumineresearch";
+const WORKFLOW_FILE = "cpc_events_information_circular.yml";
 
 type Body = {
   composite_key?: string;
   parser_profile?: string;
 };
 
-function requiredEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
-
-function errMessage(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e && typeof e === "object" && "message" in e) {
-    const m = (e as { message?: unknown }).message;
-    if (typeof m === "string") return m;
-  }
-  return "Erro desconhecido";
-}
-
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as Body;
-    const composite_key = (body.composite_key || "").trim();
+    const body = (await req.json().catch(() => ({}))) as Body;
+
+    const composite_key = (body?.composite_key || "").trim();
     const parser_profile =
-      (body.parser_profile || "events_information_circular_v1").trim();
+      (body?.parser_profile || "events_information_circular_v1").trim();
 
     if (!composite_key) {
       return NextResponse.json(
-        { error: "composite_key é obrigatório" },
+        { success: false, error: "composite_key obrigatório" },
         { status: 400 },
       );
     }
 
-    // 1) Update all_data to running (server-side)
-    const supabaseUrl = requiredEnv("SUPABASE_URL");
-    const supabaseKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+    const githubToken = process.env.GITHUB_TOKEN;
 
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      auth: { persistSession: false },
-    });
-
-    await supabase.from("all_data").upsert(
-      {
-        composite_key,
-        parser_profile,
-        parser_status: "running",
-        parser_parsed_at: null,
-        parser_error: null,
-      },
-      { onConflict: "composite_key" },
-    );
-
-    // 2) Trigger GitHub Actions workflow_dispatch
-    const token = requiredEnv("GITHUB_TOKEN"); // needs repo/workflow dispatch permissions
-    const owner = process.env.GITHUB_OWNER || "hrosag";
-    const repo = process.env.GITHUB_REPO || "jumineresearch";
-    const workflowFile =
-      process.env.GITHUB_WORKFLOW_INFORMATION_CIRCULAR ||
-      "cpc_events_information_circular.yml";
-    const ref = process.env.GITHUB_WORKFLOW_REF || "main";
-
-    const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflowFile}/dispatches`;
-
-    const ghRes = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ref,
-        inputs: {
-          composite_key,
-          parser_profile,
-        },
-      }),
-    });
-
-    if (!ghRes.ok) {
-      const txt = await ghRes.text();
-
-      // rollback to ready (optional)
-      await supabase.from("all_data").upsert(
-        {
-          composite_key,
-          parser_profile,
-          parser_status: "ready",
-          parser_error: txt || `GitHub dispatch failed (${ghRes.status})`,
-        },
-        { onConflict: "composite_key" },
-      );
-
+    if (!supabaseUrl || !serviceKey || !githubToken) {
       return NextResponse.json(
-        { error: "Falha ao disparar workflow", details: txt },
-        { status: 502 },
+        {
+          success: false,
+          error:
+            "Variáveis de ambiente faltando (SUPABASE_URL / SUPABASE_SERVICE_KEY / GITHUB_TOKEN).",
+        },
+        { status: 500 },
       );
     }
 
-    return NextResponse.json({ ok: true });
-  } catch (e: unknown) {
-    return NextResponse.json({ error: errMessage(e) }, { status: 500 });
+    // 1) Atualiza all_data no Supabase (marca READY, igual aos parsers que funcionam)
+    const supabaseResp = await fetch(
+      `${supabaseUrl}/rest/v1/all_data?composite_key=eq.${encodeURIComponent(
+        composite_key,
+      )}`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          parser_profile,
+          parser_status: "ready",
+          parser_parsed_at: null,
+          parser_error: null,
+        }),
+      },
+    );
+
+    if (!supabaseResp.ok) {
+      const txt = await supabaseResp.text();
+      return NextResponse.json(
+        { success: false, error: `Erro ao atualizar all_data: ${txt}` },
+        { status: 500 },
+      );
+    }
+
+    // 2) Descobre o ID do workflow no GitHub
+    const wfResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: "application/vnd.github+json",
+        },
+      },
+    );
+
+    if (!wfResp.ok) {
+      const txt = await wfResp.text();
+      return NextResponse.json(
+        { success: false, error: `Erro ao obter workflow (${WORKFLOW_FILE}): ${txt}` },
+        { status: 500 },
+      );
+    }
+
+    const wfData = (await wfResp.json()) as { id?: number };
+    const workflowId = wfData.id;
+    if (!workflowId) {
+      return NextResponse.json(
+        { success: false, error: "Não foi possível obter o ID do workflow no GitHub." },
+        { status: 500 },
+      );
+    }
+
+    // 3) Dispara o workflow
+    const ghResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${workflowId}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ref: "main",
+          inputs: { composite_key, parser_profile },
+        }),
+      },
+    );
+
+    if (!ghResp.ok) {
+      const txt = await ghResp.text();
+      return NextResponse.json(
+        { success: false, error: `Erro ao disparar workflow: ${txt}` },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ success: true, workflow_id: workflowId });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { success: false, error: String(err) },
+      { status: 500 },
+    );
   }
 }
