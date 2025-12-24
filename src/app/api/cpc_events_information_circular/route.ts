@@ -14,7 +14,7 @@ export async function POST(req: Request) {
 
     const composite_key = (body?.composite_key || "").trim();
     const parser_profile =
-      (body?.parser_profile || "events_information_circular_v1").trim();
+      (body?.parser_profile || "cpc_events_information_circular_v1").trim();
 
     if (!composite_key) {
       return NextResponse.json(
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1) Atualiza all_data no Supabase (marca READY, igual aos parsers que funcionam)
+    // 1) Atualiza all_data no Supabase (SEM parser_error — a tabela não tem essa coluna)
     const supabaseResp = await fetch(
       `${supabaseUrl}/rest/v1/all_data?composite_key=eq.${encodeURIComponent(
         composite_key,
