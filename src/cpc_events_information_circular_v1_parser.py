@@ -26,7 +26,7 @@ TABLE_EVENTS = os.environ.get("TABLE_EVENTS") or "cpc_events"
 TABLE_CPC_BIRTH = os.environ.get("TABLE_CPC_BIRTH") or "cpc_birth"
 
 COMPOSITE_KEY = os.environ.get("COMPOSITE_KEY")
-PARSER_PROFILE = os.environ.get("PARSER_PROFILE") or "events_information_circular_v1"
+PARSER_PROFILE = os.environ.get("PARSER_PROFILE") or "cpc_events_information_circular_v1"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
