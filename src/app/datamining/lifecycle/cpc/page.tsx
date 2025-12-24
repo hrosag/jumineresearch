@@ -357,23 +357,37 @@ export default function Page() {
 
   const [parserLoadingId, setParserLoadingId] = useState<number | null>(null);
 
-  async function setParserForRow(row: Row, parser: string | null) {
-    // Apenas atualiza o estado local. A gravação "oficial" em all_data
-    // é feita na rota /api/cpc_birth_unico usando a service key.
+  function setParserSelectionForRow(row: Row, parser: string | null) {
+    // Seleção no dropdown: apenas reflete no estado local.
+    // NÃO muda parser_status (senão inicia polling e pode "voltar" para --- antes de ativar).
     setRows((prev) =>
       prev.map((r) =>
         r.id === row.id
           ? {
               ...r,
               parser_profile: parser,
-              parser_status: parser ? "ready" : "none",
-              parser_parsed_at: null,
             }
           : r,
       ),
     );
   }
 
+  function markRowReadyForParser(row: Row, parser: string) {
+    // Ao clicar em "Ativar": marca localmente como ready (UX imediata),
+    // enquanto a rota /api/* grava oficialmente em all_data com service key.
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? {
+              ...r,
+              parser_profile: parser,
+              parser_status: "ready",
+              parser_parsed_at: null,
+            }
+          : r,
+      ),
+    );
+  }
   async function activateParserForRow(row: Row) {
     if (!row.id) return;
 
@@ -388,17 +402,15 @@ export default function Page() {
       return;
     }
 
-    // marca na all_data o parser e deixa em ready
-    await setParserForRow(row, parser);
+    // UX imediata: marca localmente como ready. A gravação oficial ocorre na rota /api/*
+    markRowReadyForParser(row, parser);
 
     try {
       setParserLoadingId(row.id);
 
       const res = await fetch(routeForParser(parser), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           composite_key: row.composite_key,
           parser_profile: parser,
@@ -407,9 +419,7 @@ export default function Page() {
 
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(
-          txt || `Erro ao disparar workflow (status ${res.status})`,
-        );
+        throw new Error(txt || `Erro ao disparar workflow (status ${res.status})`);
       }
     } catch (e) {
       setErrorMsg(errMessage(e));
@@ -463,7 +473,7 @@ export default function Page() {
         prev.map((r) => {
           if (!r.composite_key) return r;
           const u = updates.find((x) => x.composite_key === r.composite_key);
-          return u ? { ...r, ...u } : r;
+          return u ? { ...r, ...u, parser_profile: u.parser_profile ?? r.parser_profile } : r;
         }),
       );
     };
@@ -1951,7 +1961,7 @@ return data;
                           disabled={parserLoadingId === row.id}
                           onChange={(e) => {
                             const value = e.target.value || null;
-                            setParserForRow(row, value);
+                            setParserSelectionForRow(row, value);
                           }}
                         >
                           <option value="">—</option>
