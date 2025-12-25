@@ -105,12 +105,12 @@ type ColKey = "company" | "ticker" | "listing" | "shares" | "halt" | "resume" | 
 const COLS: Array<{ key: ColKey; label: string; align?: "left" | "right" | "center" }> = [
   { key: "company", label: "Company", align: "left" },
   { key: "ticker", label: "Ticker", align: "left" },
-  { key: "listing", label: "Date of Listing", align: "left" },
+  { key: "listing", label: "Date of Listing", align: "center" },
   { key: "shares", label: "O/S Shares", align: "right" },
-  { key: "halt", label: "Halt", align: "left" },
-  { key: "resume", label: "Resume Trading", align: "left" },
-  { key: "filing", label: "CPC-Filing Statement", align: "left" },
-  { key: "circular", label: "CPC-Information Circular", align: "left" },
+  { key: "halt", label: "Halt", align: "center" },
+  { key: "resume", label: "Resume Trading", align: "center" },
+  { key: "filing", label: "CPC-Filing Statement", align: "center" },
+  { key: "circular", label: "CPC-Information Circular", align: "center" },
 ];
 
 type SortDir = "asc" | "desc";
