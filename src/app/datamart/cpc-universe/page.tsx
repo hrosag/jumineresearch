@@ -882,7 +882,7 @@ export default function Page() {
                     onChange={(e) => setFTicker(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2" style={{ width: colW.listing }}>
+                <th className="border-b px-2 py-2 text-center" style={{ width: colW.listing }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY ou YYYY-MM ou YYYY-MM-DD"
@@ -898,7 +898,7 @@ export default function Page() {
                     onChange={(e) => setFShares(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2" style={{ width: colW.halt }}>
+                <th className="border-b px-2 py-2 text-center" style={{ width: colW.halt }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY-MM-DD"
@@ -906,7 +906,7 @@ export default function Page() {
                     onChange={(e) => setFHalt(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2" style={{ width: colW.resume }}>
+                <th className="border-b px-2 py-2 text-center" style={{ width: colW.resume }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY-MM-DD"
@@ -914,7 +914,7 @@ export default function Page() {
                     onChange={(e) => setFResume(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2" style={{ width: colW.filing }}>
+                <th className="border-b px-2 py-2 text-center" style={{ width: colW.filing }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY-MM-DD"
@@ -922,7 +922,7 @@ export default function Page() {
                     onChange={(e) => setFFiling(e.target.value)}
                   />
                 </th>
-                <th className="border-b px-2 py-2" style={{ width: colW.circular }}>
+                <th className="border-b px-2 py-2 text-center" style={{ width: colW.circular }}>
                   <input
                     className="h-8 w-full rounded border px-2 text-xs"
                     placeholder="YYYY-MM-DD"
@@ -961,22 +961,22 @@ export default function Page() {
                     <td className="border-b px-2 py-2" style={{ width: colW.ticker }}>
                       {r.ticker ?? ""}
                     </td>
-                    <td className="border-b px-2 py-2" style={{ width: colW.listing }}>
+                    <td className="border-b px-2 py-2 text-center" style={{ width: colW.listing }}>
                       {fmtBR(r.commence_date)}
                     </td>
                     <td className="border-b px-2 py-2 text-right" style={{ width: colW.shares }}>
                       {numBR(r.capitalization_volume)}
                     </td>
-                    <td className="border-b px-2 py-2" style={{ width: colW.halt }}>
+                    <td className="border-b px-2 py-2 text-center" style={{ width: colW.halt }}>
                       {fmtBR(r.halt_date)}
                     </td>
-                    <td className="border-b px-2 py-2" style={{ width: colW.resume }}>
+                    <td className="border-b px-2 py-2 text-center" style={{ width: colW.resume }}>
                       {fmtBR(r.resume_trading_date)}
                     </td>
-                    <td className="border-b px-2 py-2" style={{ width: colW.filing }}>
+                    <td className="border-b px-2 py-2 text-center" style={{ width: colW.filing }}>
                       {fmtBR(r.filing_statement_date)}
                     </td>
-                    <td className="border-b px-2 py-2" style={{ width: colW.circular }}>
+                    <td className="border-b px-2 py-2 text-center" style={{ width: colW.circular }}>
                       {fmtBR(r.information_circular_date)}
                     </td>
                   </tr>
