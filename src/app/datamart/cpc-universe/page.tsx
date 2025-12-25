@@ -30,6 +30,8 @@ type Row = {
   capitalization_volume: number | string | null; // bigint pode vir string
   halt_date: string | null; // YYYY-MM-DD
   resume_trading_date: string | null; // YYYY-MM-DD
+  filing_statement_date: string | null; // YYYY-MM-DD
+  information_circular_date: string | null; // YYYY-MM-DD
 };
 
 type Opt = { value: string; label: string };
@@ -38,7 +40,7 @@ type ScatterPoint = {
   company_name: string;
   ticker: string;
   ticker_root: string;
-  kind: "LISTING" | "HALT" | "RESUME";
+  kind: "LISTING" | "HALT" | "RESUME" | "FILING" | "CIRCULAR";
   date: string; // YYYY-MM-DD
   x: number; // epoch ms
   y: number; // ticker index
@@ -99,7 +101,7 @@ function ScatterTip(props: ScatterTipProps) {
   );
 }
 
-type ColKey = "company" | "ticker" | "listing" | "shares" | "halt" | "resume";
+type ColKey = "company" | "ticker" | "listing" | "shares" | "halt" | "resume" | "filing" | "circular";
 const COLS: Array<{ key: ColKey; label: string; align?: "left" | "right" | "center" }> = [
   { key: "company", label: "Company", align: "left" },
   { key: "ticker", label: "Ticker", align: "left" },
@@ -107,6 +109,8 @@ const COLS: Array<{ key: ColKey; label: string; align?: "left" | "right" | "cent
   { key: "shares", label: "O/S Shares", align: "right" },
   { key: "halt", label: "Halt", align: "left" },
   { key: "resume", label: "Resume Trading", align: "left" },
+  { key: "filing", label: "CPC-Filing Statement", align: "left" },
+  { key: "circular", label: "CPC-Information Circular", align: "left" },
 ];
 
 type SortDir = "asc" | "desc";
@@ -146,6 +150,8 @@ export default function Page() {
   const [fShares, setFShares] = useState(""); // substring on formatted number or raw
   const [fHalt, setFHalt] = useState("");
   const [fResume, setFResume] = useState("");
+  const [fFiling, setFFiling] = useState("");
+  const [fCircular, setFCircular] = useState("");
 
   const dCompany = useDeferredValue(fCompany);
   const dTicker = useDeferredValue(fTicker);
@@ -153,6 +159,8 @@ export default function Page() {
   const dShares = useDeferredValue(fShares);
   const dHalt = useDeferredValue(fHalt);
   const dResume = useDeferredValue(fResume);
+  const dFiling = useDeferredValue(fFiling);
+  const dCircular = useDeferredValue(fCircular);
 
   // table sort (match CPC-Notices)
   const [sortKey, setSortKey] = useState<ColKey>("listing");
@@ -174,7 +182,7 @@ export default function Page() {
   const [tableLimit, setTableLimit] = useState(PAGE);
   useEffect(() => {
     setTableLimit(PAGE);
-  }, [dCompany, dTicker, dListing, dShares, dHalt, dResume, sortKey, sortDir, applied]);
+  }, [dCompany, dTicker, dListing, dShares, dHalt, dResume, dFiling, dCircular, sortKey, sortDir, applied]);
 
   // table column widths (resizable)
   const [colW, setColW] = useState<Record<ColKey, number>>({
@@ -184,6 +192,8 @@ export default function Page() {
     shares: 150,
     halt: 140,
     resume: 170,
+    filing: 180,
+    circular: 210,
   });
 
   const dragRef = useRef<{
@@ -237,6 +247,8 @@ export default function Page() {
     setFShares("");
     setFHalt("");
     setFResume("");
+    setFFiling("");
+    setFCircular("");
     if (minDate) setStart(minDate);
     if (maxDate) setEnd(maxDate);
     setAutoPeriod(true);
@@ -313,7 +325,7 @@ export default function Page() {
       const q = supabase
         .from(VIEW_NAME)
         .select(
-          "company_name,ticker,commence_date,capitalization_volume,halt_date,resume_trading_date",
+          "company_name,ticker,commence_date,capitalization_volume,halt_date,resume_trading_date,filing_statement_date,information_circular_date",
         )
         .gte("commence_date", start)
         .lte("commence_date", end);
@@ -376,6 +388,8 @@ export default function Page() {
     const fs = dShares.trim().toLowerCase();
     const fh = dHalt.trim();
     const fr = dResume.trim();
+    const ff = dFiling.trim();
+    const fci = dCircular.trim();
 
     return rows.filter((r) => {
       const company = (r.company_name ?? "").toLowerCase();
@@ -391,6 +405,8 @@ export default function Page() {
       const sharesFmt = numBR(sharesRaw).toLowerCase();
       const halt = r.halt_date ?? "";
       const resume = r.resume_trading_date ?? "";
+      const filing = r.filing_statement_date ?? "";
+      const circular = r.information_circular_date ?? "";
 
       if (fc && !company.includes(fc)) return false;
       if (ft && !ticker.includes(ft)) return false;
@@ -398,16 +414,20 @@ export default function Page() {
       if (fs && !(sharesStr.toLowerCase().includes(fs) || sharesFmt.includes(fs))) return false;
       if (fh && !halt.startsWith(fh)) return false;
       if (fr && !resume.startsWith(fr)) return false;
+      if (ff && !filing.startsWith(ff)) return false;
+      if (fci && !circular.startsWith(fci)) return false;
 
       return true;
     });
-  }, [rows, applied, dCompany, dTicker, dListing, dShares, dHalt, dResume]);
+  }, [rows, applied, dCompany, dTicker, dListing, dShares, dHalt, dResume, dFiling, dCircular]);
 
   const kpis = useMemo(() => {
     const total = filtered.length;
     let withHalt = 0;
     let withResume = 0;
     let withBoth = 0;
+    let withFiling = 0;
+    let withCircular = 0;
 
     for (const r of filtered) {
       const h = !!r.halt_date;
@@ -415,9 +435,11 @@ export default function Page() {
       if (h) withHalt += 1;
       if (rs) withResume += 1;
       if (h && rs) withBoth += 1;
+      if (r.filing_statement_date) withFiling += 1;
+      if (r.information_circular_date) withCircular += 1;
     }
 
-    return { total, withHalt, withResume, withBoth };
+    return { total, withHalt, withResume, withBoth, withFiling, withCircular };
   }, [filtered]);
 
   // ticker order + index for Y axis
@@ -491,6 +513,30 @@ export default function Page() {
           shares,
         });
       }
+      if (r.filing_statement_date) {
+        pts.push({
+          company_name,
+          ticker,
+          ticker_root,
+          kind: "FILING",
+          date: r.filing_statement_date,
+          x: toEpoch(r.filing_statement_date),
+          y,
+          shares,
+        });
+      }
+      if (r.information_circular_date) {
+        pts.push({
+          company_name,
+          ticker,
+          ticker_root,
+          kind: "CIRCULAR",
+          date: r.information_circular_date,
+          x: toEpoch(r.information_circular_date),
+          y,
+          shares,
+        });
+      }
     }
 
     return pts;
@@ -517,6 +563,8 @@ export default function Page() {
       if (k === "listing") return r.commence_date ?? "";
       if (k === "halt") return r.halt_date ?? "";
       if (k === "resume") return r.resume_trading_date ?? "";
+      if (k === "filing") return r.filing_statement_date ?? "";
+      if (k === "circular") return r.information_circular_date ?? "";
       // shares
       const raw = r.capitalization_volume;
       const n = typeof raw === "number" ? raw : Number(raw ?? NaN);
@@ -552,6 +600,8 @@ export default function Page() {
       "O/S Shares": r.capitalization_volume ?? "",
       Halt: r.halt_date ?? "",
       "Resume Trading": r.resume_trading_date ?? "",
+      "CPC-Filing Statement": r.filing_statement_date ?? "",
+      "CPC-Information Circular": r.information_circular_date ?? "",
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -703,7 +753,7 @@ export default function Page() {
         <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">
           KPIs
         </summary>
-        <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-6">
           <div className="rounded border px-3 py-2">
             <div className="text-xs text-muted-foreground">Total</div>
             <div className="text-lg font-semibold">{kpis.total}</div>
@@ -719,6 +769,14 @@ export default function Page() {
           <div className="rounded border px-3 py-2">
             <div className="text-xs text-muted-foreground">Halt + Resume</div>
             <div className="text-lg font-semibold">{kpis.withBoth}</div>
+          </div>
+          <div className="rounded border px-3 py-2">
+            <div className="text-xs text-muted-foreground">Com Filing Statement</div>
+            <div className="text-lg font-semibold">{kpis.withFiling}</div>
+          </div>
+          <div className="rounded border px-3 py-2">
+            <div className="text-xs text-muted-foreground">Com Information Circular</div>
+            <div className="text-lg font-semibold">{kpis.withCircular}</div>
           </div>
         </div>
       </details>
@@ -777,7 +835,7 @@ export default function Page() {
       <div className="rounded border">
         {/* horizontal scroll + resizable columns */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border-collapse text-sm">
+          <table className="w-full min-w-[1220px] border-collapse text-sm">
             <thead>
               <tr className="bg-muted/40">
                 {COLS.map((c) => (
@@ -856,6 +914,22 @@ export default function Page() {
                     onChange={(e) => setFResume(e.target.value)}
                   />
                 </th>
+                <th className="border-b px-2 py-2" style={{ width: colW.filing }}>
+                  <input
+                    className="h-8 w-full rounded border px-2 text-xs"
+                    placeholder="YYYY-MM-DD"
+                    value={fFiling}
+                    onChange={(e) => setFFiling(e.target.value)}
+                  />
+                </th>
+                <th className="border-b px-2 py-2" style={{ width: colW.circular }}>
+                  <input
+                    className="h-8 w-full rounded border px-2 text-xs"
+                    placeholder="YYYY-MM-DD"
+                    value={fCircular}
+                    onChange={(e) => setFCircular(e.target.value)}
+                  />
+                </th>
               </tr>
             </thead>
 
@@ -898,6 +972,12 @@ export default function Page() {
                     </td>
                     <td className="border-b px-2 py-2" style={{ width: colW.resume }}>
                       {fmtBR(r.resume_trading_date)}
+                    </td>
+                    <td className="border-b px-2 py-2" style={{ width: colW.filing }}>
+                      {fmtBR(r.filing_statement_date)}
+                    </td>
+                    <td className="border-b px-2 py-2" style={{ width: colW.circular }}>
+                      {fmtBR(r.information_circular_date)}
                     </td>
                   </tr>
                 ))
