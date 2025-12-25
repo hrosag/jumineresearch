@@ -67,6 +67,9 @@ const PARSER_OPTIONS = [
   "events_information_circular_v1",
 ] as const;
 
+const PARSER_NA = "NA" as const;
+const PARSER_NA_LABEL = "Não Aplicável";
+
 // ---------- helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
 function toDateNum(iso: string | null | undefined): number {
@@ -293,10 +296,12 @@ function routeForParser(parser: string) {
 function parserStatusLabel(row: Row): string {
   const s = (row.parser_status ?? "").toLowerCase();
   if (!s || s === "none") return "Pendente";
+  if (s === "pending") return "Pendente";
   if (s === "ready") return "Pronto";
   if (s === "running") return "Rodando";
   if (s === "done") return "Concluído";
   if (s === "error") return "Erro";
+  if (s === "na") return "N/A";
   return s;
 }
 
@@ -358,17 +363,78 @@ export default function Page() {
 
   const [parserLoadingId, setParserLoadingId] = useState<number | null>(null);
 
-  async function setParserForRow(row: Row, parser_profile: string | null) {
-  const norm = (parser_profile ?? "").trim();
-  const nextVal = norm.length ? norm : null;
+  // Editor inline da coluna "Parser"
+  const [parserEditKey, setParserEditKey] = useState<string | null>(null);
+  const [parserDraft, setParserDraft] = useState<Record<string, string>>({});
 
-  setRows((prev) =>
-    prev.map((r) =>
-      r.composite_key === row.composite_key ? { ...r, parser_profile: nextVal } : r,
-    ),
-  );
-}
+  function openParserEditor(row: Row) {
+    const key = row.composite_key || String(row.id);
+    setParserEditKey(key);
+    const seed =
+      (row.parser_profile ?? "").trim() ||
+      (suggestedParserProfile(row) ?? "").trim() ||
+      "";
+    setParserDraft((prev) => ({ ...prev, [key]: seed }));
+  }
 
+  function closeParserEditor() {
+    setParserEditKey(null);
+  }
+
+  function getDraftForRow(row: Row): string {
+    const key = row.composite_key || String(row.id);
+    return parserDraft[key] ?? "";
+  }
+
+  function setDraftForRow(row: Row, value: string) {
+    const key = row.composite_key || String(row.id);
+    setParserDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  
+  async function setParserForRow(
+    row: Row,
+    parser_profile: string | null,
+    nextStatus?: string | null,
+  ) {
+    if (!row.composite_key) return;
+
+    const norm = (parser_profile ?? "").trim();
+    const nextVal = norm.length ? norm : null;
+
+    const status =
+      (nextStatus ?? "").trim() ||
+      (nextVal === PARSER_NA ? "na" : "pending");
+
+    const patch: Record<string, unknown> = {
+      parser_profile: nextVal,
+      parser_status: status,
+    };
+
+    // Se marcou NA, não existe "parsed_at"
+    if (status === "na") patch.parser_parsed_at = null;
+
+    const { error } = await supabase
+      .from("all_data")
+      .update(patch)
+      .eq("composite_key", row.composite_key);
+
+    if (error) throw error;
+
+    setRows((prev) =>
+      prev.map((r) =>
+        r.composite_key === row.composite_key
+          ? {
+              ...r,
+              parser_profile: nextVal,
+              parser_status: status,
+              parser_parsed_at:
+                status === "na" ? null : (r.parser_parsed_at ?? null),
+            }
+          : r,
+      ),
+    );
+  }
 
   async function activateParserForRow(row: Row) {
     if (!row.id) return;
@@ -378,24 +444,32 @@ export default function Page() {
       return;
     }
 
+    // Se usuário abriu o editor, usa o draft; senão, tenta manual/suggested
+    const draft = getDraftForRow(row).trim();
     const manual = (row.parser_profile ?? "").trim();
-    const parser = (manual ? manual : null) ?? suggestedParserProfile(row);
+    const parser = (draft || manual || suggestedParserProfile(row) || "").trim();
+
     if (!parser) {
       setErrorMsg("Selecione um parser antes de ativar.");
       return;
     }
 
-    // marca na all_data o parser e deixa em ready
-    await setParserForRow(row, parser);
-
     try {
       setParserLoadingId(row.id);
 
+      // 1) Persistir seleção
+      if (parser === PARSER_NA) {
+        await setParserForRow(row, PARSER_NA, "na");
+        closeParserEditor();
+        return;
+      } else {
+        await setParserForRow(row, parser, "pending");
+      }
+
+      // 2) Disparar parser (workflow)
       const res = await fetch(routeForParser(parser), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           composite_key: row.composite_key,
           parser_profile: parser,
@@ -404,29 +478,25 @@ export default function Page() {
 
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(
-          txt || `Erro ao disparar workflow (status ${res.status})`,
-        );
+        throw new Error(txt || `Erro ao disparar workflow (status ${res.status})`);
       }
 
-      // Otimista: marca como ready e inicia polling
+      // 3) Otimista: marca como running/ready e inicia polling
       setRows((prev) =>
         prev.map((r) =>
           r.composite_key === row.composite_key
-            ? {
-                ...r,
-                parser_profile: parser,
-                parser_status: "ready",
-                parser_parsed_at: null,
-              }
+            ? { ...r, parser_profile: parser, parser_status: "ready", parser_parsed_at: null }
             : r,
         ),
       );
+
       setWatchKeys((prev) => {
         const next = new Set(prev);
         next.add(row.composite_key!);
         return next;
       });
+
+      closeParserEditor();
     } catch (e) {
       setErrorMsg(errMessage(e));
     } finally {
@@ -469,7 +539,7 @@ useEffect(() => {
       for (const u of data) {
         if (
           u?.composite_key &&
-          (u.parser_status === "done" || u.parser_status === "error")
+          (u.parser_status === "done" || u.parser_status === "error" || u.parser_status === "na")
         ) {
           next.delete(u.composite_key);
         }
@@ -1954,41 +2024,69 @@ setErrorMsg(null);
                     {row.canonical_type ?? row.bulletin_type ?? "—"}
                   </td>
                   <td className="p-2">
-                    {(suggestedParserProfile(row) || (isCpc(row) && row.canonical_class === "Unico")) ? (
-                      <div className="flex gap-2 items-center">
-                        <select
-                          className="border px-1 py-0.5 text-xs"
-                          value={row.parser_profile ?? ""}
-                          disabled={parserLoadingId === row.id}
-                          onChange={(e) => {
-                            const value = e.target.value || null;
-                            setParserForRow(row, value);
-                          }}
-                        >
-                          <option value="">—</option>
-                          {PARSER_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
+                    {(() => {
+                      const key = row.composite_key || String(row.id);
+                      const isEditing = parserEditKey === key;
+                      const current = (row.parser_profile ?? "").trim();
 
-                        <button
-                          type="button"
-                          className="border px-2 py-0.5 text-xs"
-                          disabled={
-                            (!row.parser_profile &&
-                              !suggestedParserProfile(row)) ||
-                            parserLoadingId === row.id
-                          }
-                          onClick={() => activateParserForRow(row)}
-                        >
-                          {parserLoadingId === row.id ? "Salvando..." : "Ativar"}
-                        </button>
-                      </div>
-                    ) : (
-                      "—"
-                    )}
+                      if (isEditing) {
+                        const value = getDraftForRow(row);
+                        return (
+                          <div className="flex gap-2 items-center">
+                            <select
+                              className="border px-1 py-0.5 text-xs"
+                              value={value}
+                              disabled={parserLoadingId === row.id}
+                              onChange={(e) => setDraftForRow(row, e.target.value)}
+                            >
+                              <option value="">----</option>
+                              <option value={PARSER_NA}>{PARSER_NA_LABEL}</option>
+                              {PARSER_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+
+                            <button
+                              type="button"
+                              className="border px-2 py-0.5 text-xs"
+                              disabled={!value.trim() || parserLoadingId === row.id}
+                              onClick={() => activateParserForRow(row)}
+                            >
+                              {parserLoadingId === row.id ? "Salvando..." : "Ativar"}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="border px-2 py-0.5 text-xs"
+                              disabled={parserLoadingId === row.id}
+                              onClick={closeParserEditor}
+                              title="Cancelar"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      if (!current) {
+                        return (
+                          <button
+                            type="button"
+                            className="text-blue-700 hover:underline"
+                            onClick={() => openParserEditor(row)}
+                            title="Selecionar parser"
+                          >
+                            ----
+                          </button>
+                        );
+                      }
+
+                      if (current === PARSER_NA) return PARSER_NA_LABEL;
+
+                      return current;
+                    })()}
                   </td>
                   <td className="p-2 text-xs">{parserStatusLabel(row)}</td>
                   <td className="p-2 text-xs">
