@@ -370,10 +370,9 @@ export default function Page() {
   function openParserEditor(row: Row) {
     const key = row.composite_key || String(row.id);
     setParserEditKey(key);
-    const seed =
-      (row.parser_profile ?? "").trim() ||
-      (suggestedParserProfile(row) ?? "").trim() ||
-      "";
+
+    // NÃO sugerir automaticamente: somente usar o que já está gravado
+    const seed = (row.parser_profile ?? "").trim() || "";
     setParserDraft((prev) => ({ ...prev, [key]: seed }));
   }
 
@@ -444,10 +443,10 @@ export default function Page() {
       return;
     }
 
-    // Se usuário abriu o editor, usa o draft; senão, tenta manual/suggested
+    // Usa apenas o valor escolhido (draft) ou o que já está gravado (manual). Sem auto-sugestão.
     const draft = getDraftForRow(row).trim();
     const manual = (row.parser_profile ?? "").trim();
-    const parser = (draft || manual || suggestedParserProfile(row) || "").trim();
+    const parser = (draft || manual || "").trim();
 
     if (!parser) {
       setErrorMsg("Selecione um parser antes de ativar.");
