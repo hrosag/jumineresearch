@@ -199,7 +199,7 @@ def parse_event_resume_trading(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     row: Dict[str, Any] = {
         "cpc_birth_id": cpc_birth_id,
         "event_composite_key": rec["composite_key"],
-        "event_type": "RESUME_TRADING",
+        "event_type": clean_space(rec.get("canonical_type") or "RESUME TRADING"),
         "bulletin_date": rec.get("bulletin_date"),
         "event_effective_date": event_effective_date,
         "event_effective_time": effective_time,

@@ -110,7 +110,7 @@ def find_cpc_birth_id(company: str | None, ticker: str | None) -> Optional[str]:
 
     # 2) company + ticker
     if c and t:
-        params = {"select": "id", "company": f"eq.{c}", "ticker": f"eq.{t}", "limit": 1}
+        params = {"select": "id", "company_name": f"eq.{c}", "ticker": f"eq.{t}", "limit": 1}
         r = requests.get(url, headers=headers, params=params, timeout=60)
         r.raise_for_status()
         data = r.json()
@@ -136,7 +136,7 @@ def build_event_row(rec: dict) -> Optional[Dict[str, Any]]:
     return {
         "cpc_birth_id": cpc_birth_id,
         "event_composite_key": rec.get("composite_key"),
-        "event_type": EVENT_TYPE,
+        "event_type": clean_space(rec.get("canonical_type") or "CPC-FILING STATEMENT"),
         "bulletin_date": rec.get("bulletin_date"),
         "event_effective_date": effective_date,
         "event_effective_time": None,

@@ -68,7 +68,7 @@ def parse_long_date(s: str) -> Optional[str]:
 
 def fetch_bulletin(composite_key: str) -> Dict[str, Any]:
     params = {
-        "select": "company,ticker,bulletin_date,body_text",
+        "select": "company,ticker,bulletin_date,canonical_type,body_text",
         "composite_key": f"eq.{composite_key}",
         "limit": "1",
     }
@@ -208,7 +208,7 @@ def main() -> None:
     event_row = {
         "cpc_birth_id": cpc_birth_id,
         "event_composite_key": COMPOSITE_KEY,
-        "event_type": "INFORMATION_CIRCULAR",
+        "event_type": (b.get("canonical_type") or "CPC-INFORMATION CIRCULAR").strip(),
         "bulletin_date": bulletin_date,
         "event_effective_date": circular_date or bulletin_date,
         "event_effective_time": None,
