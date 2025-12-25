@@ -2033,20 +2033,29 @@ setErrorMsg(null);
                         const value = getDraftForRow(row);
                         return (
                           <div className="flex gap-2 items-center">
-                            <select
-                              className="border px-1 py-0.5 text-xs"
-                              value={value}
-                              disabled={parserLoadingId === row.id}
-                              onChange={(e) => setDraftForRow(row, e.target.value)}
-                            >
-                              <option value="">----</option>
-                              <option value={PARSER_NA}>{PARSER_NA_LABEL}</option>
-                              {PARSER_OPTIONS.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="flex items-center gap-2">
+                              {(() => {
+                                const listId = `parser-options-${key}`;
+                                return (
+                                  <>
+                                    <input
+                                      list={listId}
+                                      className="border px-2 py-1 text-xs rounded min-w-[220px]"
+                                      value={value}
+                                      placeholder="----"
+                                      disabled={parserLoadingId === row.id}
+                                      onChange={(e) => setDraftForRow(row, e.target.value)}
+                                    />
+                                    <datalist id={listId}>
+                                      <option value={PARSER_NA}>{PARSER_NA_LABEL}</option>
+                                      {PARSER_OPTIONS.map((opt) => (
+                                        <option key={opt} value={opt} />
+                                      ))}
+                                    </datalist>
+                                  </>
+                                );
+                              })()}
+                            </div>
 
                             <button
                               type="button"
